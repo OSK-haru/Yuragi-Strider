@@ -5,6 +5,9 @@
   "main": "src/worker.ts",
   "assets": {
     "directory": "./dist",
+    // src/worker.ts reads static files through env.ASSETS; without this binding
+    // every request that reaches the Worker throws (Cloudflare error 1101).
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     // Pages and assets must pass through src/worker.ts so they get the security
     // and cross-origin isolation headers the browser script runner needs.
