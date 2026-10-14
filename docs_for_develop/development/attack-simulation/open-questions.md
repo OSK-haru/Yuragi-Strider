@@ -107,7 +107,7 @@ CTFに倣って共通化するのは作業環境・標的接続・課題定義�
 2026-10-14に実装した[画面のスクリプト実行](script-access.md#画面のスクリプト実行疑似シェル)で、利用者の判断が要るもの。
 
 - **追加パッケージの入手先**: numpy 等は公式CDNから読む（lock の SHA-256 で検査）。デスクトップ版をオフラインでも使うなら、必要なwheel（numpy は約3MB）を配布物に同梱する。同梱すると配布物が大きくなり、同梱するパッケージを選ぶ必要がある。
-- **公開デモでの扱い**: 公開デモの配信（`frontend/src/worker.ts`）は COEP を付けていないため、スクリプト実行は使えない（理由を出して止まる）。使えるようにするには、配信に COOP/COEP と Python 実行用パスの CSP を足す。8/31以降の変更は公開しない規則があるため、時期は公開の再開と合わせて決める。
+- **公開デモでの扱い**（2026-10-14 対応）: 公開の再開に合わせ、配信 Worker（`frontend/src/worker.ts`）が全応答に COOP/COEP を付け、`/assets/python-runtime/` だけ CSP に `'wasm-unsafe-eval' 'unsafe-eval'` と `https://cdn.jsdelivr.net` を許す。静的ファイルも Worker を通すよう `wrangler.jsonc` に `run_worker_first` を設定。Worker と同じ処理で dist を配るローカル確認で、`crossOriginIsolated`、外部フォント3種の読み込み、本物の Python Worker の起動と実行（CSP/COEP 違反なし）を確かめた。Cloudflare への配備後の実機確認は未実施。
 - **実行時間とメモリの上限**: 今は利用者が止めるまで動く（Ctrl+C、3秒後に Worker ごと停止）。ブラウザのタブの中だけで完結するのでサーバーには影響しないが、自動の上限を設けるかは未定。
 
 ## 共有QPUの計算速度（後回し）

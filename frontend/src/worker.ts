@@ -32,9 +32,31 @@ const CONTENT_SECURITY_POLICY = [
   "connect-src 'self' https://quantsim-vjul.onrender.com",
 ].join('; ')
 
-function withSecurityHeaders(response: Response): Response {
+/*
+ * The attack simulator's script runner (Pyodide in a Worker) compiles
+ * WebAssembly and evaluates its own generated JS, and loads extra packages such
+ * as numpy from the official CDN. Only files under this prefix get the looser
+ * policy; the page keeps CONTENT_SECURITY_POLICY. Same split as api/main.py.
+ */
+const PYTHON_RUNTIME_PREFIX = '/assets/python-runtime/'
+const PYTHON_RUNTIME_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'",
+  "connect-src 'self' https://cdn.jsdelivr.net",
+].join('; ')
+
+/*
+ * SharedArrayBuffer, which the script runner needs, requires a cross-origin
+ * isolated page (COOP same-origin + COEP require-corp). The external fonts and
+ * the package CDN send Cross-Origin-Resource-Policy: cross-origin, so they load.
+ */
+function withSecurityHeaders(response: Response, pathname = '/'): Response {
   const headers = new Headers(response.headers)
-  headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY)
+  headers.set('Content-Security-Policy', pathname.startsWith(PYTHON_RUNTIME_PREFIX)
+    ? PYTHON_RUNTIME_CONTENT_SECURITY_POLICY : CONTENT_SECURITY_POLICY)
+  headers.set('Cross-Origin-Embedder-Policy', 'require-corp')
   headers.set('X-Content-Type-Options', 'nosniff')
   headers.set('X-Frame-Options', 'DENY')
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
@@ -81,6 +103,6 @@ export default {
       headers.set('Cache-Control', 'no-store')
       return withSecurityHeaders(new Response(upstream.body, { status: upstream.status, headers }))
     }
-    return withSecurityHeaders(await env.ASSETS.fetch(request))
+    return withSecurityHeaders(await env.ASSETS.fetch(request), new URL(request.url).pathname)
   },
 }

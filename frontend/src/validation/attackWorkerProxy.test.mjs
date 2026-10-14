@@ -69,6 +69,15 @@ const asyncChecks = async () => {
   assert.equal(assetCalls, 1)
   checks.push('everything else is still served from static assets')
 
+  assert.equal(page.headers.get('cross-origin-opener-policy'), 'same-origin')
+  assert.equal(page.headers.get('cross-origin-embedder-policy'), 'require-corp')
+  assert.doesNotMatch(page.headers.get('content-security-policy'), /unsafe-eval/)
+  const runtime = await worker.fetch(new Request('https://app.test/assets/python-runtime/pyodide.asm.wasm'), env)
+  assert.equal(runtime.headers.get('cross-origin-embedder-policy'), 'require-corp')
+  assert.match(runtime.headers.get('content-security-policy'), /script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'/)
+  assert.match(runtime.headers.get('content-security-policy'), /connect-src 'self' https:\/\/cdn\.jsdelivr\.net/)
+  checks.push('pages are cross-origin isolated; only the Python runtime path allows wasm and eval')
+
   const huge = await worker.fetch(new Request('https://app.test/api/attack/environments', {
     method: 'POST', body: 'x'.repeat(80 * 1024), headers: { 'content-length': String(80 * 1024) } }), env)
   assert.equal(huge.status, 413)
