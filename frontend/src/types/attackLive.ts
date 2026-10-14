@@ -262,13 +262,7 @@ export type SolutionResult = {
 
 export type SolutionFailure = 'invalid' | 'exhausted' | 'unavailable'
 
-export type ScriptAccess = { scriptToken: string; attackerCredential: string }
-export type ScriptAccessFailure = 'disabled' | 'unavailable'
-
 export interface AttackEnvironmentClient {
-  /** Issue the script token for a Python client (local profiles only); replaces any earlier token. */
-  issueScriptAccess(environmentId: string, signal: AbortSignal):
-    Promise<{ ok: true; access: ScriptAccess } | { ok: false; reason: ScriptAccessFailure }>
   /** Grade a rule on hidden cases. Only aggregates come back. */
   submitSolution(environmentId: string, submission: SolutionSubmission, signal: AbortSignal):
     Promise<{ ok: true; result: SolutionResult } | { ok: false; reason: SolutionFailure }>

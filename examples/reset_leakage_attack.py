@@ -1,10 +1,6 @@
 """Reset漏洩の攻撃サンプル: 収集 → 学習 → 観測 → 推定 → 提出。
 
-画面の「Pythonから接続」で表示される環境ID・トークン・資格情報を渡して実行する。
-
-    python examples/reset_leakage_attack.py http://127.0.0.1:8001 <環境ID> <トークン> <資格情報> [--answer]
-
-画面のターミナルでは接続情報を省略する（その画面の環境へ接続する）。
+画面のターミナルで実行する（その画面の環境へ接続する）。
 
     python reset_leakage_attack.py [--answer]
 
@@ -16,14 +12,10 @@
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from attack_client import AttackSession, Circuit  # noqa: E402
+from attack_client import AttackSession, Circuit
 
 
 def collect(session: AttackSession, reference: str, runs: int, shots: int) -> np.ndarray:
@@ -56,13 +48,10 @@ def run_attack(session: AttackSession, *, runs: int = 3, shots: int = 32, submit
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    # 4つとも省略できるのは画面のスクリプト実行だけ（AttackSession が判断する）。
-    for name in ("url", "environment_id", "token", "credential"):
-        parser.add_argument(name, nargs="?")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--answer", action="store_true", help="学習した規則をそのまま提出する（課題モード）")
     args = parser.parse_args()
-    with AttackSession(args.url, args.environment_id, args.token, args.credential) as session:
+    with AttackSession() as session:
         report = run_attack(session, runs=args.runs, submit=args.answer)
     print(f"参照ラベル0の1の割合: {np.round(report['ref0'], 3)}")
     print(f"参照ラベル1の1の割合: {np.round(report['ref1'], 3)}")

@@ -1,8 +1,7 @@
 """サービスの公開操作を呼ぶセッション。通信は transport に任せる。
 
-手元のPythonでは WebSocket（quanyu.attack.v1）とHTTP提出を直接使い、ブラウザの
-スクリプト実行環境（Pyodide）では、画面が持つ接続へ同期ブリッジ経由で渡す。
-どちらでも使える操作と検査は同じで、セッションの書き方も変わらない。
+ブラウザのスクリプト実行環境（Pyodide）で動き、画面が持つ接続へ同期ブリッジ経由で
+要求を渡す。資格情報は画面の外に出ない。
 """
 
 from __future__ import annotations
@@ -44,7 +43,13 @@ class Job:
         """完了するまで結果照会を繰り返す。"""
         deadline = time.monotonic() + timeout
         while True:
-            value = self._session._query("job.result.read", self.job_id)
+            try:
+                value = self._session._query("job.result.read", self.job_id)
+            except AttackError as error:
+                # 結果の公開前に照会すると、サービスは RESULT_NOT_READY を返す。待って照会し直す。
+                if error.code != "RESULT_NOT_READY":
+                    raise
+                value = {}
             status = value.get("status")
             body = value.get("result") if isinstance(value.get("result"), dict) else value
             if status == "succeeded" and isinstance(body.get("counts"), dict):
@@ -63,26 +68,15 @@ class Job:
 
 
 class AttackSession:
-    """公開サービス操作のセッション。
+    """公開サービス操作のセッション。画面のスクリプト実行で、その画面の環境へ接続する。"""
 
-    手元のPythonでは URL・環境ID・トークン・資格情報を渡す。ブラウザのスクリプト
-    実行環境では引数を省略し、その画面の環境へ接続する（資格情報は画面の外に出ない）。
-    """
-
-    def __init__(self, base_url: str | None = None, environment_id: str | None = None,
-                 token: str | None = None, credential: str | None = None,
-                 *, device: str = "ibm_kingston", timeout: float = 30.0):
+    def __init__(self, *, device: str = "ibm_kingston", timeout: float = 30.0):
+        if sys.platform != "emscripten":
+            raise AttackError("AttackSession runs only in the browser script runner "
+                              "(the terminal's python command)", "NO_BRIDGE")
+        from attack_client.browser import BrowserTransport
         self.device, self._timeout = device, timeout
-        given = [base_url, environment_id, token, credential]
-        if all(item is None for item in given) and sys.platform == "emscripten":
-            from attack_client.browser import BrowserTransport
-            self._transport = BrowserTransport(timeout)
-        elif any(item is None for item in given):
-            raise ValueError("pass base_url, environment_id, token and credential "
-                             "(only the browser script runner may omit them)")
-        else:
-            from attack_client.websocket import WebSocketTransport
-            self._transport = WebSocketTransport(base_url, environment_id, token, credential, timeout)
+        self._transport = BrowserTransport(timeout)
         self.environment_id = self._transport.environment_id
 
     @property

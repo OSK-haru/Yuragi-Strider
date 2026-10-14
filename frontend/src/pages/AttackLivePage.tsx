@@ -106,51 +106,6 @@ export function AttackModeNotice() {
   return <p className="attack-live__mode-note">※この画面の量子コンピューター・被害者・サービスは、すべてこのPCの中の仮想環境です。実機やクラウドサービスには一切接続しません。</p>
 }
 
-const PYTHON_DEVICE = 'ibm_kingston'
-
-/* 手元のPythonから接続するための情報。トークンは押したときだけ発行し、表示を閉じると画面から消える。 */
-function AttackScriptAccess({ workspace, deviceId }: { workspace: ReturnType<typeof createLiveWorkspace>; deviceId: string }) {
-  const [info, setInfo] = useState<{ environmentId: string; token: string; credential: string } | null>(null)
-  const [message, setMessage] = useState('')
-  const [copied, setCopied] = useState(false)
-  async function reveal() {
-    setMessage('')
-    const outcome = await workspace.issueScriptAccess()
-    if (!outcome.ok) {
-      setMessage(outcome.reason === 'disabled' ? 'この環境ではPythonからの接続は使えません（ローカル実行専用の機能です）。' : '接続情報を発行できませんでした。')
-      return
-    }
-    setInfo({ environmentId: outcome.environmentId, token: outcome.access.scriptToken, credential: outcome.access.attackerCredential })
-  }
-  const snippet = info ? [
-    'from attack_client import AttackSession, Circuit',
-    '',
-    `session = AttackSession("${window.location.origin}",`,
-    `    "${info.environmentId}",`,
-    `    "${info.token}",`,
-    `    "${info.credential}",`,
-    `    device="${deviceId || PYTHON_DEVICE}")`,
-    'job = session.run(Circuit(1).measure(0, 0), shots=32)',
-    'print(job.result().counts)',
-  ].join('\n') : ''
-  return <section className="ide__group" aria-label="Pythonから接続">
-    <h3>Pythonから接続</h3>
-    <small>手元のPythonから、ここと同じ公開操作を使えます。トークンは環境ごとに1つで、発行し直すと前のものは無効です。</small>
-    {!info && <button type="button" onClick={() => void reveal()}>接続情報を発行して表示</button>}
-    {message && <small role="status">{message}</small>}
-    {info && <>
-      <pre className="attack-live__snippet" aria-label="接続用コード">{snippet}</pre>
-      <div className="attack-live__row">
-        <button type="button" onClick={() => {
-          void navigator.clipboard?.writeText(snippet).then(() => setCopied(true), () => setCopied(false))
-        }}>{copied ? 'コピーしました' : 'コードをコピー'}</button>
-        <button type="button" onClick={() => { setInfo(null); setCopied(false) }}>隠す</button>
-      </div>
-      <small>仮想の資格情報とトークンです。この環境の中でだけ通用します。</small>
-    </>}
-  </section>
-}
-
 export function AttackCredentialInfo() {
   return <p className="attack-live__credential-note"><strong>仮想資格情報</strong>：シミュレーター内でだけ通用する仮の資格情報です。実在のAPIキーや秘密は入力しないでください。</p>
 }
@@ -736,7 +691,6 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
                 <small>ゲート時間はサービスが決めます。エディターのduration指定は送信しません。</small>
                 <small>回路幅・命令・shots・状態継承は、サービス条件に従って検査されます。</small>
               </section>
-              <AttackScriptAccess key={state.environment.environmentId} workspace={workspace} deviceId={deviceId} />
               <section className="ide__group" aria-label="操作中のジョブ">
                 <h3>操作中のジョブ</h3>
                 <code>{jobId || '—'}</code>

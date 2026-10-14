@@ -1,6 +1,6 @@
 import type {
   SolutionSubmission,
-  AttackEnvironmentClient, ScriptAccess, ScriptAccessFailure, ConnectionState, CreateEnvironmentRequest, EnvironmentHandle,
+  AttackEnvironmentClient, ConnectionState, CreateEnvironmentRequest, EnvironmentHandle,
   LiveAttackConnection, LiveReply, LiveRequest, OwnedEnvironment, ProgramSubmission, SettingsCatalog, WaitTarget,
 } from '../types/attackLive'
 import type { ScriptServicePort } from '../scripting/scriptServices'
@@ -239,16 +239,9 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
         : `見えないケース ${result.total} 件中 ${result.correct} 件正解（合格は ${result.required} 件以上）`
       update({ notice: `提出 ${result.attempt}回目: ${detail} → ${result.passed ? '合格' : '不合格'}。残り ${result.attemptsRemaining} 回。` })
     }),
-    /** One-off, user-requested reveal for a Python client. Not kept in workspace state. */
-    async issueScriptAccess(): Promise<{ ok: true; environmentId: string; access: ScriptAccess } | { ok: false; reason: ScriptAccessFailure }> {
-      const environment = state.environment
-      if (!environment) return { ok: false, reason: 'unavailable' }
-      const outcome = await client.issueScriptAccess(environment.environmentId, new AbortController().signal)
-      return outcome.ok ? { ok: true, environmentId: environment.environmentId, access: outcome.access } : outcome
-    },
     /**
-     * Port for the in-browser script runner. A script opens its own connection
-     * (as a local Python client does), so its polling never enters this state.
+     * Port for the in-browser script runner. A script opens its own connection,
+     * so its polling never enters this state.
      * The credential stays inside the client.
      */
     scriptPort(): ScriptServicePort | null {

@@ -148,7 +148,6 @@
 .ide__prompt input::placeholder { text-transform: none; letter-spacing: 0; }
 .ide__messages:has(.attack-live__terminal) .ide__pane-body { overflow: hidden; }
 
-.attack-live__snippet { margin: 6px 0; padding: 8px; overflow-x: auto; font-size: 12px; line-height: 1.5; white-space: pre; border: 1px solid var(--border, #8884); border-radius: 6px; }
 
 /* --- script editor: files, text, run ------------------------------------- */
 .attack-script { display: flex; flex-direction: column; height: 100%; min-height: 0; }

@@ -80,13 +80,8 @@ class WebOwnershipSettings:
     # proxy the client address is not trustworthy, so these cap total load.
     creates_per_minute: int = 0
     max_concurrent_evaluations: int = 0
-    # Non-browser clients (a Python script on the owner's machine) may act as the
-    # owner with a script token issued from the browser. Local profiles only.
-    script_access: bool = False
 
     def __post_init__(self) -> None:
-        if type(self.script_access) is not bool:
-            raise ValueError("script_access must be a boolean")
         for name in ("creates_per_minute", "max_concurrent_evaluations"):
             value = getattr(self, name)
             if type(value) is not int or not 0 <= value <= 1000:
@@ -119,7 +114,7 @@ class WebOwnershipSettings:
         origins = tuple(f"http://{host}:{port}" for host in ("127.0.0.1", "localhost")
                         for port in (api_port, ui_port))
         return cls(allowed_origins=origins, allowed_hosts=("127.0.0.1", "localhost"),
-                   max_environments_per_browser=4, script_access=True)
+                   max_environments_per_browser=4)
 
     @classmethod
     def desktop(cls, host: str, port: int) -> "WebOwnershipSettings":
@@ -129,7 +124,7 @@ class WebOwnershipSettings:
         if type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("desktop port must be a valid TCP port")
         return cls(allowed_origins=(f"http://{normalized}:{port}",),
-                   allowed_hosts=(normalized,), max_environments_per_browser=4, script_access=True)
+                   allowed_hosts=(normalized,), max_environments_per_browser=4)
 
     @classmethod
     def public(cls, *, allowed_origins: tuple[str, ...], allowed_hosts: tuple[str, ...],
@@ -228,22 +223,6 @@ def _parse_origin(value: str):
     return parsed
 
 
-def _request_host_only(request: Request | WebSocket, settings: WebOwnershipSettings) -> None:
-    hosts = request.headers.getlist("host")
-    if len(hosts) != 1:
-        raise RequestOriginHostRejected
-    try:
-        parsed_host = urlsplit("//" + hosts[0])
-        port = parsed_host.port
-    except ValueError:
-        raise RequestOriginHostRejected from None
-    hostname = (parsed_host.hostname or "").lower().rstrip(".")
-    if (not _valid_host_name(hostname) or parsed_host.username is not None
-            or parsed_host.password is not None or parsed_host.path
-            or port is not None and not 1 <= port <= 65535
-            or hostname not in {host.lower().rstrip(".") for host in settings.allowed_hosts}):
-        raise RequestOriginHostRejected
-
 
 def _request_origin_and_host(request: Request | WebSocket, settings: WebOwnershipSettings) -> str:
     origins = request.headers.getlist("origin")
@@ -285,7 +264,6 @@ class _EnvironmentOwner:
     attacker_credential: str | None
     closing: bool = False
     evaluator: object | None = None
-    script_token_hash: bytes | None = None
 
 
 class BrowserEnvironmentManager:
@@ -331,9 +309,6 @@ class BrowserEnvironmentManager:
         if not isinstance(websocket, WebSocket):
             raise TypeError("WebSocket ownership resolution requires an ASGI WebSocket")
         environment_id = websocket.path_params.get("world_id")
-        bearer = self._resolve_script_bearer(websocket, environment_id)
-        if bearer is not None:
-            return bearer
         _request_origin_and_host(websocket, self.settings)
         cookies = websocket.cookies
         context, expired = self._resolve_cookie(environment_id, cookies)
@@ -353,9 +328,6 @@ class BrowserEnvironmentManager:
         params = request.path_params
         environment_id = (params.get("world_id") or params.get("environment_id")
                           or params.get("session_id"))
-        bearer = self._resolve_script_bearer(request, environment_id)
-        if bearer is not None:
-            return bearer
         _request_origin_and_host(request, self.settings)
         if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
             _require_csrf_header(request)
@@ -364,58 +336,6 @@ class BrowserEnvironmentManager:
         if context is None:
             raise EnvironmentNotFound
         return context
-
-    def _resolve_script_bearer(self, connection: Request | WebSocket, environment_id: object):
-        """Owner context for a script token, or None when no Authorization header is sent.
-
-        A header that is present but wrong never falls back to cookies."""
-        values = connection.headers.getlist("authorization")
-        if not values:
-            return None
-        if not self.settings.script_access:
-            raise EnvironmentNotFound
-        _request_host_only(connection, self.settings)
-        scheme, _, token = values[0].partition(" ")
-        if (len(values) != 1 or scheme != "Bearer" or not token
-                or type(environment_id) is not str or not _ENVIRONMENT_ID.fullmatch(environment_id)):
-            raise EnvironmentNotFound
-        supplied = hashlib.sha256(token.encode("utf-8")).digest()
-        now = self._clock()
-        expired = []
-        with self._lock:
-            record = self._records.get(environment_id)
-            if record is not None and self._is_expired(record, now):
-                record.closing = True
-                expired.append(environment_id)
-            valid = (record is not None and not record.closing and record.script_token_hash is not None
-                     and hmac.compare_digest(record.script_token_hash, supplied))
-            if valid:
-                record.last_seen = now
-                context = record.context
-        self._schedule_discard(expired)
-        if not valid:
-            raise EnvironmentNotFound
-        self._schedule_expiry(environment_id)
-        return context
-
-    async def issue_script_token(self, request: Request, environment_id: str) -> str:
-        """Issue (and replace) the script token for the cookie-proven owner."""
-        if not self.settings.script_access:
-            raise EnvironmentNotFound
-        _request_origin_and_host(request, self.settings)
-        _require_csrf_header(request)
-        context, expired = self._resolve_cookie(environment_id, dict(request.cookies))
-        await self._dispose_many(expired)
-        if context is None:
-            raise EnvironmentNotFound
-        token = secrets.token_urlsafe(32)
-        with self._lock:
-            record = self._records.get(environment_id)
-            if record is None or record.closing or record.context is not context:
-                raise EnvironmentNotFound
-            record.script_token_hash = hashlib.sha256(token.encode("utf-8")).digest()
-        self._schedule_expiry(environment_id)
-        return token
 
     def _resolve_cookie(self, environment_id: object, cookies: dict[str, str]):
         expired = []
@@ -729,12 +649,10 @@ class BrowserEnvironmentManager:
 
     async def submit_solution(self, request: Request, environment_id: str) -> dict[str, object]:
         """Grade an estimator for the proven owner; hidden cases never leave the server."""
-        context = self._resolve_script_bearer(request, environment_id)
-        if context is None:
-            _request_origin_and_host(request, self.settings)
-            _require_csrf_header(request)
-            context, expired = self._resolve_cookie(environment_id, dict(request.cookies))
-            await self._dispose_many(expired)
+        _request_origin_and_host(request, self.settings)
+        _require_csrf_header(request)
+        context, expired = self._resolve_cookie(environment_id, dict(request.cookies))
+        await self._dispose_many(expired)
         if context is None:
             raise EnvironmentNotFound
         with self._lock:
@@ -810,16 +728,6 @@ def create_browser_environment_router(manager: BrowserEnvironmentManager) -> API
         except EnvironmentNotFound:
             raise HTTPException(status_code=404, detail={"code": "ENVIRONMENT_NOT_FOUND"}) from None
         return JSONResponse({"attacker_credential": credential}, headers={"Cache-Control": "no-store"})
-
-    @router.post("/{environment_id}/script-token")
-    async def issue_script_token(request: Request, environment_id: str):
-        try:
-            token = await manager.issue_script_token(request, environment_id)
-        except RequestOriginHostRejected:
-            raise HTTPException(status_code=403, detail={"code": "ORIGIN_HOST_REJECTED"}) from None
-        except EnvironmentNotFound:
-            raise HTTPException(status_code=404, detail={"code": "ENVIRONMENT_NOT_FOUND"}) from None
-        return JSONResponse({"script_token": token}, headers={"Cache-Control": "no-store"})
 
     @router.post("/{environment_id}/submission")
     async def submit_solution(request: Request, environment_id: str):

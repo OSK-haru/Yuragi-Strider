@@ -506,11 +506,7 @@ def create_live_attack_websocket_router(
     async def live_socket(websocket: WebSocket, world_id: str):
         origin_headers = websocket.headers.getlist("origin")
         offered = websocket.scope.get("subprotocols", ())
-        # A script client (no browser) authenticates with a bearer token instead of an Origin;
-        # the owner resolver below accepts only a valid script token in that case.
-        script_client = not origin_headers and len(websocket.headers.getlist("authorization")) == 1
-        if ((not script_client and (len(origin_headers) != 1 or origin_headers[0] not in origins))
-                or PROTOCOL not in offered):
+        if len(origin_headers) != 1 or origin_headers[0] not in origins or PROTOCOL not in offered:
             await websocket.close(code=4403, reason="ORIGIN_OR_PROTOCOL_REJECTED")
             return
 

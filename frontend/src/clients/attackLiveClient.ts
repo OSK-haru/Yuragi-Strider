@@ -169,26 +169,6 @@ export function createAttackEnvironmentClient(
       }
     },
 
-    async issueScriptAccess(environmentId, signal) {
-      const credential = credentials.get(environmentId)
-      if (!isEnvironmentId(environmentId) || !credential) return { ok: false, reason: 'unavailable' }
-      try {
-        const response = await fetcher(`${API_ROOT}/environments/${encodeURIComponent(environmentId)}/script-token`, {
-          method: 'POST', credentials: 'same-origin', signal,
-          headers: { Accept: 'application/json', [CSRF_HEADER]: CSRF_VALUE },
-        })
-        if (response.status === 404) return { ok: false, reason: 'disabled' }
-        if (!response.ok) return { ok: false, reason: 'unavailable' }
-        const body: unknown = await response.json()
-        if (!isRecord(body) || typeof body.script_token !== 'string' || !body.script_token) {
-          return { ok: false, reason: 'unavailable' }
-        }
-        return { ok: true, access: { scriptToken: body.script_token, attackerCredential: credential } }
-      } catch {
-        return { ok: false, reason: 'unavailable' }
-      }
-    },
-
     async discardEnvironment(environmentId, signal) {
       const response = await fetcher(`${API_ROOT}/environments/${encodeURIComponent(environmentId)}`, {
         method: 'DELETE', credentials: 'same-origin', signal,

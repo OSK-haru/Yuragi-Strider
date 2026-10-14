@@ -1,6 +1,6 @@
 /*
  * ブラウザのスクリプト実行に組み込む SDK と、最初に置くファイル。
- * 手元のPython用と同じ attack_client の .py をそのまま使う（写しを持たない）。
+ * リポジトリの attack_client の .py をそのまま使う（写しを持たない）。
  */
 
 const sources = import.meta.glob('../../../attack_client/*.py', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
@@ -12,7 +12,7 @@ export const ATTACK_CLIENT_SDK: Record<string, string> = Object.fromEntries(Obje
 export const STARTER_FILES: Record<string, string> = {
   'main.py': [
     '# ターミナルで  python main.py  と打つと実行する。Ctrl+C で止まる。',
-    '# 手元のPythonと同じ attack_client を使う。ここでは接続情報を省略できる。',
+    '# attack_client は、この画面の環境へ接続する。',
     'from attack_client import AttackSession, Circuit',
     '',
     'with AttackSession() as session:',

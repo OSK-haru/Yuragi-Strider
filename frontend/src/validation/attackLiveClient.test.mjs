@@ -19,7 +19,6 @@ const { createAttackEnvironmentClient } = module.exports
 
 const checks = []
 function check(label, operation) { operation(); checks.push(label) }
-let scriptTokenStatus = 200
 const SECRET = 'attacker-virtual-credential-never-return-this'
 const capturedLogs = []
 const originalConsole = Object.fromEntries(['log', 'warn', 'error'].map((name) => [name, console[name]]))
@@ -42,7 +41,6 @@ const fetcher = async (url, init) => {
     { environment_id: environmentId, mode: 'free', created_at: '2026-10-07T00:00:00+00:00' },
   ] })
   if (url.endsWith('/attacker-credential')) return response(200, { attacker_credential: SECRET })
-  if (url.endsWith('/script-token')) return response(scriptTokenStatus, scriptTokenStatus === 200 ? { script_token: 'tok-abc' } : { detail: { code: 'ENVIRONMENT_NOT_FOUND' } })
   if (url.endsWith('/submission')) {
     const sent = JSON.parse(init.body)
     if ('message' in sent) return response(200, { attempt: 1, attempts_remaining: 2, passed: sent.message === 'right' })
@@ -235,15 +233,6 @@ assert.deepEqual(message, { ok: true, result: { attempt: 1, attemptsRemaining: 2
 assert.deepEqual(JSON.parse(httpCalls.at(-1).init.body), { message: 'right' })
 checks.push('solution submission uses the owner cookie and CSRF header and maps failures without leaking values')
 checks.push('an exact-match message result carries no partial aggregates')
-
-const scripted = await client.issueScriptAccess(environmentId, controller.signal)
-assert.deepEqual(scripted, { ok: true, access: { scriptToken: 'tok-abc', attackerCredential: SECRET } })
-const scriptCall = httpCalls.at(-1)
-assert.equal(scriptCall.init.method, 'POST')
-assert.equal(scriptCall.init.headers['X-Attack-Simulator-Request'], '1')
-scriptTokenStatus = 404
-assert.deepEqual(await client.issueScriptAccess(environmentId, controller.signal), { ok: false, reason: 'disabled' })
-checks.push('script access needs the owner cookie and CSRF header; a profile without it is reported as disabled')
 
 await client.discardEnvironment(environmentId, controller.signal)
 const deletion = httpCalls.at(-1)
