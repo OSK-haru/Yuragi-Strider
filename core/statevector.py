@@ -133,6 +133,10 @@ def _initial_statevector(initial_states: list[str]) -> Vector:
             local = (2.0 ** -0.5, 2.0 ** -0.5)
         elif state == "-":
             local = (2.0 ** -0.5, -(2.0 ** -0.5))
+        elif state == "+i":
+            local = (2.0 ** -0.5, 1.0j * 2.0 ** -0.5)
+        elif state == "-i":
+            local = (2.0 ** -0.5, -1.0j * 2.0 ** -0.5)
         else:
             raise ValueError(f"unsupported initial state: {state!r}")
         vector = tuple(

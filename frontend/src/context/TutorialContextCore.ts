@@ -50,6 +50,8 @@ export type TutorialBeat = {
   chapterTitle: string
   /* このビートを表示する画面。前のビートと違うときだけ移動する。 */
   route: NavigationRoute
+  /* IDE画面での作業領域の表示。省略時は利用者の選んだ表示のまま。 */
+  ideView?: 'circuit' | 'explorer'
   mood: PetMood
   text: string
   /* 暗転から外して強調する要素の data-tutorial-anchor 値。 */

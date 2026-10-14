@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { PulseEnvironmentPanel } from '../components/PulseEnvironmentPanel'
+import { PulseToolboxPanel } from '../components/PulseToolboxPanel'
 import { PulseWaveform } from '../components/PulseWaveform'
-import { QuantumPet, type QuantumPetPhase } from '../components/QuantumPet'
+import { IdeViewToggles, IdeWorkbench } from '../components/IdeWorkbench'
 import { SimulationCompletionPopup } from '../components/SimulationCompletionPopup'
 import { apiUrl } from '../utils/apiBase'
-import { pulseLabTips, pulseRunningStages } from '../utils/quantumPetTips'
+import { useIdeLayout } from '../hooks/useIdeLayout'
 import { useInternalInfoVisible } from '../context/useAdminMode'
 import {
   pulseModelUnavailableReason,
@@ -48,15 +49,20 @@ import {
   pulseStepDurationUs,
 } from '../utils/pulseCircuit'
 import {
+  checkPulseToolbox,
+  type PulseToolboxSettings,
+} from '../utils/pulseToolbox'
+import {
   constraintsAreWellFormed,
   drivePulseConstraintIssues,
   virtualZConstraintIssues,
 } from '../utils/pulseConstraints'
+import '../components/IdeLayout.css'
 import './PulseLabPage.css'
 
 type RequestStatus = 'idle' | 'loading' | 'success' | 'error'
-
-const PET_CELEBRATION_MS = 7000
+type PulseIdeView = 'sequence' | 'explorer'
+type PulseIdeMessagesTab = 'run' | 'waveform' | 'result'
 
 type PulseLabPageProps = {
   form: PulseLabForm
@@ -75,7 +81,22 @@ type PulseLabPageProps = {
   latestRun: PulseRunRecord | null
   runSignature: string
   onRunCommitted: (run: PulseRunRecord) => void
-  onOpenPulseStateExplorer: () => void
+  /*
+   * ツール箱の設定。状態エクスプローラーの表示項目メニューと同じ1つを共有する。
+   * 追加指標は保存した軌跡から計算するので、実行そのものには影響しない。
+   */
+  toolbox: PulseToolboxSettings
+  onToolboxChange: (toolbox: PulseToolboxSettings) => void
+  /*
+   * IDE の作業領域に置く Pulse 回路スタジオと Pulse 状態エクスプローラー。
+   * App が用意する。Pulse モードはこの IDE 画面に一本化している。
+   */
+  ide: {
+    renderEditor: () => ReactNode
+    renderExplorer: (showSequence: () => void) => ReactNode
+  }
+  /* 最初に開く表示。旧 /pulse-state-explorer から来たときは 'explorer'。 */
+  initialIdeView?: PulseIdeView
 }
 
 export function PulseLabPage({
@@ -90,8 +111,14 @@ export function PulseLabPage({
   latestRun,
   runSignature,
   onRunCommitted,
-  onOpenPulseStateExplorer,
+  toolbox,
+  onToolboxChange,
+  ide,
+  initialIdeView = 'sequence',
 }: PulseLabPageProps) {
+  const [ideView, setIdeView] = useState<PulseIdeView>(initialIdeView)
+  const [messagesTab, setMessagesTab] = useState<PulseIdeMessagesTab>('run')
+  const ideLayout = useIdeLayout('pulse', { inspectorWidth: 340 }, { navigator: 'Pulse 回路' })
   const internalInfoVisible = useInternalInfoVisible()
   const result = latestRun?.response ?? null
   const lastResponseAt = latestRun?.completedAt ?? null
@@ -99,7 +126,6 @@ export function PulseLabPage({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [showCompletionPopup, setShowCompletionPopup] = useState(false)
-  const [petCelebrating, setPetCelebrating] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
   /*
@@ -131,9 +157,9 @@ export function PulseLabPage({
     ? executionForms.reduce((total, executionForm) => total + pulseDurationUs(executionForm), 0)
       + Math.max(0, executionForms.length - 1) * executionConstraints.interPulseGapUs
     : pulseDurationUs(form)
-  const errors = validatePulseLabForm(formForRun)
+  const errors = validatePulseLabForm(formForRun, circuit.transmons.length)
   const executionErrors = executionForms.flatMap((executionForm) =>
-    Object.values(validatePulseLabForm(executionForm)),
+    Object.values(validatePulseLabForm(executionForm, circuit.transmons.length)),
   )
   const cost = networkMode
     ? estimateTransmonNetworkCost(formForRun, circuit)
@@ -183,6 +209,17 @@ export function PulseLabPage({
    * 選択中の1レーンだけ。密度行列の次元が回路と噛み合わない原因がこれなので、
    * 何が走るのかを実行ボタンの手前で明示し、一斉実行へ1クリックで移れるようにする。
    */
+  /*
+   * ツール箱の構成。2準位1台のモデルだけは軌跡に密度行列がなく、指標は使えない。
+   * 実行後の判定はエクスプローラーが結果の形で行い、ここは実行前の目安。
+   */
+  const toolboxGeometry = {
+    levels: form.localLevels,
+    count: circuit.transmons.length,
+    hasDensityMatrices: !(form.localLevels === 2 && circuit.transmons.length === 1),
+    pointCount: 0,
+  }
+  const toolboxCheck = checkPulseToolbox(toolbox, toolboxGeometry)
   const lanesWithDrives = circuit.lanes.filter((lane) => lane.steps.some(isDrivePulseStep))
   const networkDimension = form.localLevels ** circuit.transmons.length
   useEffect(() => {
@@ -192,29 +229,6 @@ export function PulseLabPage({
       abortRef.current?.abort()
     }
   }, [])
-
-  /*
-   * ペットは完了色（菫）をしばらく保ってから、基本色（緑）へ戻る。
-   */
-  useEffect(() => {
-    if (!petCelebrating) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => setPetCelebrating(false), PET_CELEBRATION_MS)
-    return () => window.clearTimeout(timeoutId)
-  }, [petCelebrating])
-
-  const petPhase: QuantumPetPhase =
-    status === 'loading' ? 'running' : petCelebrating ? 'done' : 'idle'
-  const petMessage =
-    petPhase === 'running'
-      ? null
-      : petPhase === 'done'
-        ? 'パルスシミュレーションが完了したよ。占有数の変化を見てみよう。'
-        : status === 'error' && errorMessage !== null
-          ? `つまずいたみたい：${errorMessage}`
-          : null
 
   async function runPulseSimulation() {
     if (!canRun) {
@@ -342,13 +356,11 @@ export function PulseLabPage({
       setErrorMessage(null)
       setErrorDetail(null)
       setShowCompletionPopup(true)
-      setPetCelebrating(true)
     } catch (error) {
       if (!mountedRef.current || abortRef.current !== controller) {
         return
       }
       setStatus('error')
-      setPetCelebrating(false)
       /* 例外本文にはサーバ側の内部情報が載りうるので、詳細は詳細モードだけに出す。 */
       const timedOut = error instanceof Error && error.name === 'AbortError'
       setErrorMessage(
@@ -371,221 +383,243 @@ export function PulseLabPage({
     }
   }
 
+  const runLabel = status === 'loading'
+    ? `${executionForms.length}個のブロックを実行中...`
+    : networkMode
+      ? `全 ${circuit.transmons.length} レーンを同時実行`
+      : sequenceMode
+        ? `q${activeTransmonIndex} シーケンスのみ実行`
+        : 'Pulseシミュレーションを実行'
+  const scopeTitle = networkMode
+    ? '複数レーン同時実行。'
+    : sequenceMode
+      ? `q${activeTransmonIndex} シーケンス実行。`
+      : ignoresSequence
+        ? '単一Pulse実験（シーケンスは実行されません）。'
+        : '単一Pulse実験。'
+  const scopeDetail = networkMode
+    ? `${circuit.transmons.length}台の${form.localLevels}準位トランズモンと全レーンのPulseを、${form.localLevels ** circuit.transmons.length}次元の密度行列で同時に発展させます。`
+    : sequenceMode
+      ? `${sequence.length}個のPulseを、密度行列と共通環境を引き継いで順番に実行します。`
+      : ignoresSequence
+        ? `レーンに ${sequence.length} 個のブロックがありますが、シーケンス実行は3準位でのみ対応しています。現在の単一Pulse設定を実行します。ブロックを流したい場合は「準位数」を「3準位 qutrit（漏れ準位あり）」にしてください。`
+        : 'Pulse回路にブロックがないため、現在の単一Pulse設定を実行します。'
+  /* 実行できない理由。入力では直せないサーバー側の不一致を最優先で出す。 */
+  const blockingMessage = apiUnavailableReason
+    ?? (hasNoDriveInSequence
+      ? '回路に駆動 Pulse がありません。波形はゼロのままです。回路スタジオで Pulse ブロックを追加してください。'
+      : !isValid
+        ? '実行前に、強調表示されている項目を修正してください。'
+        : null)
+  const runIssueCount = (blockingMessage ? 1 : 0) + constraintIssues.length + (errorMessage ? 1 : 0)
+  const messageTabs: Array<[PulseIdeMessagesTab, string, number | null]> = [
+    ['run', '実行', runIssueCount],
+    ['waveform', '波形', null],
+    ['result', '結果', null],
+  ]
+
+  /*
+   * Quartus型のIDEレイアウト。作業領域は Pulse 回路スタジオと
+   * Pulse 状態エクスプローラーを切り替え、設定はプロパティ、
+   * 見積もり・波形・結果はメッセージに置く。
+   */
   return (
-    <main className="pulse-lab">
-      <header className="pulse-lab__header">
-        <div>
-          <span className="pulse-lab__eyebrow">Yuragi-Strider / 実験的</span>
-          <h1>Pulseラボ</h1>
-          <p>
-            回転フレームRWA制御エンベロープの実験的モデルです。
-            <strong> 校正済みのハードウェアモデルではありません。</strong>
-          </p>
-        </div>
-      </header>
-
-      <aside className="pulse-lab__scope-note" aria-label="Pulseラボの適用範囲">
-        <strong>{networkMode ? '複数レーン同時実行。' : sequenceMode ? `q${activeTransmonIndex} シーケンス実行。` : ignoresSequence ? '単一Pulse実験（シーケンスは実行されません）。' : '単一Pulse実験。'}</strong>
-        <span>
-          {networkMode
-            ? `${circuit.transmons.length}台の${form.localLevels}準位トランズモンと全レーンのPulseを、${form.localLevels ** circuit.transmons.length}次元の密度行列で同時に発展させます。`
-            : sequenceMode
-            ? `${sequence.length}個のPulseを、密度行列と共通環境を引き継いで順番に実行します。`
-            : ignoresSequence
-            ? `レーンに ${sequence.length} 個のブロックがありますが、シーケンス実行は3準位でのみ対応しています。現在の単一Pulse設定を実行します。ブロックを流したい場合は「準位数」を「3準位 qutrit（漏れ準位あり）」にしてください。`
-            : 'Pulse回路にブロックがないため、現在の単一Pulse設定を実行します。'}
+    <main className="pulse-lab pulse-ide ide">
+      <header className="ide__titlebar">
+        <h1>Pulse IDE</h1>
+        <nav className="ide__tabs" aria-label="作業領域の表示">
+          <button type="button" aria-pressed={ideView === 'sequence'} onClick={() => setIdeView('sequence')}>Pulse 回路</button>
+          <button type="button" aria-pressed={ideView === 'explorer'} onClick={() => setIdeView('explorer')}>状態エクスプローラー</button>
+        </nav>
+        <IdeViewToggles controls={ideLayout} />
+        <span className="ide__badge" role="status">
+          {status === 'loading' ? '実行中' : result ? '結果あり' : '未実行'}
         </span>
-      </aside>
-
-      {/* モデル識別と発展方式の内訳は内部情報。 */}
-      {internalInfoVisible ? (
-      <section className="pulse-lab__identity" aria-label="Pulseモデルの識別情報">
-        <div>
-          <span>モデル</span>
-          <strong>
-            {networkMode
-              ? `${circuit.transmons.length}トランズモン・ネットワーク / ${form.localLevels}^${circuit.transmons.length}準位`
-              : form.localLevels === 3
-                ? '3準位トランズモン qutrit'
-              : '2準位ベースライン'}
-          </strong>
-        </div>
-        <div>
-          <span>フレーム</span>
-          <strong>回転フレーム / RWA</strong>
-        </div>
-        <div>
-          <span>PULSE時間幅</span>
-          <strong>{sequenceDurationUs.toPrecision(4)} us</strong>
-        </div>
-        <div>
-          <span>総観測時間</span>
-          <strong>{form.totalSimulationTimeUs.toPrecision(4)} us</strong>
-        </div>
-        <div>
-          <span>発展方式</span>
-          <strong>
-            {form.evolutionMethod === 'explicit_cptp'
-              ? '明示的 CPTP 写像'
-              : '固定ステップ RK4'}
-          </strong>
-        </div>
-      </section>
+      </header>
+      <div className="ide__toolbar" role="toolbar" aria-label="操作">
+        <button type="button" disabled={!canRun} onClick={() => void runPulseSimulation()}>{runLabel}</button>
+        <span className="ide__toolbar-note"><strong>{scopeTitle}</strong> {scopeDetail}</span>
+      </div>
+      {blockingMessage || errorMessage ? (
+        <p className="ide__notice" role="alert">{errorMessage ?? blockingMessage}</p>
       ) : null}
-
-      <div className="pulse-lab__workspace">
-        <PulseEnvironmentPanel
-          form={form}
-          errors={errors}
-          disabled={status === 'loading'}
-          transmonCount={circuit.transmons.length}
-          onTransmonCountChange={onTransmonCountChange}
-          onChange={onFormChange}
-          executionConstraints={executionConstraints}
-          onExecutionConstraintsChange={onExecutionConstraintsChange}
-        />
-
-        <section className="pulse-lab__run" aria-labelledby="pulse-run-title">
-          <div>
-            <span>実行上限管理</span>
-            <h2 id="pulse-run-title">{sequenceMode ? 'Pulseシーケンスを実行' : 'Pulseシミュレーションを実行'}</h2>
-            <p data-level={cost.level}>
-              {cost.message} UIによる保守的な見積り: 約{' '}
-              {cost.estimatedInternalSteps.toLocaleString()} /{' '}
-              {cost.maximumInternalSteps.toLocaleString()} ステップ。
-            </p>
-          </div>
-
-          <div
-            className="pulse-lab__run-scope"
-            data-tone={circuit.transmons.length > 4 ? 'warn' : 'info'}
-          >
-            <dl>
-              <div>
-                <dt>実行対象</dt>
-                <dd>
-                  {networkMode
-                    ? `全 ${circuit.transmons.length} レーン同時（q0〜q${circuit.transmons.length - 1}）`
-                    : `q${activeTransmonIndex} のレーンのみ`}
-                </dd>
-              </div>
-              <div>
-                <dt>密度行列</dt>
-                <dd>
-                  {networkMode
-                    ? `${networkDimension} × ${networkDimension}（${form.localLevels}^${circuit.transmons.length}）`
-                    : form.localLevels === 3
-                      ? '3 × 3（1トランズモン）'
-                      : '2 × 2（1トランズモン）'}
-                </dd>
-              </div>
-            </dl>
-            {lanesWithDrives.length >= 2 && circuit.transmons.length > 4 ? (
-              <p>
-                回路には Pulse を持つレーンが {lanesWithDrives.length} 本ありますが、
-                同時実行できるのは 4 トランズモンまでです。回路スタジオでトランズモン数を
-                4 台以下にしてください。
-              </p>
-            ) : null}
-          </div>
-
-          <button
-            type="button"
-            disabled={!canRun}
-            onClick={() => void runPulseSimulation()}
-          >
-            {status === 'loading'
-              ? `${executionForms.length}個のブロックを実行中...`
-              : networkMode
-                ? `全 ${circuit.transmons.length} レーンを同時実行`
-                : sequenceMode
-                  ? `q${activeTransmonIndex} シーケンスのみ実行`
-                  : 'Pulseシミュレーションを実行'}
-          </button>
-          {/*
-            サーバー側の不一致は入力では直せない。「項目を修正してください」より
-            先に出さないと、直せないものを直そうとさせてしまう。
-          */}
-          {apiUnavailableReason ? (
-            <p className="pulse-lab__run-error pulse-lab__run-error--server" role="alert">
-              {apiUnavailableReason}
+      <IdeWorkbench
+        controls={ideLayout}
+        navigator={(
+          <aside className="ide__pane ide__navigator" aria-label="Pulse 回路">
+            <h2 className="ide__pane-title">Pulse 回路</h2>
+            <div className="ide__pane-body">
+              <dl className="ide__facts">
+                <div><dt>トランズモン</dt><dd>{circuit.transmons.length} 台</dd></div>
+                <div><dt>準位数</dt><dd>{form.localLevels} 準位</dd></div>
+                <div><dt>実行対象</dt><dd>{networkMode ? `全 ${circuit.transmons.length} レーン` : `q${activeTransmonIndex}`}</dd></div>
+                <div>
+                  <dt>密度行列</dt>
+                  <dd>{networkMode ? `${networkDimension} × ${networkDimension}` : `${form.localLevels} × ${form.localLevels}`}</dd>
+                </div>
+                <div><dt>Pulse 時間幅</dt><dd>{sequenceDurationUs.toPrecision(4)} μs</dd></div>
+                <div><dt>総観測時間</dt><dd>{form.totalSimulationTimeUs.toPrecision(4)} μs</dd></div>
+              </dl>
+              {lanesWithDrives.length >= 2 && circuit.transmons.length > 4 ? (
+                <small>
+                  Pulse を持つレーンが {lanesWithDrives.length} 本ありますが、同時実行できるのは 4 トランズモンまでです。
+                  トランズモン数を 4 台以下にしてください。
+                </small>
+              ) : null}
+              {/* モデル識別と発展方式の内訳は内部情報。 */}
               {internalInfoVisible ? (
-                <span className="pulse-lab__run-error-detail">
-                  required model_id: {modelId}
-                  {apiCompatibility.state === 'ready'
-                    ? ` / api offers: ${[...apiCompatibility.supportedModels].join(', ')}`
-                    : ` / api state: ${apiCompatibility.state}`}
-                </span>
+                <dl className="ide__facts" aria-label="Pulseモデルの識別情報">
+                  <div>
+                    <dt>モデル</dt>
+                    <dd>
+                      {networkMode
+                        ? `${circuit.transmons.length}トランズモン・ネットワーク`
+                        : form.localLevels === 3 ? '3準位 qutrit' : '2準位ベースライン'}
+                    </dd>
+                  </div>
+                  <div><dt>フレーム</dt><dd>回転フレーム / RWA</dd></div>
+                  <div><dt>発展方式</dt><dd>{form.evolutionMethod === 'explicit_cptp' ? '明示的 CPTP 写像' : '固定ステップ RK4'}</dd></div>
+                </dl>
               ) : null}
-            </p>
-          ) : hasNoDriveInSequence ? (
-            <p className="pulse-lab__run-error" role="alert">
-              回路に駆動 Pulse がありません。波形はゼロのままです。Circuit Studio で Pulse ブロックを追加してください。
-            </p>
-          ) : !isValid ? (
-            <p className="pulse-lab__run-error" role="alert">
-              実行前に、強調表示されている項目を修正してください。
-            </p>
-          ) : null}
-          {constraintIssues.length > 0 ? (
-            <ul className="pulse-lab__run-error" aria-label="実行制約の違反">
-              {constraintIssues.map((issue) => (
-                <li key={`${issue.stepIndex}-${issue.message}`}>{issue.label}: {issue.message}</li>
-              ))}
-            </ul>
-          ) : null}
-          {errorMessage ? (
-            <p className="pulse-lab__run-error" role="alert">
-              {errorMessage}
-              {internalInfoVisible && errorDetail ? (
-                <span className="pulse-lab__run-error-detail">{errorDetail}</span>
-              ) : null}
-            </p>
-          ) : null}
-        </section>
-
-        <PulseWaveform
-          points={waveform}
-          pulseDurationUs={waveformPulseEndTimeUs}
-          totalSimulationTimeUs={form.totalSimulationTimeUs}
-          scopeLabel={waveformScopeLabel}
-          dragAvailable={form.localLevels !== 2}
-        />
-
-        {/*
-          Pulseラボは「設計して実行する」場所に徹する。時間発展の状態
-          （占有数・密度行列・指標）はここには一切描かず、Pulse状態
-          エクスプローラー1か所だけで読む。結果の置き場所が二重になると
-          カーソルや古さ判定の基準がずれるため。
-        */}
-        {result ? (
-          <section className="pulse-lab__explorer-link">
-            <div>
-              <span>実行完了</span>
-              <strong>Pulse 状態エクスプローラーで結果を読む</strong>
-              <p>
-                時間発展した状態（占有数・密度行列・指標）はこのページには表示しません。
-                時刻カーソルを1本共有して同じ瞬間で並べて読める Pulse 状態エクスプローラーへ移動してください。
-                {internalInfoVisible && lastResponseAt ? (
-                  <> 最終実行 {new Date(lastResponseAt).toLocaleTimeString()}。</>
-                ) : null}
-              </p>
+              <small>回転フレームRWA制御エンベロープの実験的モデルです。校正済みのハードウェアモデルではありません。</small>
             </div>
-            <button type="button" onClick={onOpenPulseStateExplorer}>
-              Pulse 状態エクスプローラーで開く
-            </button>
-          </section>
-        ) : (
-          <section className="pulse-lab__empty">
-            <span>実行準備完了</span>
-            <h2>まだPulseの結果がありません</h2>
-            <p>
-              波形と計算量見積りを確認してから、選択したモデルを実行してください。
-              実行した状態は Pulse 状態エクスプローラーで確認します。
-            </p>
+          </aside>
+        )}
+        editor={(
+          <section className="ide__pane ide__editor" aria-label="作業領域">
+            <div className="ide__doc-tabs">
+              <span className="ide__doc-tab">{ideView === 'sequence' ? 'Pulse 回路スタジオ' : 'Pulse 状態エクスプローラー'}</span>
+            </div>
+            <div className="ide__pane-body">
+              {ideView === 'sequence' ? ide.renderEditor() : ide.renderExplorer(() => setIdeView('sequence'))}
+            </div>
           </section>
         )}
-      </div>
+        toolbox={(
+          <aside className="ide__pane ide__toolbox" aria-label="分析ツール箱">
+            <h2 className="ide__pane-title">分析ツール箱</h2>
+            <div className="ide__pane-body">
+              <PulseToolboxPanel
+                settings={toolbox}
+                check={toolboxCheck}
+                geometry={toolboxGeometry}
+                onChange={onToolboxChange}
+              />
+            </div>
+          </aside>
+        )}
+        inspector={(
+          <aside className="ide__pane ide__inspector" aria-label="プロパティ">
+            <h2 className="ide__pane-title">環境と Pulse の設定</h2>
+            <div className="ide__pane-body">
+              <PulseEnvironmentPanel
+                form={form}
+                errors={errors}
+                disabled={status === 'loading'}
+                transmonCount={circuit.transmons.length}
+                onTransmonCountChange={onTransmonCountChange}
+                onChange={onFormChange}
+                executionConstraints={executionConstraints}
+                onExecutionConstraintsChange={onExecutionConstraintsChange}
+              />
+            </div>
+          </aside>
+        )}
+        messages={(
+          <section className="ide__pane ide__messages" aria-label="メッセージ">
+            <div className="ide__doc-tabs" role="group" aria-label="メッセージの種類">
+              {messageTabs.map(([key, label, count]) => (
+                <button key={key} type="button" aria-pressed={messagesTab === key} onClick={() => setMessagesTab(key)}>
+                  {label}{count === null ? null : <span>{count}</span>}
+                </button>
+              ))}
+            </div>
+            <div className="ide__pane-body pulse-ide__messages-body">
+              {messagesTab === 'run' ? (
+                <section className="pulse-lab__run" aria-labelledby="pulse-run-title">
+                  <div>
+                    <span>実行上限管理</span>
+                    <h2 id="pulse-run-title">{sequenceMode ? 'Pulseシーケンスを実行' : 'Pulseシミュレーションを実行'}</h2>
+                    <p data-level={cost.level}>
+                      {cost.message} UIによる保守的な見積り: 約{' '}
+                      {cost.estimatedInternalSteps.toLocaleString()} /{' '}
+                      {cost.maximumInternalSteps.toLocaleString()} ステップ。
+                    </p>
+                  </div>
+                  {apiUnavailableReason ? (
+                    <p className="pulse-lab__run-error pulse-lab__run-error--server" role="alert">
+                      {apiUnavailableReason}
+                      {internalInfoVisible ? (
+                        <span className="pulse-lab__run-error-detail">
+                          required model_id: {modelId}
+                          {apiCompatibility.state === 'ready'
+                            ? ` / api offers: ${[...apiCompatibility.supportedModels].join(', ')}`
+                            : ` / api state: ${apiCompatibility.state}`}
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : blockingMessage ? (
+                    <p className="pulse-lab__run-error" role="alert">{blockingMessage}</p>
+                  ) : null}
+                  {constraintIssues.length > 0 ? (
+                    <ul className="pulse-lab__run-error" aria-label="実行制約の違反">
+                      {constraintIssues.map((issue) => (
+                        <li key={`${issue.stepIndex}-${issue.message}`}>{issue.label}: {issue.message}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {errorMessage ? (
+                    <p className="pulse-lab__run-error" role="alert">
+                      {errorMessage}
+                      {internalInfoVisible && errorDetail ? (
+                        <span className="pulse-lab__run-error-detail">{errorDetail}</span>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </section>
+              ) : null}
+              {messagesTab === 'waveform' ? (
+                <PulseWaveform
+                  points={waveform}
+                  pulseDurationUs={waveformPulseEndTimeUs}
+                  totalSimulationTimeUs={form.totalSimulationTimeUs}
+                  scopeLabel={waveformScopeLabel}
+                  dragAvailable={form.localLevels !== 2}
+                />
+              ) : null}
+              {messagesTab === 'result' ? (
+                result ? (
+                  <section className="pulse-lab__explorer-link">
+                    <div>
+                      <span>実行完了</span>
+                      <strong>状態エクスプローラーで結果を読む</strong>
+                      <p>
+                        時間発展した状態（占有数・密度行列・指標）は、作業領域の状態エクスプローラーで読みます。
+                        {internalInfoVisible && lastResponseAt ? (
+                          <> 最終実行 {new Date(lastResponseAt).toLocaleTimeString()}。</>
+                        ) : null}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => setIdeView('explorer')}>状態エクスプローラーを開く</button>
+                  </section>
+                ) : (
+                  <section className="pulse-lab__empty">
+                    <span>実行準備完了</span>
+                    <h2>まだPulseの結果がありません</h2>
+                    <p>波形と計算量見積りを確認してから、ツールバーの実行ボタンを押してください。</p>
+                  </section>
+                )
+              ) : null}
+            </div>
+          </section>
+        )}
+      />
+      <footer className="ide__statusbar">
+        <span>{status === 'loading' ? '実行中…' : '準備完了'}</span>
+        <span>{form.localLevels}準位 · {circuit.transmons.length}台</span>
+        <span>Pulse 時間幅 {sequenceDurationUs.toPrecision(4)} μs</span>
+        {lastResponseAt ? <span>最終実行 {new Date(lastResponseAt).toLocaleTimeString()}</span> : null}
+      </footer>
       {showCompletionPopup ? (
         <SimulationCompletionPopup
           mode="pulse"
@@ -598,12 +632,6 @@ export function PulseLabPage({
           onDismiss={() => setShowCompletionPopup(false)}
         />
       ) : null}
-      <QuantumPet
-        phase={petPhase}
-        message={petMessage}
-        tips={pulseLabTips}
-        stages={pulseRunningStages}
-      />
     </main>
   )
 }

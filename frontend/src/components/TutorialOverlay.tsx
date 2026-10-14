@@ -57,9 +57,38 @@ function fidelityDropLabel(samples: TutorialRunSample[]): string | null {
     : `${Math.abs(deltaPoints).toFixed(2)} ポイント上がったよ。`
 }
 
+/*
+ * 同じ目印が、非表示のまま常駐している画面（攻撃シミュレーター）にもある。
+ * hidden の中のものは飛ばして、見えている方を使う。
+ */
 function findAnchor(name: string): HTMLElement | null {
-  const element = document.querySelector(`[data-tutorial-anchor="${name}"]`)
-  return element instanceof HTMLElement ? element : null
+  for (const element of document.querySelectorAll(`[data-tutorial-anchor="${name}"]`)) {
+    if (element instanceof HTMLElement && element.closest('[hidden]') === null) return element
+  }
+  return null
+}
+
+/*
+ * IDE のペインは中でスクロールするので、目印の要素がペインより大きいと枠が
+ * ペインの外（隣のペイン）まではみ出す。スクロールする祖先の見えている範囲で
+ * 切り取る。全く見えていなければ null。
+ */
+function visibleBounds(element: HTMLElement): { left: number; top: number; width: number; height: number } | null {
+  const rect = element.getBoundingClientRect()
+  let left = rect.left
+  let top = rect.top
+  let right = rect.right
+  let bottom = rect.bottom
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    const style = getComputedStyle(parent)
+    if (!/(auto|scroll|hidden)/.test(`${style.overflowX}${style.overflowY}`)) continue
+    const clip = parent.getBoundingClientRect()
+    left = Math.max(left, clip.left)
+    top = Math.max(top, clip.top)
+    right = Math.min(right, clip.right)
+    bottom = Math.min(bottom, clip.bottom)
+  }
+  return right - left > 0 && bottom - top > 0 ? { left, top, width: right - left, height: bottom - top } : null
 }
 
 function sameRects(left: AnchorRect[], right: AnchorRect[]) {
@@ -99,8 +128,8 @@ function useAnchorRects(anchorKey: string): AnchorRect[] {
           continue
         }
 
-        const bounds = element.getBoundingClientRect()
-        if (bounds.width <= 0 || bounds.height <= 0) {
+        const bounds = visibleBounds(element)
+        if (bounds === null) {
           continue
         }
 

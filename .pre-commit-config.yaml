@@ -4,9 +4,13 @@ repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v3.2.0
     hooks:
+    # data/device_snapshots/ holds third-party files kept byte-for-byte with
+    # recorded SHA-256 hashes (see each SOURCE.md); fixers must not touch them.
     -   id: trailing-whitespace
+        exclude: ^data/device_snapshots/
     -   id: end-of-file-fixer
+        exclude: ^data/device_snapshots/
     -   id: check-yaml
     -   id: check-added-large-files
         args: ['--maxkb=500']
-        exclude: ^formalweb/website/package-lock\.json$
+        exclude: ^(formalweb/website/package-lock\.json|data/device_snapshots/.*\.json)$

@@ -89,11 +89,14 @@ type ActiveDragSession = {
 type CircuitProviderProps = {
   gateDurationDefaults: GateDurationDefaults
   children: ReactNode
+  keyboardEnabled?: boolean
+  keyboardScopeId?: string
+  minimumLogicalQubits?: 1 | 2
 }
 
 const DEFAULT_EDITOR_HINT = 'パレットのゲートを選んでスロットをクリック、またはドラッグして配置できます。列と列のあいだに落とすと新しい列が入ります。'
 
-export function CircuitProvider({ gateDurationDefaults, children }: CircuitProviderProps) {
+export function CircuitProvider({ gateDurationDefaults, children, keyboardEnabled = true, keyboardScopeId, minimumLogicalQubits = 2 }: CircuitProviderProps) {
   const [circuitHistory, setCircuitHistory] = useState<CircuitHistoryState>(() =>
     createCircuitHistory(createDefaultCircuit()),
   )
@@ -158,7 +161,7 @@ export function CircuitProvider({ gateDurationDefaults, children }: CircuitProvi
       return
     }
 
-    finalizeCircuitEdit(resizeCircuitEditorState(circuitState, nextLogicalQubits))
+    finalizeCircuitEdit(resizeCircuitEditorState(circuitState, nextLogicalQubits, minimumLogicalQubits))
     setEditorHint(`Circuit resized to ${nextLogicalQubits} qubits.`)
   }
 
@@ -1112,7 +1115,7 @@ export function CircuitProvider({ gateDurationDefaults, children }: CircuitProvi
       )
     }
     const text = await file.text()
-    const importedCircuit = parseCircuitConfigJson(text)
+    const importedCircuit = parseCircuitConfigJson(text, minimumLogicalQubits)
 
     finalizeCircuitEdit(importedCircuit)
     setSelectedGateType(null)
@@ -1140,7 +1143,12 @@ export function CircuitProvider({ gateDurationDefaults, children }: CircuitProvi
   }
 
   useEffect(() => {
+    if (!keyboardEnabled) return
     function handleWindowKeyDown(event: KeyboardEvent) {
+      if (keyboardScopeId) {
+        const scope = document.getElementById(keyboardScopeId)
+        if (!scope || scope.closest('[hidden]')) return
+      }
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) {
         return
       }

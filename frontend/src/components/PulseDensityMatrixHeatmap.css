@@ -130,7 +130,7 @@
   place-items: center;
   color: var(--tt-ink-dim);
   font-family: var(--tt-mono);
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   letter-spacing: -0.02em;
 }
 
@@ -151,8 +151,8 @@
 }
 
 .pulse-density__cell[data-selected='true'] {
-  border-color: var(--tt-accent);
-  box-shadow: inset 0 0 0 1px var(--tt-accent);
+  border-color: var(--tt-interact);
+  box-shadow: inset 0 0 0 1px var(--tt-interact);
 }
 
 .pulse-density__cell span,

@@ -69,7 +69,9 @@ from core.physical_environment import (
     SUPPORTED_ENVIRONMENT_MODELS,
     UNIFIED_ENVIRONMENT_MODEL,
     compute_environment_rates,
+    compute_environment_rates_per_qubit,
     environment_rates_to_derived_parameters,
+    per_qubit_rates_to_derived_parameters,
 )
 from core.results import SimulationConfig, SimulationResult
 from core.rust_dense_kernel import (
@@ -499,7 +501,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             ])
     if _has_classical_conditions(config) and representation != "statevector":
         try:
-            branch_rates = compute_environment_rates(config.environment)
+            _, _, branch_rates = _resolved_environment_rates(config)
             branch_evolution_method = config.evolution_method
             branch_method_fallback = None
             if (
@@ -580,10 +582,20 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     return result
 
 
+def environment_is_ideal(config: SimulationConfig) -> bool:
+    """True when every local relaxation, excitation and dephasing rate is zero."""
+
+    return _environment_is_ideal(config)
+
+
 def _environment_is_ideal(config: SimulationConfig) -> bool:
-    rates = compute_environment_rates(config.environment)
+    rates = compute_environment_rates_per_qubit(
+        config.environment,
+        config.circuit.logical_qubits,
+    )
     return all(
-        abs(float(getattr(rates, name))) <= 1e-15
+        abs(float(getattr(local_rates, name))) <= 1e-15
+        for local_rates in rates
         for name in ("gamma_down_per_us", "gamma_up_per_us", "gamma_phi_per_us")
     )
 
@@ -639,17 +651,23 @@ def _run_gate_aware_hamiltonian_lindblad(config: SimulationConfig) -> Simulation
     """
     profile = _core_profiling_stats(config)
     lindblad_started_at = perf_counter()
-    rates = compute_environment_rates(config.environment)
+    rates, local_rates, solver_rates = _resolved_environment_rates(config)
     if (
         config.simulation_backend == RUST_DENSE_PREVIEW_BACKEND
         and config.evolution_method == FIXED_STEP_RK4
     ):
         cached_collapse_ops: Sequence[CachedCollapseOperator] = (
             _LazyEnvironmentCollapseOperators(config.circuit.logical_qubits, rates)
+            if not config.environment.per_qubit
+            else prepare_collapse_operators(
+                multi_qubit_environment_collapse_operators(
+                    config.circuit.logical_qubits, solver_rates
+                )
+            )
         )
     else:
         collapse_ops = multi_qubit_environment_collapse_operators(
-            config.circuit.logical_qubits, rates
+            config.circuit.logical_qubits, solver_rates
         )
         cached_collapse_ops = prepare_collapse_operators(collapse_ops)
     profile.lindblad_operator_build_ms = (perf_counter() - lindblad_started_at) * 1000.0
@@ -657,6 +675,8 @@ def _run_gate_aware_hamiltonian_lindblad(config: SimulationConfig) -> Simulation
     caches = _SimulationCaches.empty()
     kernel_stats = _KernelStats(config.simulation_backend)
     derived_parameters = environment_rates_to_derived_parameters(rates)
+    derived_parameters["per_qubit"] = per_qubit_rates_to_derived_parameters(local_rates)
+    derived_parameters["per_qubit_environment_enabled"] = bool(config.environment.per_qubit)
 
     try:
         simulation = _simulate_circuit_gate_aware_hamiltonian(
@@ -664,7 +684,7 @@ def _run_gate_aware_hamiltonian_lindblad(config: SimulationConfig) -> Simulation
             duration_us=config.duration_us,
             time_steps=config.time_steps,
             collapse_ops=cached_collapse_ops,
-            max_environment_rate_per_us=_max_environment_rate_per_us(rates),
+            max_environment_rate_per_us=_max_environment_rate_per_us(solver_rates),
             caches=caches,
             kernel_stats=kernel_stats,
             profile=profile,
@@ -796,17 +816,23 @@ def _run_gate_aware_hamiltonian_lindblad(config: SimulationConfig) -> Simulation
 def _run_post_circuit_degradation(config: SimulationConfig) -> SimulationResult:
     profile = _core_profiling_stats(config)
     lindblad_started_at = perf_counter()
-    rates = compute_environment_rates(config.environment)
+    rates, local_rates, solver_rates = _resolved_environment_rates(config)
     if (
         config.simulation_backend == RUST_DENSE_PREVIEW_BACKEND
         and config.evolution_method == FIXED_STEP_RK4
     ):
         cached_collapse_ops: Sequence[CachedCollapseOperator] = (
             _LazyEnvironmentCollapseOperators(config.circuit.logical_qubits, rates)
+            if not config.environment.per_qubit
+            else prepare_collapse_operators(
+                multi_qubit_environment_collapse_operators(
+                    config.circuit.logical_qubits, solver_rates
+                )
+            )
         )
     else:
         collapse_ops = multi_qubit_environment_collapse_operators(
-            config.circuit.logical_qubits, rates
+            config.circuit.logical_qubits, solver_rates
         )
         cached_collapse_ops = prepare_collapse_operators(collapse_ops)
     profile.lindblad_operator_build_ms = (perf_counter() - lindblad_started_at) * 1000.0
@@ -814,6 +840,8 @@ def _run_post_circuit_degradation(config: SimulationConfig) -> SimulationResult:
     caches = _SimulationCaches.empty()
     kernel_stats = _KernelStats(config.simulation_backend)
     derived_parameters = environment_rates_to_derived_parameters(rates)
+    derived_parameters["per_qubit"] = per_qubit_rates_to_derived_parameters(local_rates)
+    derived_parameters["per_qubit_environment_enabled"] = bool(config.environment.per_qubit)
     derived_parameters.update({
         "backend_name": PYTHON_DENSE_BACKEND_NAME,
         "simulation_mode": POST_CIRCUIT_DEGRADATION_MODEL,
@@ -831,7 +859,7 @@ def _run_post_circuit_degradation(config: SimulationConfig) -> SimulationResult:
         duration_us=config.duration_us,
         time_steps=config.time_steps,
         collapse_ops=cached_collapse_ops,
-        max_environment_rate_per_us=_max_environment_rate_per_us(rates),
+        max_environment_rate_per_us=_max_environment_rate_per_us(solver_rates),
         caches=caches,
         kernel_stats=kernel_stats,
         profile=profile,
@@ -2400,11 +2428,25 @@ def _generator_substep_count(dt: float, generator_scale_per_us: float) -> int:
 
 
 def _max_environment_rate_per_us(rates) -> float:
+    if isinstance(rates, Sequence):
+        return max((_max_environment_rate_per_us(rate) for rate in rates), default=0.0)
     return (
         abs(float(rates.gamma_down_per_us))
         + abs(float(rates.gamma_up_per_us))
         + abs(float(rates.gamma_phi_per_us))
     )
+
+
+def _resolved_environment_rates(config: SimulationConfig):
+    """Return shared metadata rates, local rates, and solver input rates."""
+
+    shared = compute_environment_rates(config.environment)
+    local = compute_environment_rates_per_qubit(
+        config.environment,
+        config.circuit.logical_qubits,
+    )
+    solver_rates = local if config.environment.per_qubit else shared
+    return shared, local, solver_rates
 
 
 def _trace_error(state: Matrix) -> float:

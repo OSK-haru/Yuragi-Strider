@@ -1,0 +1,19 @@
+.pulse-toolbox-result__note {
+  margin: 0 0 10px;
+  color: var(--tt-ink-mid);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+/* 図の文字は viewBox ごと縮むので、横に並べず縦に積んで読める大きさを保つ。 */
+.pulse-toolbox-result__multiples {
+  display: grid;
+  gap: 16px;
+}
+
+.pulse-toolbox-result__multiples h3 {
+  margin: 0 0 4px;
+  color: var(--tt-ink);
+  font-family: var(--tt-mono);
+  font-size: 0.86rem;
+}

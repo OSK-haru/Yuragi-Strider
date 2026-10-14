@@ -11,6 +11,7 @@ from api.pulse_models import (
     CoupledTransmonNetworkPulseSimulateResponse,
     QutritPulseEnvelopeRequest,
 )
+from api.pulse_readout import pulse_readout_response
 from core.cptp_evolution import evolve_cptp_segment
 from core.gates import Matrix
 from core.pulse_envelopes import (
@@ -374,6 +375,12 @@ def _run_single_network_request(
         },
         "pulse_end": pulse_end,
         "final": final,
+        "readout": pulse_readout_response(
+            request.readout_error,
+            final["joint_populations"],
+            count,
+            local_dimension,
+        ),
         "diagnostics": {
             "api_runtime_ms": (perf_counter() - started) * 1000.0,
             "backend": {
@@ -479,6 +486,12 @@ def _average_network_ensemble_response(
         "leakage_at_pulse_end": averaged["pulse_end"]["leakage_probability"],
         "leakage_at_final_time": averaged["final"]["leakage_probability"],
     }
+    averaged["readout"] = pulse_readout_response(
+        request.readout_error,
+        averaged["final"]["joint_populations"],
+        count,
+        local_dimension,
+    )
     averaged["input"].update({
         "detunings_rad_per_us": request.detunings_rad_per_us,
         "quasi_static_detuning_sigmas_rad_per_us": (
@@ -674,6 +687,7 @@ def _build_rates(
             qutrit_dissipation_rates(environment, anharmonicity)
             for anharmonicity in request.anharmonicities_mhz
         )
+    local_calibrations = environment.per_qubit
     return tuple(
         qutrit_dissipation_rates(
             EnvironmentConfig(
@@ -682,17 +696,23 @@ def _build_rates(
                 temperature_mk=environment.temperature_mk,
                 flux_noise_phi0=environment.flux_noise_phi0,
                 qubit_frequency_ghz=frequency,
-                t1_max_us=environment.t1_max_us,
-                tphi_max_us=environment.tphi_max_us,
+                t1_max_us=(
+                    local_calibrations[index].t1_max_us
+                    if local_calibrations else environment.t1_max_us
+                ),
+                tphi_max_us=(
+                    local_calibrations[index].tphi_max_us
+                    if local_calibrations else environment.tphi_max_us
+                ),
                 ideal_reference=environment.ideal_reference,
             ),
             anharmonicity,
         )
-        for frequency, anharmonicity in zip(
+        for index, (frequency, anharmonicity) in enumerate(zip(
             request.frequencies_ghz,
             request.anharmonicities_mhz,
             strict=True,
-        )
+        ))
     )
 
 

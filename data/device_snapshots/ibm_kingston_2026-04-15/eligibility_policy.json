@@ -1,0 +1,9 @@
+{
+  "schema_version": "device_eligibility_policy_v1",
+  "decision_ref": "attack-simulation/decisions.md#D66",
+  "readout_error_exclude_above": 0.1,
+  "cz_error_exclude_at_or_above": 0.5,
+  "exclude_missing_t1_or_t2": true,
+  "exclude_missing_measure_or_reset_duration": true,
+  "meaning": "Recorded D66 placement policy; threshold values are data, not code defaults."
+}

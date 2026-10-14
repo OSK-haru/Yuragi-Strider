@@ -10,20 +10,12 @@
   color: var(--tt-ink);
 }
 
-.state-explorer-page__header,
 .state-explorer-page__empty,
 .state-explorer-page__unavailable,
 .state-explorer-page > .state-explorer-panel,
 .state-explorer-page > .metric-timeline {
   width: min(1180px, 100%);
   margin: 0 auto;
-}
-
-.state-explorer-page__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: start;
-  gap: 20px;
 }
 
 .state-explorer-page__eyebrow {
@@ -40,14 +32,6 @@
   font-weight: 500;
   font-size: clamp(2rem, 5vw, 3.3rem);
   letter-spacing: -0.05em;
-}
-
-.state-explorer-page__scope {
-  max-width: 660px;
-  margin: 10px 0 0;
-  color: var(--tt-ink-mid);
-  font-size: 0.88rem;
-  line-height: 1.55;
 }
 
 .state-explorer-page__empty button {
@@ -230,7 +214,7 @@
 
 .state-explorer-page__comparison-panel--ideal h2,
 .state-explorer-page__comparison-panel--ideal h3 {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
 }
 
 .state-explorer-page__section-heading {
@@ -284,10 +268,6 @@
     padding: 24px 16px 40px;
   }
 
-  .state-explorer-page__header {
-    flex-direction: column;
-  }
-
   .state-explorer-page__section-heading {
     flex-direction: column;
   }
@@ -302,20 +282,15 @@
   color: var(--tt-ink);
 }
 
-.state-explorer-page__header {
-  padding-bottom: 16px;
-  border-bottom: var(--tt-bar) solid var(--tt-accent);
-}
-
 .state-explorer-page__eyebrow {
   display: inline-block;
   padding: 0;
   margin-bottom: 10px;
   border: 0;
   background: none;
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -327,16 +302,6 @@
 
 .state-explorer-page__eyebrow::after {
   content: ' ]';
-}
-
-.state-explorer-page__header h1 {
-  color: var(--tt-ink);
-  font-family: var(--tt-macro);
-  font-size: clamp(1.9rem, 4.5vw, 3.2rem);
-  font-weight: 900;
-  line-height: 0.88;
-  letter-spacing: -0.045em;
-  text-transform: uppercase;
 }
 
 /* 環境レートのパネル。診断カードのレート表示と見た目を揃える。 */
@@ -392,4 +357,25 @@
   background: rgb(var(--tt-ink-mid-rgb) / 0.08);
   color: var(--tt-ink);
   font-size: 0.8rem;
+}
+
+/* ツール箱の追加指標 */
+.state-explorer-page__toolbox-note {
+  margin: 0 0 10px;
+  color: var(--tt-ink-mid);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+/* 図の文字は viewBox ごと縮むので、横に並べず縦に積んで読める大きさを保つ。 */
+.state-explorer-page__toolbox-multiples {
+  display: grid;
+  gap: 16px;
+}
+
+.state-explorer-page__toolbox-multiples h3 {
+  margin: 0 0 4px;
+  color: var(--tt-ink);
+  font-family: var(--tt-mono);
+  font-size: 0.86rem;
 }

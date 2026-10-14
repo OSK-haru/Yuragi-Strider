@@ -5,6 +5,31 @@ description: Raw mechanical interfaces fusing Swiss typographic print with milit
 
 # SKILL: Industrial Brutalism & Tactical Telemetry UI
 
+## 0. Project Overrides (Yuragi-Strider) — read first
+This project is an experiential simulator whose screens are also used to read research data. Where the sections below conflict with these rules, **these rules win**. The aesthetic is kept; it may not cost legibility or correct reading of data.
+
+### 0.1 Red is a signal, not decoration
+*   Reserve the accent red for **alarm, error, destructive actions, hazard framing, and the attack simulator's warnings**. If everything is red, a real warning is invisible (IEC 60073 / ISO 9241 color-meaning convention).
+*   Interaction states (hover, active, selected, current navigation) use **ink inversion** (ink fill, void text) or a stronger ink border — not red.
+*   Focus indication uses a 2px ink outline with offset, visible on every focusable element (WCAG 2.4.7). Never remove `outline` without an equal replacement.
+*   Red used as text must use `--tt-accent-text`, which meets 4.5:1 on the dark substrate.
+
+### 0.2 Data encoding is not branding
+*   Never encode a data value (sign, phase, magnitude) with the accent red alone. Use the gate-family hues (`--gate-rotation-rgb` blue, `--gate-phase-rgb` amber) and ink.
+*   Signed values use one diverging convention across **all** views: **positive = accent red, negative = `--gate-rotation-rgb` blue**, unsigned magnitude = ink. Selection/hover frames on data cells are ink + void double lines, never red.
+*   Cyclic quantities (phase) use a cyclic ramp where −π and +π share a color (`frontend/src/utils/phaseColor.ts`). Never a linear ramp.
+*   Dithering/posterization is allowed on data only when the exact value is available on hover/focus and in export.
+
+### 0.3 Legibility floor (overrides §3.2)
+*   Text contrast: WCAG 2.2 AA — 4.5:1 for body and small text, 3:1 for large text and non-text UI. `--tt-ink-faint` is for disabled states and pure decoration only, never for readable text or placeholders.
+*   Minimum font size 0.68rem. The "small, wide-tracked, uppercase" micro style is for short labels and IDs, not sentences.
+*   Uppercase casing has no effect on Japanese; do not rely on it for hierarchy. `<html lang="ja">`.
+
+### 0.4 Scope adjustments
+*   Both light and dark themes exist and are maintained (overrides the single-substrate rule in §4). Each theme must pass 0.3 on its own.
+*   A small `--tt-radius` is already in use; do not churn it either way.
+*   Analog effects (§7: scanlines, noise, halftone) stay off data plots and text blocks, and all motion respects `prefers-reduced-motion`.
+
 ## 1. Skill Meta
 **Name:** Industrial Brutalism & Tactical Telemetry Interface Engineering
 **Description:** Advanced proficiency in architecting web interfaces that synthesize mid-century Swiss Typographic design, industrial manufacturing manuals, and retro-futuristic aerospace/military terminal interfaces. This discipline requires absolute mastery over rigid modular grids, extreme typographic scale contrast, purely utilitarian color palettes, and the programmatic simulation of analog degradation (halftones, CRT scanlines, bitmap dithering). The objective is to construct digital environments that project raw functionality, mechanical precision, and high data density, deliberately discarding conventional consumer UI patterns.
@@ -54,7 +79,7 @@ The color architecture is uncompromising. Gradients, soft drop shadows, and mode
 ### If Swiss Industrial Print (Light):
 *   **Background:** `#F4F4F0` or `#EAE8E3` (Matte, unbleached documentation paper).
 *   **Foreground:** `#050505` to `#111111` (Carbon Ink).
-*   **Accent:** `#E61919` or `#FF2A2A` (Aviation/Hazard Red). This is the ONLY accent color. Used for strike-throughs, thick structural dividing lines, or vital data highlights.
+*   **Accent:** `#E61919` or `#FF2A2A` (Aviation/Hazard Red). This is the ONLY accent color (data views may also use the gate-family hues; see §0.2). Used for strike-throughs, thick structural dividing lines, or vital data highlights.
 
 ### If Tactical Telemetry (Dark):
 *   **Background:** `#0A0A0A` or `#121212` (Deactivated CRT. Avoid pure `#000000`).

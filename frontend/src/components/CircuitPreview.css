@@ -180,17 +180,17 @@
 }
 
 .circuit-preview__slot-group--selected .circuit-preview__slot {
-  stroke: var(--tt-accent);
+  stroke: var(--tt-interact);
   stroke-width: 1.8;
 }
 
 .circuit-preview__slot-group--selected .circuit-preview__gate {
-  stroke: var(--tt-accent);
+  stroke: var(--tt-interact);
   stroke-width: 2.4;
 }
 
 .circuit-preview__slot-group--selected .circuit-preview__gate--measure {
-  stroke: var(--tt-accent);
+  stroke: var(--tt-interact);
 }
 
 .circuit-preview__slot--pending-control {
@@ -227,12 +227,12 @@
 .circuit-preview__cnot-overlay--selected .circuit-preview__cnot-line,
 .circuit-preview__cnot-overlay--selected .circuit-preview__target-ring,
 .circuit-preview__cnot-overlay--selected .circuit-preview__target-cross {
-  stroke: var(--tt-accent);
+  stroke: var(--tt-interact);
   stroke-width: 2.4;
 }
 
 .circuit-preview__cnot-overlay--selected .circuit-preview__control-dot {
-  fill: var(--tt-accent);
+  fill: var(--tt-interact);
 }
 
 .circuit-preview__gate {
@@ -395,7 +395,7 @@
 }
 
 .circuit-preview__cnot-line--selected {
-  stroke: var(--tt-accent);
+  stroke: var(--tt-interact);
   stroke-width: 2.4;
 }
 
@@ -408,7 +408,7 @@
 }
 
 .circuit-preview__register-line--selected {
-  stroke: var(--tt-accent);
+  stroke: var(--tt-interact);
   stroke-width: 2.4;
 }
 
@@ -426,7 +426,7 @@
 }
 
 .circuit-preview__register-box--selected {
-  stroke: var(--tt-accent);
+  stroke: var(--tt-interact);
   stroke-width: 2.4;
 }
 
@@ -441,7 +441,7 @@
 }
 
 .circuit-preview__register-label--selected {
-  fill: var(--tt-accent);
+  fill: var(--tt-interact);
 }
 
 .circuit-preview__draw-preview-line {
@@ -515,11 +515,11 @@
 }
 
 .circuit-preview__insert-marker--active .circuit-preview__insert-band {
-  fill: rgb(var(--tt-accent-rgb) / 0.14);
+  fill: rgb(var(--tt-interact-rgb) / 0.14);
 }
 
 .circuit-preview__insert-marker--active .circuit-preview__insert-line {
-  stroke: var(--tt-accent);
+  stroke: var(--tt-interact);
   stroke-width: 3.4;
   stroke-dasharray: none;
 }

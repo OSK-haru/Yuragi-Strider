@@ -15,7 +15,7 @@
 }
 
 .density-matrix-canvas__surface:focus-visible {
-  outline: var(--tt-bar) solid var(--tt-accent);
+  outline: var(--tt-bar) solid var(--tt-interact);
   outline-offset: 2px;
 }
 
@@ -25,7 +25,7 @@
   width: min(100%, 640px);
   color: var(--tt-ink-dim);
   font-family: var(--tt-mono);
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   letter-spacing: 0.14em;
 }
 
@@ -34,7 +34,7 @@
   margin: 0;
   color: var(--tt-ink-dim);
   font-family: var(--tt-mono);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   letter-spacing: 0.08em;
 }
 

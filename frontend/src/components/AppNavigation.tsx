@@ -5,14 +5,10 @@ import { documentationLinks } from '../utils/documentationLinks'
 
 export type NavigationRoute =
   | 'home'
-  | 'simulate'
-  | 'algorithm-library'
-  | 'circuit-studio'
-  | 'state-explorer'
-  | 'pulse-lab'
-  | 'pulse-circuit-studio'
-  | 'pulse-state-explorer'
+  | 'gate-aware-ide'
+  | 'pulse-ide'
   | 'help'
+  | 'attack-simulator'
 
 type AppNavigationProps = {
   currentRoute: NavigationRoute
@@ -22,61 +18,69 @@ type AppNavigationProps = {
 type NavigationItem = { route: NavigationRoute; label: string; detail: string }
 
 const homeItem: NavigationItem = { route: 'home', label: 'ホーム', detail: 'Yuragi-Strider' }
+const attackItem: NavigationItem = { route: 'attack-simulator', label: '攻撃シミュレーター', detail: '環境設定 / live操作' }
 
 const gateAwareItems: NavigationItem[] = [
-  { route: 'simulate', label: 'シミュレーションワークスペース', detail: 'Gate-aware' },
-  { route: 'algorithm-library', label: 'アルゴリズム一覧', detail: 'Algorithm Library' },
-  { route: 'circuit-studio', label: '回路スタジオ', detail: 'Circuit Studio' },
-  { route: 'state-explorer', label: '状態エクスプローラー', detail: 'State Explorer' },
+  { route: 'gate-aware-ide', label: 'IDEワークスペース', detail: '回路・実行・状態エクスプローラー' },
   { route: 'help', label: 'ヘルプ / Q&A', detail: 'Guide' },
 ]
 
 const pulseItems: NavigationItem[] = [
-  { route: 'pulse-lab', label: 'Pulseラボ', detail: 'Pulseワークスペース' },
-  { route: 'pulse-circuit-studio', label: 'Pulse 回路スタジオ', detail: 'Pulseシーケンスエディター' },
-  { route: 'pulse-state-explorer', label: 'Pulse 状態エクスプローラー', detail: 'Pulse State Explorer' },
+  { route: 'pulse-ide', label: 'Pulse IDE', detail: 'Pulse 回路・実行・状態エクスプローラー' },
 ]
 
 /* レール左側に出す、現在地の機械的な呼称。 */
 const routeDesignations: Record<NavigationRoute, string> = {
   home: 'IDX / PRIMARY TERMINAL',
-  simulate: 'SIM / GATE-AWARE',
-  'algorithm-library': 'LIB / ALGORITHMS',
-  'circuit-studio': 'EDT / CIRCUIT',
-  'state-explorer': 'OBS / STATE VECTOR',
-  'pulse-lab': 'PLS / WAVEFORM LAB',
-  'pulse-circuit-studio': 'PLS / SEQUENCE EDITOR',
-  'pulse-state-explorer': 'OBS / PULSE TRAJECTORY',
+  'gate-aware-ide': 'IDE / GATE-AWARE',
+  'pulse-ide': 'IDE / PULSE',
   help: 'DOC / GUIDE',
+  'attack-simulator': 'ATK / SHARED SERVICE',
 }
 
-type NavigationDomain = 'home' | 'gate-aware' | 'pulse'
+type NavigationDomain = 'home' | 'gate-aware' | 'pulse' | 'attack'
 
 function navigationDomainForRoute(route: NavigationRoute): NavigationDomain {
+  if (route === 'attack-simulator') return 'attack'
   if (route === 'home') {
     return 'home'
   }
-  return route === 'pulse-lab'
-    || route === 'pulse-circuit-studio'
-    || route === 'pulse-state-explorer'
+  return route === 'pulse-ide'
     ? 'pulse'
     : 'gate-aware'
 }
 
-function navigationItemsForRoute(route: NavigationRoute): NavigationItem[] {
-  const domain = navigationDomainForRoute(route)
-  if (domain === 'home') {
-    return [homeItem, ...gateAwareItems, ...pulseItems]
-  }
-  return domain === 'pulse'
-    ? [homeItem, ...pulseItems]
-    : [homeItem, ...gateAwareItems]
+/* メニューは3つのフォルダに分ける。現在地のフォルダだけ開いた状態で始める。 */
+type NavigationGroup = {
+  domain: Exclude<NavigationDomain, 'home'>
+  label: string
+  detail: string
+  items: NavigationItem[]
 }
+
+const navigationGroups: NavigationGroup[] = [
+  { domain: 'gate-aware', label: '通常モード', detail: 'Gate-aware', items: gateAwareItems },
+  { domain: 'attack', label: '攻撃シミュレーター', detail: 'Attack', items: [attackItem] },
+  { domain: 'pulse', label: 'Pulseモード', detail: 'Pulse', items: pulseItems },
+]
 
 export function AppNavigation({ currentRoute, onNavigate }: AppNavigationProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const navigationItems = navigationItemsForRoute(currentRoute)
   const domain = navigationDomainForRoute(currentRoute)
+  const [openGroups, setOpenGroups] = useState<NavigationDomain[]>([domain])
+
+  // Opening the group of the current route is derived while rendering, not in an effect.
+  const [shownDomain, setShownDomain] = useState(domain)
+  if (shownDomain !== domain) {
+    setShownDomain(domain)
+    setOpenGroups((open) => (open.includes(domain) ? open : [...open, domain]))
+  }
+
+  function toggleGroup(group: NavigationDomain) {
+    setOpenGroups((open) =>
+      open.includes(group) ? open.filter((entry) => entry !== group) : [...open, group],
+    )
+  }
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -92,6 +96,21 @@ export function AppNavigation({ currentRoute, onNavigate }: AppNavigationProps) 
   function navigate(route: NavigationRoute) {
     setIsOpen(false)
     onNavigate(route)
+  }
+
+  function renderItem(item: NavigationItem) {
+    return (
+      <button
+        className={`app-navigation__item${currentRoute === item.route ? ' app-navigation__item--current' : ''}`}
+        type="button"
+        key={item.route}
+        aria-current={currentRoute === item.route ? 'page' : undefined}
+        onClick={() => navigate(item.route)}
+      >
+        <span>{item.label}</span>
+        <small>{item.detail}</small>
+      </button>
+    )
   }
 
   return (
@@ -143,7 +162,11 @@ export function AppNavigation({ currentRoute, onNavigate }: AppNavigationProps) 
         id="global-navigation-menu"
         className={`app-navigation__menu${isOpen ? ' app-navigation__menu--open' : ''}`}
         aria-label="ページナビゲーション"
-        aria-hidden={!isOpen}
+        /*
+         * 閉じている間は opacity 0 で見えないだけなので、aria-hidden だけだと
+         * Tab で見えない項目へフォーカスが入る。inert で操作・読み上げ両方から外す。
+         */
+        inert={!isOpen}
       >
         <div className="app-navigation__menu-header">
           <span>YURAGI-STRIDER</span>
@@ -152,21 +175,33 @@ export function AppNavigation({ currentRoute, onNavigate }: AppNavigationProps) 
               ? 'モードを選択'
               : domain === 'pulse'
                 ? 'Pulseワークスペース'
+                : domain === 'attack'
+                  ? '攻撃ワークスペース'
                 : 'Gate-awareワークスペース'}
           </small>
         </div>
-        {navigationItems.map((item) => (
-          <button
-            className={`app-navigation__item${currentRoute === item.route ? ' app-navigation__item--current' : ''}`}
-            type="button"
-            key={item.route}
-            aria-current={currentRoute === item.route ? 'page' : undefined}
-            onClick={() => navigate(item.route)}
-          >
-            <span>{item.label}</span>
-            <small>{item.detail}</small>
-          </button>
-        ))}
+        {renderItem(homeItem)}
+        {navigationGroups.map((group) => {
+          const expanded = openGroups.includes(group.domain)
+          const panelId = `global-navigation-group-${group.domain}`
+          return (
+            <div className="app-navigation__group" key={group.domain}>
+              <button
+                className={`app-navigation__folder${expanded ? ' app-navigation__folder--open' : ''}`}
+                type="button"
+                aria-expanded={expanded}
+                aria-controls={panelId}
+                onClick={() => toggleGroup(group.domain)}
+              >
+                <span>{group.label}</span>
+                <small>{group.detail}</small>
+              </button>
+              <div className="app-navigation__group-items" id={panelId} hidden={!expanded}>
+                {group.items.map(renderItem)}
+              </div>
+            </div>
+          )
+        })}
         <a
           className="app-navigation__item app-navigation__item--external"
           href={documentationLinks.home}

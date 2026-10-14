@@ -13,10 +13,12 @@ from threading import BoundedSemaphore
 from typing import Literal
 from time import perf_counter
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
+from api.attack_web_ownership import WebOwnershipSettings
 
 from api.pulse_models import (
     PulseApiRequest,
@@ -26,23 +28,143 @@ from api.pulse_service import (
     PulseExecutionLimitError,
     run_pulse_api_request as run_pulse_request,
 )
+from api.t1_sweep_service import run_t1_sweep
+from api.ramsey_sweep_service import run_ramsey_sweep
 from core.capabilities import DECLARED_PULSE_MODELS, PULSE_MODEL_STATUSES
 from core.circuit_model import CircuitAnnotation, CircuitConfig, GateColumn, GateOperation
 from core.physical_environment import INPUT_MODE_NORMALIZED, INPUT_MODE_PHYSICAL
 from core.results import EnvironmentConfig, SimulationConfig
 from core.gate_compiler import compile_gate_aware_circuit
+from core.process_characterization import (
+    MAX_MONTE_CARLO_SAMPLES,
+    MIN_MONTE_CARLO_SAMPLES,
+    characterize_process,
+)
+from core.pulse_toolbox_metrics import (
+    MAX_PULSE_TOOLBOX_OBSERVABLES,
+    MAX_TRANSMON_COUNT as PULSE_TOOLBOX_MAX_TRANSMONS,
+    PulseToolboxSpec,
+    compute_pulse_toolbox_metrics,
+    density_from_upper_triangle,
+)
 from core.simulator import run_simulation
+from core.toolbox_metrics import (
+    MAX_TOOLBOX_OBSERVABLES,
+    ToolboxSnapshotSpec,
+    compute_toolbox_snapshot_metrics,
+    validate_toolbox_spec,
+)
 from core.ui_response import compilation_response, simulation_result_to_ui_response
 
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Yuragi-Strider API", version="0.1.0")
+app.state.attack_simulator_enabled = False
+app.state.attack_simulator_profile = None
+app.state.attack_simulator_ownership_settings = None
+app.state.attack_simulator_runtime = None
+
+
+def configure_attack_simulator(
+    *, profile: str, ownership_settings: WebOwnershipSettings | None = None,
+    target_app: FastAPI | None = None,
+) -> bool:
+    """Mount the complete opt-in surface only for an explicit local profile.
+
+    All dependencies and routers are built before one include_router call. A
+    malformed attack-simulator configuration is logged and disables only this
+    subsystem; the rest of the API remains available.
+    """
+    application = app if target_app is None else target_app
+    if not isinstance(application, FastAPI):
+        raise TypeError("target_app must be a FastAPI application")
+    normalized = profile.strip().lower() if type(profile) is str else ""
+    if normalized not in {"development", "desktop", "public"}:
+        return False
+    if normalized == "public" and _worker_count() > 1:
+        # Environments and owner cookies live in this process; a second worker
+        # would answer for environments it does not hold.
+        logger.warning("Attack simulator disabled: the public profile needs exactly one worker process.")
+        return False
+    if getattr(application.state, "attack_simulator_enabled", False):
+        current = getattr(application.state, "attack_simulator_runtime", None)
+        if (getattr(application.state, "attack_simulator_profile", None) == normalized and current is not None
+                and (ownership_settings is None or current.settings == ownership_settings)):
+            return True
+        logger.warning("Attack simulator already configured; refusing a second mount.")
+        return False
+    try:
+        settings = ownership_settings
+        if settings is None:
+            if normalized == "desktop":
+                raise ValueError("desktop profile requires launcher-provided ownership settings")
+            settings = WebOwnershipSettings.from_environment()
+        if normalized == "public" and (
+                not settings.creates_per_minute or not settings.max_concurrent_evaluations
+                or any(not origin.startswith("https://") for origin in settings.allowed_origins)):
+            raise ValueError("the public profile requires WebOwnershipSettings.public() limits and HTTPS origins")
+        from api.attack_product_runtime import build_attack_simulator_runtime
+
+        runtime = build_attack_simulator_runtime(settings)
+        application.include_router(runtime.router)
+    except Exception:
+        logger.warning(
+            "Attack simulator disabled because its local profile is invalid or unavailable.",
+            exc_info=True,
+        )
+        application.state.attack_simulator_enabled = False
+        application.state.attack_simulator_profile = None
+        application.state.attack_simulator_ownership_settings = None
+        application.state.attack_simulator_runtime = None
+        return False
+    application.state.attack_simulator_enabled = True
+    application.state.attack_simulator_profile = normalized
+    application.state.attack_simulator_ownership_settings = settings
+    application.state.attack_simulator_runtime = runtime
+    return True
+
+
+def _worker_count() -> int:
+    """Worker processes requested by the usual launcher variables (default one)."""
+    counts = []
+    for name in ("WEB_CONCURRENCY", "UVICORN_WORKERS"):
+        try:
+            counts.append(int(os.environ.get(name, "1") or "1"))
+        except ValueError:
+            counts.append(2)  # An unparseable value cannot be proven to be one worker.
+    return max(counts)
+
+
+def _configure_attack_simulator_from_environment() -> None:
+    profile = os.environ.get("ATTACK_SIMULATOR_PROFILE", "generic").strip().lower()
+    if profile == "generic":
+        return
+    if profile not in {"development", "public"}:
+        logger.warning(
+            "Attack simulator disabled: ATTACK_SIMULATOR_PROFILE must be generic, development or public."
+        )
+        return
+    configure_attack_simulator(profile=profile)
+
+
+app.router.on_startup.append(_configure_attack_simulator_from_environment)
 
 # The API only accepts compact circuit descriptions.  This limit is enforced
 # while the ASGI body is being received, including chunked requests, so a
 # client cannot exhaust memory before Pydantic validates the JSON structure.
 MAX_API_REQUEST_BODY_BYTES = 64 * 1024
+# The Pulse toolbox takes the density matrices of a finished run (up to
+# PULSE_TOOLBOX_MAX_MATRIX_ELEMENTS complex entries), which a compact circuit
+# description never needs. Only that route gets the larger budget; every other
+# route keeps the default.
+PULSE_TOOLBOX_PATH = "/api/analysis/pulse-toolbox"
+# The toolbox is cheap per request, but a request can carry millions of floats.
+# A small dedicated budget keeps a burst of them from exhausting memory or
+# starving the simulation slots.
+PULSE_TOOLBOX_MAX_CONCURRENT_REQUESTS = 2
+_PULSE_TOOLBOX_EXECUTION_SLOTS = BoundedSemaphore(PULSE_TOOLBOX_MAX_CONCURRENT_REQUESTS)
+MAX_PULSE_TOOLBOX_REQUEST_BODY_BYTES = 6 * 1024 * 1024
 
 
 class _RequestBodyTooLarge(Exception):
@@ -52,24 +174,31 @@ class _RequestBodyTooLarge(Exception):
 class RequestBodyLimitMiddleware:
     """Reject oversized HTTP bodies before they reach JSON parsing."""
 
-    def __init__(self, app: object, max_body_bytes: int) -> None:
+    def __init__(
+        self,
+        app: object,
+        max_body_bytes: int,
+        path_limits: dict[str, int] | None = None,
+    ) -> None:
         self.app = app
         self.max_body_bytes = max_body_bytes
+        self.path_limits = dict(path_limits or {})
 
     async def __call__(self, scope: object, receive: object, send: object) -> None:
         if not isinstance(scope, dict) or scope.get("type") != "http":
             await self.app(scope, receive, send)  # type: ignore[misc]
             return
 
+        max_body_bytes = self.path_limits.get(str(scope.get("path", "")), self.max_body_bytes)
         headers = dict(scope.get("headers", []))
         raw_content_length = headers.get(b"content-length")
         if raw_content_length is not None:
             try:
-                if int(raw_content_length) > self.max_body_bytes:
-                    await self._send_too_large(send)
+                if int(raw_content_length) > max_body_bytes:
+                    await self._send_too_large(scope, receive, send, max_body_bytes)
                     return
             except ValueError:
-                await self._send_too_large(send)
+                await self._send_too_large(scope, receive, send, max_body_bytes)
                 return
 
         received_bytes = 0
@@ -79,31 +208,38 @@ class RequestBodyLimitMiddleware:
             message = await receive()  # type: ignore[misc]
             if isinstance(message, dict) and message.get("type") == "http.request":
                 received_bytes += len(message.get("body", b""))
-                if received_bytes > self.max_body_bytes:
+                if received_bytes > max_body_bytes:
                     raise _RequestBodyTooLarge
             return message
 
         try:
             await self.app(scope, limited_receive, send)  # type: ignore[misc]
         except _RequestBodyTooLarge:
-            await self._send_too_large(send)
+            await self._send_too_large(scope, receive, send, max_body_bytes)
 
-    async def _send_too_large(self, send: object) -> None:
+    async def _send_too_large(
+        self,
+        scope: object,
+        receive: object,
+        send: object,
+        max_body_bytes: int,
+    ) -> None:
         response = JSONResponse(
             status_code=413,
             content={
                 "detail": {
                     "message": "Request body exceeds the API size limit.",
-                    "maximum_bytes": self.max_body_bytes,
+                    "maximum_bytes": max_body_bytes,
                 }
             },
         )
-        await response({}, None, send)  # type: ignore[arg-type]
+        await response(scope, receive, send)  # type: ignore[arg-type]
 
 
 app.add_middleware(
     RequestBodyLimitMiddleware,
     max_body_bytes=MAX_API_REQUEST_BODY_BYTES,
+    path_limits={PULSE_TOOLBOX_PATH: MAX_PULSE_TOOLBOX_REQUEST_BODY_BYTES},
 )
 
 # Local dev (Vite) and the desktop-app launcher serve the frontend from the
@@ -125,11 +261,74 @@ if _ALLOWED_ORIGINS:
     )
 
 
+# JSON API responses never need to load or run anything.
+API_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+
+# The desktop launcher serves the built UI from this same app. Mirror the
+# hosted worker's policy (frontend/src/worker.ts), but allow connections only
+# to this same origin: the local UI never talks to the hosted API.
+LOCAL_UI_CONTENT_SECURITY_POLICY = "; ".join((
+    "default-src 'self'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: blob:",
+    "connect-src 'self'",
+))
+
+
+# The attack simulator runs user scripts in a dedicated Worker with Pyodide
+# (frontend/src/scripting/pythonWorker.ts). Pyodide compiles WebAssembly and
+# evaluates its own generated JS, and loads extra packages such as numpy from the
+# official CDN (each checked against the bundled lock file's SHA-256). Only the
+# Worker and Pyodide files under this prefix get the looser policy; the page
+# itself keeps LOCAL_UI_CONTENT_SECURITY_POLICY.
+PYTHON_RUNTIME_PREFIX = "/assets/python-runtime/"
+PYTHON_RUNTIME_PACKAGE_ORIGIN = "https://cdn.jsdelivr.net"
+PYTHON_RUNTIME_CONTENT_SECURITY_POLICY = "; ".join((
+    "default-src 'self'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'",
+    f"connect-src 'self' {PYTHON_RUNTIME_PACKAGE_ORIGIN}",
+))
+# SharedArrayBuffer, which the script runner needs, requires a cross-origin
+# isolated page. The Vite dev server sends the same pair (frontend/vite.config.ts).
+CROSS_ORIGIN_ISOLATION_HEADERS = {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+}
+
+
+def _is_api_path(path: str) -> bool:
+    return path == "/api" or path.startswith("/api/")
+
+
+# FastAPI's developer docs load Swagger/ReDoc from a CDN with inline scripts;
+# they keep their previous behaviour rather than a policy that would blank them.
+_DOCS_PATHS = frozenset({"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"})
+
+
 @app.middleware("http")
 async def add_api_security_headers(request: Request, call_next: object):
-    """Apply browser-hardening headers to every API response."""
+    """Apply browser-hardening headers to every API and desktop UI response."""
 
     response = await call_next(request)  # type: ignore[misc]
+    path = request.url.path
+    if path not in _DOCS_PATHS:
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            API_CONTENT_SECURITY_POLICY if _is_api_path(path)
+            else PYTHON_RUNTIME_CONTENT_SECURITY_POLICY if path.startswith(PYTHON_RUNTIME_PREFIX)
+            else LOCAL_UI_CONTENT_SECURITY_POLICY,
+        )
+        if not _is_api_path(path):
+            for name, value in CROSS_ORIGIN_ISOLATION_HEADERS.items():
+                response.headers.setdefault(name, value)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -300,6 +499,13 @@ class ReadoutErrorRequest(BaseModel):
     per_qubit: list[ReadoutErrorQubitRequest] = Field(default_factory=list)
 
 
+class QubitCoherenceRequest(BaseModel):
+    """Per-qubit coherence maxima overriding the shared physical defaults."""
+
+    t1_max_us: float = Field(gt=0.0)
+    tphi_max_us: float = Field(gt=0.0)
+
+
 class SimulationParametersRequest(BaseModel):
     normalized_temperature: float | None = Field(default=None, ge=0.0, le=1.0)
     normalized_magnetic_field: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -310,6 +516,7 @@ class SimulationParametersRequest(BaseModel):
     qubit_frequency_ghz: float | None = Field(default=None, gt=0.0)
     t1_max_us: float | None = Field(default=None, gt=0.0)
     tphi_max_us: float | None = Field(default=None, gt=0.0)
+    per_qubit: list[QubitCoherenceRequest] = Field(default_factory=list, max_length=18)
     ideal_reference: bool = False
     duration_us: float | None = Field(default=None, gt=0.0, le=MAX_API_DURATION_US)
     time_steps: int | None = Field(default=None, ge=2, le=MAX_API_TIME_STEPS)
@@ -553,6 +760,89 @@ class CircuitConfigRequest(BaseModel):
         return self
 
 
+class ToolboxRequest(BaseModel):
+    """Extra per-snapshot metrics requested before the run.
+
+    Each field is off when omitted. Which subsets are meaningful (and which
+    would only repeat a value the explorer already shows) is decided by
+    core.toolbox_metrics, so the request model only bounds sizes.
+    """
+
+    entropy_qubits: list[int] | None = Field(default=None, max_length=18)
+    concurrence_qubits: list[int] | None = Field(default=None, max_length=2)
+    negativity_subsystem: list[int] | None = Field(default=None, max_length=18)
+    mutual_information_a: list[int] | None = Field(default=None, max_length=18)
+    mutual_information_b: list[int] | None = Field(default=None, max_length=18)
+    trace_distance: bool = False
+    observables: list[str] = Field(default_factory=list, max_length=MAX_TOOLBOX_OBSERVABLES)
+
+    def to_spec(self) -> ToolboxSnapshotSpec:
+        def subset(value: list[int] | None) -> tuple[int, ...] | None:
+            return None if value is None else tuple(value)
+
+        return ToolboxSnapshotSpec(
+            entropy_qubits=subset(self.entropy_qubits),
+            concurrence_qubits=subset(self.concurrence_qubits),
+            negativity_subsystem=subset(self.negativity_subsystem),
+            mutual_information_a=subset(self.mutual_information_a),
+            mutual_information_b=subset(self.mutual_information_b),
+            trace_distance=self.trace_distance,
+            observables=tuple(self.observables),
+        )
+
+
+
+# Pulse trajectories keep one density matrix per sample. The cap matches the
+# Pulse network response budget, so a result the API produced always fits.
+PULSE_TOOLBOX_MAX_POINTS = 2000
+PULSE_TOOLBOX_MAX_MATRIX_ELEMENTS = 250_000
+
+
+class PulseToolboxMatrix(BaseModel):
+    """One Hermitian matrix as its upper triangle, row by row, diagonal included."""
+
+    upper_real: list[float]
+    upper_imag: list[float]
+
+
+class PulseToolboxRequest(BaseModel):
+    """Extra metrics for a finished Pulse run, computed from its density matrices.
+
+    The run itself is not repeated. The client sends the density matrices it
+    already holds, so the metrics also work for an imported result and can be
+    changed without running the simulation again. Which subsets are meaningful
+    is decided by core.pulse_toolbox_metrics; this model only bounds sizes.
+    """
+
+    local_levels: Literal[2, 3]
+    transmon_count: int = Field(ge=1, le=PULSE_TOOLBOX_MAX_TRANSMONS)
+    times_us: list[float] = Field(min_length=1, max_length=PULSE_TOOLBOX_MAX_POINTS)
+    density_matrices: list[PulseToolboxMatrix] = Field(
+        min_length=1, max_length=PULSE_TOOLBOX_MAX_POINTS
+    )
+    entropy_transmons: list[int] | None = Field(default=None, max_length=4)
+    concurrence_transmons: list[int] | None = Field(default=None, max_length=2)
+    negativity_subsystem: list[int] | None = Field(default=None, max_length=4)
+    mutual_information_a: list[int] | None = Field(default=None, max_length=4)
+    mutual_information_b: list[int] | None = Field(default=None, max_length=4)
+    observables: list[str] = Field(
+        default_factory=list, max_length=MAX_PULSE_TOOLBOX_OBSERVABLES
+    )
+
+    def to_spec(self) -> PulseToolboxSpec:
+        def subset(value: list[int] | None) -> tuple[int, ...] | None:
+            return None if value is None else tuple(value)
+
+        return PulseToolboxSpec(
+            entropy_transmons=subset(self.entropy_transmons),
+            concurrence_transmons=subset(self.concurrence_transmons),
+            negativity_subsystem=subset(self.negativity_subsystem),
+            mutual_information_a=subset(self.mutual_information_a),
+            mutual_information_b=subset(self.mutual_information_b),
+            observables=tuple(self.observables),
+        )
+
+
 class SimulateRequest(BaseModel):
     circuit_preset: Literal["bell", "teleportation", "bit_flip_repetition"] | None = None
     simulation_backend: Literal["python_dense", "rust_dense_preview"]
@@ -574,6 +864,7 @@ class SimulateRequest(BaseModel):
     )
     readout_error: ReadoutErrorRequest | None = None
     parameters: SimulationParametersRequest
+    toolbox: ToolboxRequest | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -605,6 +896,207 @@ class SimulateRequest(BaseModel):
             if duration_us is not None and any(isinstance(time_us, (int, float)) and time_us > duration_us for time_us in (snapshot_options.get("custom_times_us") or [])):
                 raise ValueError("snapshot_options.custom_times_us must not exceed parameters.duration_us")
         return values
+
+    @model_validator(mode="after")
+    def validate_per_qubit_calibration(self) -> "SimulateRequest":
+        qubit_count = (
+            self.circuit_config.logical_qubits
+            if self.circuit_config is not None
+            else {"bell": 2, "teleportation": 3, "bit_flip_repetition": 3}.get(
+                self.circuit_preset or "bell", 2
+            )
+        )
+        if self.parameters.per_qubit:
+            if self.input_mode != INPUT_MODE_PHYSICAL:
+                raise ValueError("parameters.per_qubit requires physical input_mode")
+            if len(self.parameters.per_qubit) != qubit_count:
+                raise ValueError(
+                    "parameters.per_qubit must match circuit logical_qubits "
+                    f"({qubit_count})"
+                )
+        if self.readout_error is not None and self.readout_error.per_qubit:
+            if len(self.readout_error.per_qubit) != qubit_count:
+                raise ValueError(
+                    "readout_error.per_qubit must match circuit logical_qubits "
+                    f"({qubit_count})"
+                )
+            for index, entry in enumerate(self.readout_error.per_qubit):
+                if entry.p10 + entry.p01 >= 1.0:
+                    raise ValueError(
+                        f"readout_error.per_qubit[{index}] assignment span must be positive"
+                    )
+        elif self.readout_error is not None:
+            if self.readout_error.p10 + self.readout_error.p01 >= 1.0:
+                raise ValueError("readout_error assignment span must be positive")
+        if self.toolbox is not None:
+            validate_toolbox_spec(self.toolbox.to_spec(), qubit_count)
+        return self
+
+
+class ProcessCharacterizationRequest(SimulateRequest):
+    """The same circuit and environment as /api/simulate, plus estimator controls."""
+
+    monte_carlo_samples: int = Field(
+        default=64,
+        ge=MIN_MONTE_CARLO_SAMPLES,
+        le=MAX_MONTE_CARLO_SAMPLES,
+    )
+    monte_carlo_seed: int = Field(default=0, ge=0, le=2 ** 32 - 1)
+    include_process_matrix: bool = True
+
+
+class T1SweepRequest(BaseModel):
+    simulation_backend: Literal["python_dense", "rust_dense_preview"] = "python_dense"
+    evolution_method: Literal["fixed_step_rk4", "explicit_cptp"] = "fixed_step_rk4"
+    maximum_delay_us: float = Field(default=300.0, gt=0.0, le=MAX_API_DURATION_US)
+    point_count: int = Field(default=31, ge=5, le=101)
+    parameters: SimulationParametersRequest
+    readout_error: ReadoutErrorRequest | None = None
+
+    @model_validator(mode="after")
+    def validate_t1_sweep(self) -> "T1SweepRequest":
+        required = (
+            "device_quality",
+            "temperature_mk",
+            "flux_noise_phi0",
+            "qubit_frequency_ghz",
+            "t1_max_us",
+            "tphi_max_us",
+        )
+        missing = [name for name in required if getattr(self.parameters, name) is None]
+        if missing:
+            raise ValueError(
+                "parameters missing required physical fields for T1 sweep: "
+                + ", ".join(missing)
+            )
+        if self.readout_error is not None:
+            entries = self.readout_error.per_qubit
+            if len(entries) > 1:
+                raise ValueError(
+                    "T1 sweep readout_error.per_qubit accepts exactly one entry"
+                )
+            selected = entries[0] if entries else self.readout_error
+            if selected.p10 + selected.p01 >= 1.0:
+                raise ValueError("readout assignment span must be positive")
+        return self
+
+
+class T1SweepPointResponse(BaseModel):
+    delay_us: float
+    true_p1: float
+    observed_p1: float
+    fitted_observed_p1: float
+    residual: float
+
+
+class T1SweepFitResponse(BaseModel):
+    amplitude: float
+    observation_floor: float
+    t1_us: float
+    root_mean_square_error: float
+    maximum_absolute_error: float
+    r_squared: float | None
+
+
+class T1SweepReferenceResponse(BaseModel):
+    t1_effective_us: float | None
+    gamma_population_relaxation_per_us: float | None
+    temperature_mk: float
+
+
+class T1SweepReadoutResponse(BaseModel):
+    enabled: bool
+    p10: float
+    p01: float
+
+
+class T1SweepResponse(BaseModel):
+    schema_version: Literal["t1-sweep-v1"]
+    model: Literal["single_exponential_with_observation_floor"]
+    points: list[T1SweepPointResponse]
+    fit: T1SweepFitResponse
+    reference: T1SweepReferenceResponse
+    readout: T1SweepReadoutResponse
+    diagnostics: dict[str, object]
+
+
+class RamseySweepRequest(BaseModel):
+    simulation_backend: Literal["python_dense", "rust_dense_preview"] = "python_dense"
+    evolution_method: Literal["fixed_step_rk4", "explicit_cptp"] = "fixed_step_rk4"
+    maximum_delay_us: float = Field(default=300.0, gt=0.0, le=MAX_API_DURATION_US)
+    point_count: int = Field(default=61, ge=9, le=101)
+    detuning_mhz: float = Field(default=0.01, gt=0.0, le=1.0)
+    parameters: SimulationParametersRequest
+    readout_error: ReadoutErrorRequest | None = None
+
+    @model_validator(mode="after")
+    def validate_ramsey_sweep(self) -> "RamseySweepRequest":
+        required = (
+            "device_quality",
+            "temperature_mk",
+            "flux_noise_phi0",
+            "qubit_frequency_ghz",
+            "t1_max_us",
+            "tphi_max_us",
+        )
+        missing = [name for name in required if getattr(self.parameters, name) is None]
+        if missing:
+            raise ValueError(
+                "parameters missing required physical fields for Ramsey sweep: "
+                + ", ".join(missing)
+            )
+        sample_interval = self.maximum_delay_us / (self.point_count - 1)
+        if self.detuning_mhz >= 0.5 / sample_interval:
+            raise ValueError(
+                "detuning_mhz must stay below the sweep Nyquist frequency; "
+                "increase point_count or reduce maximum_delay_us"
+            )
+        if self.readout_error is not None:
+            entries = self.readout_error.per_qubit
+            if len(entries) > 1:
+                raise ValueError(
+                    "Ramsey sweep readout_error.per_qubit accepts exactly one entry"
+                )
+            selected = entries[0] if entries else self.readout_error
+            if selected.p10 + selected.p01 >= 1.0:
+                raise ValueError("readout assignment span must be positive")
+        return self
+
+
+class RamseySweepPointResponse(T1SweepPointResponse):
+    pass
+
+
+class RamseyFitResponse(BaseModel):
+    model: Literal["exponential_envelope", "gaussian_envelope"]
+    envelope_power: Literal[1.0, 2.0]
+    amplitude: float
+    observation_floor: float
+    t2_star_us: float
+    frequency_mhz: float
+    phase_rad: float
+    root_mean_square_error: float
+    maximum_absolute_error: float
+    r_squared: float | None
+    aicc: float
+    delta_aicc: float
+
+
+class RamseyReferenceResponse(BaseModel):
+    t2_effective_us: float | None
+    detuning_mhz: float
+    temperature_mk: float
+
+
+class RamseySweepResponse(BaseModel):
+    schema_version: Literal["ramsey-sweep-v1"]
+    selected_model: Literal["exponential_envelope", "gaussian_envelope"]
+    points: list[RamseySweepPointResponse]
+    fit: RamseyFitResponse
+    candidate_ranking_by_aicc: list[RamseyFitResponse]
+    reference: RamseyReferenceResponse
+    readout: T1SweepReadoutResponse
+    diagnostics: dict[str, object]
 
 
 class CompilePreviewRequest(BaseModel):
@@ -864,6 +1356,13 @@ def build_config_from_simulate_request(request: SimulateRequest) -> SimulationCo
             ),
             t1_max_us=_required(parameters.t1_max_us, "t1_max_us"),
             tphi_max_us=_required(parameters.tphi_max_us, "tphi_max_us"),
+            per_qubit=[
+                {
+                    "t1_max_us": entry.t1_max_us,
+                    "tphi_max_us": entry.tphi_max_us,
+                }
+                for entry in parameters.per_qubit
+            ],
             ideal_reference=parameters.ideal_reference,
         )
     else:
@@ -1128,6 +1627,261 @@ def pulse_simulate(request: PulseApiRequest) -> dict[str, object]:
         ) from exc
 
 
+@app.post(
+    "/api/analysis/t1-sweep",
+    response_model=T1SweepResponse,
+    responses={
+        422: {"description": "Invalid T1 sweep request."},
+        503: {"description": "Simulation capacity is busy."},
+        504: {"description": "T1 sweep exceeded the API timeout."},
+    },
+)
+def t1_sweep(request: T1SweepRequest) -> dict[str, object]:
+    """Run a bounded excited-state decay sweep and fit A exp(-t/T1) + B."""
+
+    if not _SIMULATE_EXECUTION_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Simulation capacity is busy.",
+                "maximum_concurrent_requests": SIMULATE_API_MAX_CONCURRENT_REQUESTS,
+            },
+        )
+    try:
+        future = _SIMULATE_EXECUTOR.submit(
+            run_t1_sweep,
+            parameters=request.parameters,
+            maximum_delay_us=request.maximum_delay_us,
+            point_count=request.point_count,
+            simulation_backend=request.simulation_backend,
+            evolution_method=request.evolution_method,
+            readout_error=request.readout_error,
+        )
+    except Exception:
+        _SIMULATE_EXECUTION_SLOTS.release()
+        raise
+    future.add_done_callback(lambda completed: _SIMULATE_EXECUTION_SLOTS.release())
+    try:
+        return future.result(timeout=SIMULATE_API_TIMEOUT_SECONDS)
+    except FuturesTimeoutError as exc:
+        future.cancel()
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "message": "T1 sweep timed out.",
+                "timeout_seconds": SIMULATE_API_TIMEOUT_SECONDS,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_failure_detail("T1 sweep request is invalid.", exc),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("T1 sweep failed.")
+        raise HTTPException(
+            status_code=500,
+            detail=_failure_detail("T1 sweep failed.", exc),
+        ) from exc
+
+
+@app.post(
+    "/api/analysis/ramsey-sweep",
+    response_model=RamseySweepResponse,
+    responses={
+        422: {"description": "Invalid Ramsey sweep request."},
+        503: {"description": "Simulation capacity is busy."},
+        504: {"description": "Ramsey sweep exceeded the API timeout."},
+    },
+)
+def ramsey_sweep(request: RamseySweepRequest) -> dict[str, object]:
+    """Run a bounded Ramsey sweep and compare exponential/Gaussian envelopes."""
+
+    if not _SIMULATE_EXECUTION_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Simulation capacity is busy.",
+                "maximum_concurrent_requests": SIMULATE_API_MAX_CONCURRENT_REQUESTS,
+            },
+        )
+    try:
+        future = _SIMULATE_EXECUTOR.submit(
+            run_ramsey_sweep,
+            parameters=request.parameters,
+            maximum_delay_us=request.maximum_delay_us,
+            point_count=request.point_count,
+            detuning_mhz=request.detuning_mhz,
+            simulation_backend=request.simulation_backend,
+            evolution_method=request.evolution_method,
+            readout_error=request.readout_error,
+        )
+    except Exception:
+        _SIMULATE_EXECUTION_SLOTS.release()
+        raise
+    future.add_done_callback(lambda completed: _SIMULATE_EXECUTION_SLOTS.release())
+    try:
+        return future.result(timeout=SIMULATE_API_TIMEOUT_SECONDS)
+    except FuturesTimeoutError as exc:
+        future.cancel()
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "message": "Ramsey sweep timed out.",
+                "timeout_seconds": SIMULATE_API_TIMEOUT_SECONDS,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_failure_detail("Ramsey sweep request is invalid.", exc),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Ramsey sweep failed.")
+        raise HTTPException(
+            status_code=500,
+            detail=_failure_detail("Ramsey sweep failed.", exc),
+        ) from exc
+
+
+def _run_process_characterization(request: ProcessCharacterizationRequest) -> dict[str, object]:
+    return characterize_process(
+        build_config_from_simulate_request(request),
+        monte_carlo_samples=request.monte_carlo_samples,
+        monte_carlo_seed=request.monte_carlo_seed,
+        include_process_matrix=request.include_process_matrix,
+    )
+
+
+@app.post(
+    "/api/analysis/process-characterization",
+    responses={
+        422: {"description": "The circuit has no unitary ideal process or is too large."},
+        503: {"description": "Simulation capacity is busy."},
+        504: {"description": "Process characterization exceeded the API timeout."},
+    },
+)
+def process_characterization(request: ProcessCharacterizationRequest) -> dict[str, object]:
+    """Average gate fidelity, plus the chi matrix up to three qubits."""
+
+    if (
+        PUBLIC_MAX_LOGICAL_QUBITS is not None
+        and request.circuit_config is not None
+        and request.circuit_config.logical_qubits > PUBLIC_MAX_LOGICAL_QUBITS
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "logical_qubits exceeds the public demo limit.",
+                "maximum_logical_qubits": PUBLIC_MAX_LOGICAL_QUBITS,
+            },
+        )
+    if not _SIMULATE_EXECUTION_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Simulation capacity is busy.",
+                "maximum_concurrent_requests": SIMULATE_API_MAX_CONCURRENT_REQUESTS,
+            },
+        )
+    try:
+        future = _SIMULATE_EXECUTOR.submit(_run_process_characterization, request)
+    except Exception:
+        _SIMULATE_EXECUTION_SLOTS.release()
+        raise
+    future.add_done_callback(lambda completed: _SIMULATE_EXECUTION_SLOTS.release())
+    try:
+        return future.result(timeout=SIMULATE_API_TIMEOUT_SECONDS)
+    except FuturesTimeoutError as exc:
+        future.cancel()
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "message": "Process characterization timed out.",
+                "timeout_seconds": SIMULATE_API_TIMEOUT_SECONDS,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_failure_detail("Process characterization request is invalid.", exc),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Process characterization failed.")
+        raise HTTPException(
+            status_code=500,
+            detail=_failure_detail("Process characterization failed.", exc),
+        ) from exc
+
+
+@app.post(
+    PULSE_TOOLBOX_PATH,
+    responses={
+        422: {"description": "Invalid Pulse toolbox request."},
+    },
+)
+def pulse_toolbox(request: PulseToolboxRequest) -> dict[str, object]:
+    """Entropy, entanglement and Pauli expectations on a Pulse run's density matrices.
+
+    The work is a handful of small eigenvalue problems per point and the request
+    size is bounded, so it runs inline instead of taking a simulation slot.
+    """
+
+    dimension = request.local_levels**request.transmon_count
+    if len(request.times_us) != len(request.density_matrices):
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "times_us and density_matrices must have the same length."},
+        )
+    if len(request.density_matrices) * dimension * dimension > PULSE_TOOLBOX_MAX_MATRIX_ELEMENTS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Too many density-matrix elements for one toolbox request.",
+                "maximum_matrix_elements": PULSE_TOOLBOX_MAX_MATRIX_ELEMENTS,
+            },
+        )
+    if not _PULSE_TOOLBOX_EXECUTION_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Pulse toolbox capacity is busy.",
+                "maximum_concurrent_requests": PULSE_TOOLBOX_MAX_CONCURRENT_REQUESTS,
+            },
+        )
+    try:
+        matrices = [
+            density_from_upper_triangle(matrix.upper_real, matrix.upper_imag, dimension)
+            for matrix in request.density_matrices
+        ]
+        return compute_pulse_toolbox_metrics(
+            request.to_spec(),
+            request.local_levels,
+            request.transmon_count,
+            request.times_us,
+            matrices,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_failure_detail("Pulse toolbox request is invalid.", exc),
+        ) from exc
+    except Exception as exc:
+        logger.exception("Pulse toolbox failed.")
+        raise HTTPException(
+            status_code=500,
+            detail=_failure_detail("Pulse toolbox failed.", exc),
+        ) from exc
+    finally:
+        _PULSE_TOOLBOX_EXECUTION_SLOTS.release()
+
+
 def _run_simulate_request(request: SimulateRequest) -> dict[str, object]:
     request_started_at = perf_counter()
     try:
@@ -1142,6 +1896,15 @@ def _run_simulate_request(request: SimulateRequest) -> dict[str, object]:
         ui_response_started_at = perf_counter()
         response = simulation_result_to_ui_response(result)
         ui_response_ms = (perf_counter() - ui_response_started_at) * 1000.0
+
+        if request.toolbox is not None:
+            comparison = (response.get("run") or {}).get("comparison") or {}
+            response["toolbox"] = compute_toolbox_snapshot_metrics(
+                request.toolbox.to_spec(),
+                int(config.circuit.logical_qubits),
+                response.get("state_snapshots") or [],
+                comparison.get("ideal_state_snapshots") or [],
+            )
 
         total_request_ms = (perf_counter() - request_started_at) * 1000.0
         diagnostics = response.get("diagnostics")

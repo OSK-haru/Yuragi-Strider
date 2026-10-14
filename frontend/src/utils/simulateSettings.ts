@@ -9,12 +9,15 @@
 import type {
   GateAwareEvolutionMethod,
   GateCompilationMode,
+  PerQubitCalibrationSettings,
+  ReadoutErrorSettings,
   SimulateRequestParameters,
   SimulationBackend,
   SimulationResponse,
   SnapshotOptions,
 } from '../types/simulation'
 import type { CircuitConfig } from './circuitConfig'
+import { initialToolboxSettings, type ToolboxSettings } from './toolbox'
 
 /*
  * 状態エクスプローラーで見比べるために取っておいた実行と、比較表示の on/off。
@@ -45,7 +48,10 @@ export type SimulateSettings = {
   compilationMode: GateCompilationMode
   simulationBackend: SimulationBackend
   snapshotOptions: SnapshotOptions
+  readoutError: ReadoutErrorSettings
+  perQubitCalibration: PerQubitCalibrationSettings
   customSnapshotTimesInput: string
+  toolbox: ToolboxSettings
 }
 
 export const initialSimulationParameters: SimulateRequestParameters = {
@@ -70,11 +76,25 @@ export const initialSnapshotOptions: SnapshotOptions = {
   include_after_circuit: true,
 }
 
+export const initialReadoutError: ReadoutErrorSettings = {
+  enabled: false,
+  p10: 0.005,
+  p01: 0.013,
+}
+
+export const initialPerQubitCalibration: PerQubitCalibrationSettings = {
+  enabled: false,
+  values: [],
+}
+
 export const initialSimulateSettings: SimulateSettings = {
   parameters: initialSimulationParameters,
   evolutionMethod: 'fixed_step_rk4',
   compilationMode: 'logical_direct',
   simulationBackend: 'python_dense',
   snapshotOptions: initialSnapshotOptions,
+  readoutError: initialReadoutError,
+  perQubitCalibration: initialPerQubitCalibration,
   customSnapshotTimesInput: '',
+  toolbox: initialToolboxSettings,
 }

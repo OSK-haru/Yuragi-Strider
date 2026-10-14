@@ -11,6 +11,7 @@ import {
   isQutritPulseResponse,
   type PulseComplexValue,
   type PulseLabForm,
+  type PulseReadout,
   type PulseResponse,
   type PulseRunRecord,
 } from '../types/pulse'
@@ -46,6 +47,7 @@ export type PulseExplorerPoint = {
   stepLabel: string | null
   /* 基底ラベル -> 占有確率。密度行列の対角成分にあたる。 */
   populations: Record<string, number>
+  observedPopulations: Record<string, number>
   /* 散逸のない閉じた系の占有確率。2準位モデルだけが持つ。 */
   idealPopulations: Record<string, number> | null
   purity: number
@@ -72,6 +74,7 @@ export type PulseExplorerView = {
   pulseEndTimeUs: number
   totalTimeUs: number
   sequenceLength: number
+  readoutEnabled: boolean
 }
 
 export function buildPulseExplorerView(
@@ -89,6 +92,11 @@ export function buildPulseExplorerView(
         '1': point.population_1,
         '2': point.population_2,
       },
+      observedPopulations: applyPulseReadoutError({
+        '0': point.population_0,
+        '1': point.population_1,
+        '2': point.population_2,
+      }, response.readout),
       idealPopulations: null,
       purity: point.purity,
       leakage: point.leakage_probability,
@@ -111,6 +119,7 @@ export function buildPulseExplorerView(
       pulseEndTimeUs: response.pulse_end.time_us,
       totalTimeUs: lastTimeUs(points),
       sequenceLength: Number(response.input.sequence_length ?? 1),
+      readoutEnabled: response.readout?.enabled ?? false,
     }
   }
 
@@ -122,6 +131,7 @@ export function buildPulseExplorerView(
       segment: point.segment,
       stepLabel: null,
       populations: { ...point.joint_populations },
+      observedPopulations: applyPulseReadoutError(point.joint_populations, response.readout),
       idealPopulations: null,
       purity: point.purity,
       leakage: point.leakage_probability,
@@ -146,6 +156,7 @@ export function buildPulseExplorerView(
       pulseEndTimeUs: response.pulse_end.time_us,
       totalTimeUs: lastTimeUs(points),
       sequenceLength: 1,
+      readoutEnabled: response.readout?.enabled ?? false,
     }
   }
 
@@ -157,6 +168,10 @@ export function buildPulseExplorerView(
       '0': point.open_population_0,
       '1': point.open_population_1,
     },
+    observedPopulations: applyPulseReadoutError({
+      '0': point.open_population_0,
+      '1': point.open_population_1,
+    }, response.readout),
     idealPopulations: {
       '0': point.closed_population_0,
       '1': point.closed_population_1,
@@ -183,7 +198,37 @@ export function buildPulseExplorerView(
     pulseEndTimeUs: response.pulse_end.time_us,
     totalTimeUs: lastTimeUs(points),
     sequenceLength: 1,
+    readoutEnabled: response.readout?.enabled ?? false,
   }
+}
+
+export function applyPulseReadoutError(
+  populations: Record<string, number>,
+  readout: PulseReadout | undefined,
+): Record<string, number> {
+  if (!readout) {
+    return { ...populations }
+  }
+  let observed = { ...populations }
+  readout.assignment_errors.forEach(({ p10, p01 }, subsystem) => {
+    const updated = Object.fromEntries(Object.keys(observed).map((label) => [label, 0]))
+    Object.entries(observed).forEach(([label, probability]) => {
+      const level = label[subsystem]
+      if (level === '0') {
+        updated[label] += (1 - p10) * probability
+        const flipped = `${label.slice(0, subsystem)}1${label.slice(subsystem + 1)}`
+        updated[flipped] += p10 * probability
+      } else if (level === '1') {
+        updated[label] += (1 - p01) * probability
+        const flipped = `${label.slice(0, subsystem)}0${label.slice(subsystem + 1)}`
+        updated[flipped] += p01 * probability
+      } else {
+        updated[label] += probability
+      }
+    })
+    observed = updated
+  })
+  return observed
 }
 
 function lastTimeUs(points: PulseExplorerPoint[]): number {

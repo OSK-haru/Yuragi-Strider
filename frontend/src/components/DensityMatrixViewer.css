@@ -149,7 +149,7 @@
 }
 
 .density-matrix-viewer__search-error {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
 }
 
 .density-matrix-viewer__matrix-scroll {
@@ -218,7 +218,7 @@
   color: var(--density-cell-ink, var(--tt-ink-max));
   cursor: crosshair;
   font-family: var(--tt-mono);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -237,13 +237,40 @@
   white-space: nowrap;
 }
 
-.density-matrix-viewer__cell[data-sign='positive'] {
+/* 正負の色は全画面共通で 正=赤, 負=青（Pulse 側のヒートマップと同じ）。 */
+.density-matrix-viewer__cell[data-sign='magnitude'] {
   background: rgb(var(--tt-ink-rgb) / var(--density-cell-alpha));
 }
 
-.density-matrix-viewer__cell[data-sign='negative'] {
+.density-matrix-viewer__cell[data-sign='positive'] {
   background: rgb(var(--tt-accent-rgb) / var(--density-cell-alpha));
 }
+
+.density-matrix-viewer__cell[data-sign='negative'] {
+  background: rgb(var(--gate-rotation-rgb) / var(--density-cell-alpha));
+}
+
+/*
+ * 位相モードは循環ランプの帯で塗る。帯 k はアンカー floor(k/2) と次の
+ * アンカーの中点（偶数帯はアンカーそのもの）。順序は utils/phaseColor.ts と同じ。
+ */
+.density-matrix-viewer__cell[data-phase-band] {
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, rgb(var(--phase-from)) 50%, rgb(var(--phase-to)))
+      calc(var(--density-cell-alpha) * 100%),
+    transparent
+  );
+}
+
+.density-matrix-viewer__cell[data-phase-band='0'] { --phase-from: var(--tt-ink-rgb); --phase-to: var(--tt-ink-rgb); }
+.density-matrix-viewer__cell[data-phase-band='1'] { --phase-from: var(--tt-ink-rgb); --phase-to: var(--gate-phase-rgb); }
+.density-matrix-viewer__cell[data-phase-band='2'] { --phase-from: var(--gate-phase-rgb); --phase-to: var(--gate-phase-rgb); }
+.density-matrix-viewer__cell[data-phase-band='3'] { --phase-from: var(--gate-phase-rgb); --phase-to: var(--tt-accent-rgb); }
+.density-matrix-viewer__cell[data-phase-band='4'] { --phase-from: var(--tt-accent-rgb); --phase-to: var(--tt-accent-rgb); }
+.density-matrix-viewer__cell[data-phase-band='5'] { --phase-from: var(--tt-accent-rgb); --phase-to: var(--gate-rotation-rgb); }
+.density-matrix-viewer__cell[data-phase-band='6'] { --phase-from: var(--gate-rotation-rgb); --phase-to: var(--gate-rotation-rgb); }
+.density-matrix-viewer__cell[data-phase-band='7'] { --phase-from: var(--gate-rotation-rgb); --phase-to: var(--tt-ink-rgb); }
 
 .density-matrix-viewer__cell[data-sign='zero'] {
   background: rgb(var(--tt-ink-mid-rgb) / 0.08);
@@ -251,16 +278,22 @@
 
 .density-matrix-viewer__cell:hover,
 .density-matrix-viewer__cell:focus-visible {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-ink-max);
   outline: none;
+  box-shadow: inset 0 0 0 1px var(--tt-void);
 }
 
+/*
+ * 選択枠は赤を使わない。正の値が赤で塗られるので、赤枠だと赤いセルの上で
+ * 消える。インクの外枠＋地色の内枠の二重線にして、どの塗りの上でも見せる。
+ */
 .density-matrix-viewer__cell[data-selected='true'] {
   position: relative;
   z-index: 1;
-  border-color: var(--tt-accent);
-  outline: 3px solid var(--tt-accent);
+  border-color: var(--tt-ink-max);
+  outline: 3px solid var(--tt-ink-max);
   outline-offset: -3px;
+  box-shadow: inset 0 0 0 5px var(--tt-void);
 }
 
 .density-matrix-viewer__neighborhood {
@@ -283,8 +316,8 @@
 .density-matrix-viewer__neighborhood-eyebrow {
   display: block;
   margin-bottom: 4px;
-  color: var(--tt-accent);
-  font-size: 0.66rem;
+  color: var(--tt-accent-text);
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.12em;
 }

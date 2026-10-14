@@ -2,7 +2,6 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import './PulseCircuitStudioPage.css'
 import { spawnGatePlacementEffect } from '../utils/gatePlacementEffect'
 import { PulseBlockEditor } from '../components/PulseBlockEditor'
-import { QuantumPet } from '../components/QuantumPet'
 import type { PulseLabForm } from '../types/pulse'
 import type {
   PulseCircuitLane,
@@ -21,7 +20,6 @@ import {
 } from '../utils/pulseCircuit'
 import { pulseStepConstraintIssues } from '../utils/pulseConstraints'
 import { matchingPulseDeviceProfile } from '../utils/pulseDeviceProfiles'
-import { pulseCircuitStudioTips } from '../utils/quantumPetTips'
 
 type PulseCircuitStudioPageProps = {
   circuit: PulseCircuitState
@@ -112,7 +110,6 @@ export function PulseCircuitStudioPage({
     ])),
     [circuit.lanes, circuit.executionConstraints.interPulseGapUs],
   )
-  const circuitDurationUs = Math.max(0, ...[...schedules.values()].map((entry) => entry.totalUs))
   const longestStepUs = Math.max(
     0,
     ...circuit.lanes.flatMap((lane) => lane.steps.filter(isDrivePulseStep).map(
@@ -481,28 +478,11 @@ export function PulseCircuitStudioPage({
     : 0
 
   return (
-    <main className="pulse-circuit-studio">
-      <header className="pulse-circuit-studio__header">
-        <div>
-          <span className="pulse-circuit-studio__eyebrow">Yuragi-Strider / Pulseワークスペース</span>
-          <h1>Pulse 回路スタジオ</h1>
-          <p>トランズモンごとの制御レーンへPulseを配置します。Gate-aware回路とは状態を共有しません。</p>
-        </div>
-        <dl className="pulse-circuit-studio__summary">
-          <div><dt>トランズモン</dt><dd>{transmonCount}</dd></div>
-          <div><dt>Pulse</dt><dd>{totalPulseCount}</dd></div>
-          <div><dt>回路長</dt><dd>{formatDurationUs(circuitDurationUs)}</dd></div>
-          <div data-tone={violationCount > 0 ? 'alert' : 'ok'}>
-            <dt>ハード制約</dt>
-            <dd>{violationCount > 0 ? `${violationCount} 件違反` : '適合'}</dd>
-          </div>
-        </dl>
-      </header>
-
+    <div className="pulse-circuit-studio">
       <aside className="pulse-circuit-studio__notice" data-tone={exceedsRunnableScope ? 'alert' : 'info'}>
         {exceedsRunnableScope
           ? `現在 ${transmonCount} トランズモン。密度行列の計算量上限により、5台以上は回路編集のみで実行できません。実行するには4台以下にしてください。`
-          : '2〜4台では Pulse Lab から全レーンを同時実行できます（交換結合ありのネットワーク）。5〜8台は回路編集のみ対応です。'}
+          : '2〜4台ではツールバーから全レーンを同時実行できます（交換結合ありのネットワーク）。5〜8台は回路編集のみ対応です。'}
       </aside>
 
       <section className="pulse-circuit-studio__environment" aria-label="Pulse回路の環境設定">
@@ -832,9 +812,7 @@ export function PulseCircuitStudioPage({
           </div>
         </section>
       </section>
-      {/* ここは実行しない編集ページなので、ペットはガイド役だけ。 */}
-      <QuantumPet phase="idle" tips={pulseCircuitStudioTips} />
-    </main>
+    </div>
   )
 }
 

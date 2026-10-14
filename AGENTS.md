@@ -2,102 +2,10 @@
 
 ## Project context
 
-This project is an interactive simulator for small quantum circuits under physical/environmental constraints.
-
-The original motivation was to build something lower-level than a typical logical quantum circuit simulator.
-Instead of focusing only on abstract circuit execution, this project aims to show how environmental conditions such as temperature, magnetic field, and noise affect the effective behavior of a small quantum circuit over time.
-
-The project is **not** intended to be:
-- a full general-purpose quantum SDK,
-- a full reimplementation of QuTiP,
-- a production-grade research simulator,
-- or a game-first product.
-
-The current direction is:
-- beginner-friendly,
-- interactive,
-- visually understandable,
-- physically motivated,
-- and useful as a bridge between abstract circuits and low-level physical constraints.
-
-This project should help users understand things like:
-- why a circuit loses effectiveness under noise,
-- how decoherence changes state evolution,
-- how physical/environmental parameters affect usable circuit lifetime,
-- and how simple circuit structure interacts with noisy open-system dynamics.
-
-## Product positioning
-
-This product should be treated as:
-
-**a beginner-friendly interactive simulator for understanding physically constrained quantum circuits**
-
-More specifically:
-- it should be easy to try,
-- easy to compare conditions,
-- easy to see why a state degrades,
-- and deep enough that expert-oriented details can later be added.
-
-It should not drift toward:
-- a generic library,
-- a broad research platform,
-- a high-fidelity pulse-level simulator,
-- or an unfocused educational toy.
-
-## Current development stage
-
-The original 1-week MVP (1 qubit, single H gate, no CNOT, no persistence —
-recorded historically in `SPEC_MVP.md`) is complete. The product has since
-expanded well beyond that scope: React/FastAPI, 1-18 logical qubits (noisy
-density-matrix evolution up to 8, explicit CPTP up to 5, statevector path for
-ideal measurement-free circuits above 5), a 2-8 qubit Circuit Studio with
-CNOT and other multi-qubit gates, projective measurement with classical
-feed-forward, circuit JSON import/export, Pulse Baseline A, and the qutrit and
-coupled transmon-network pulse extensions. See `docs_for_develop/README.md` for
-current implementation status; do not treat the original MVP non-goals as
-current scope limits.
-
-The MVP validated:
-1. whether the internal model is understandable,
-2. whether environmental parameters visibly affect the result,
-3. whether the UI can communicate “effective circuit lifetime” intuitively.
-
-Current work should still respect the project's core design philosophy below
-(understanding over raw computational power) even though the MVP's specific
-scope limits no longer apply.
-
-## Core design philosophy
-
-The central value is **understanding**, not just computation.
-
-If a feature only increases mathematical/general simulation power, but does not improve:
-- interpretability,
-- comparison,
-- beginner accessibility,
-- or visible cause-and-effect,
-
-then it is probably not a priority.
-
-When in doubt, prefer:
-- clarity over completeness,
-- scope control over feature growth,
-- and interpretable outputs over raw internal complexity.
-
-## Known constraints
-- Development time is limited.
-- MVP duration is 1 week.
-- The final product should remain lightweight.
-- The project should prioritize a strong UX and understandable outputs.
-- The simulator should remain small-scale and not attempt large-system generality.
-
-## UI philosophy
-- Beginner mode should avoid unnecessary jargon.
-- Expert-facing information may exist, but should not define the MVP.
-- Outputs should explain degradation in an intuitive way.
-- The user should always be able to see what changed and why.
+This repository contains an interactive quantum circuit simulator.
 
 ## Secrets rule
-- Never paste tokens, keys, or passwords into prompts.
+- Never paste tokens, keys, api keys, or passwords into prompts.
 - Never commit .env files.
 - Use environment variables or local secret stores only.
 - If a task seems to require a secret, stop and ask.
@@ -142,3 +50,33 @@ Approved stack (see `docs_for_develop/README.md` and `requirements-runtime.txt`
   required for the standard Python path
 
 Do not add new top-level dependencies without approval.
+
+## Project collaboration guidance
+
+At the beginning of each new conversation, before the first substantive
+project task, read and follow:
+
+- `DEVELOPMENT_PROTOCOL.md` for shared working principles.
+- `PROJECT_STYLE.md` for project-specific tone, expression, and output preferences.
+
+Do not reread them on every turn.
+
+Reread `PROJECT_STYLE.md` when any of the following applies:
+
+- Roughly 10 user turns have passed since the last reading.
+- The conversation context has been compacted, if detectable.
+- The work changes to a substantially different phase.
+- The user asks for a tone correction.
+- The current response style appears inconsistent with the file.
+
+Reread `DEVELOPMENT_PROTOCOL.md` after context compaction, before a major
+design or implementation phase, or when the working procedure is in doubt.
+Apply `PROJECT_STYLE.md` as written. Do not rewrite, normalize, or reorganize
+its wording unless the user explicitly requests it.
+
+Keep product requirements, design decisions, and progress in their respective
+project documents rather than treating these guidance files as specifications.
+
+For task start, focused verification, and handoff, follow `AGENT_HARNESS.md`.
+For periodic, read-only design monitoring, follow `MONITOR_REVIEW.md`.
+For the seven-role audit fleet, follow `AUDIT_FLEET.md`.

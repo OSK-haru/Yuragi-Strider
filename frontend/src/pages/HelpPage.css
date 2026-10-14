@@ -64,8 +64,8 @@
 
 .help-page__docs-cta:hover,
 .help-page__docs-cta:focus-visible {
-  background: var(--tt-accent);
-  color: var(--tt-on-accent);
+  background: var(--tt-interact-fill);
+  color: var(--tt-on-interact);
   outline: none;
 }
 
@@ -101,8 +101,8 @@
 
 .help-page__resources a:hover,
 .help-page__resources a:focus-visible {
-  border-bottom-color: var(--tt-accent);
-  background: var(--tt-accent-wash);
+  border-bottom-color: var(--tt-interact);
+  background: var(--tt-interact-wash);
   outline: none;
 }
 
@@ -185,9 +185,9 @@
   margin-bottom: 10px;
   border: 0;
   background: none;
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;

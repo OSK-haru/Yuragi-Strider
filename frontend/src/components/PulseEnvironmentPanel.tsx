@@ -179,6 +179,61 @@ export function PulseEnvironmentPanel({
             <NumberField field="networkDetuningQ1RadPerUs" label="q1 基準離調 [rad/us]" value={form.networkDetuningQ1RadPerUs} error={errors.networkDetuningQ1RadPerUs} step={1} disabled={disabled} onChange={setNumber} />
             <NumberField field="networkExchangeCouplingRadPerUs" label="隣接交換結合 J [rad/us]" value={form.networkExchangeCouplingRadPerUs} error={errors.networkExchangeCouplingRadPerUs} step={0.5} min={0} disabled={disabled} onChange={setNumber} />
           </div>
+          <h3>量子ビット別校正値</h3>
+          <p className="pulse-parameters__model-note">
+            共通の最大 T1・Tφ・読み出し誤差を、各トランズモンの値で上書きします。
+          </p>
+          <label className="pulse-parameters__calibration-toggle">
+            <span>個別校正</span>
+            <select
+              value={form.networkPerQubitCalibrationEnabled ? 'enabled' : 'disabled'}
+              disabled={disabled || form.environmentMode !== 'physical'}
+              onChange={(event) => onChange({
+                ...form,
+                networkPerQubitCalibrationEnabled: event.target.value === 'enabled',
+              })}
+            >
+              <option value="disabled">共通値を使用</option>
+              <option value="enabled">トランズモン別に設定</option>
+            </select>
+          </label>
+          {form.networkPerQubitCalibrationEnabled && form.environmentMode === 'physical' ? (
+            <div className="pulse-parameters__calibration-table">
+              {Array.from({ length: transmonCount }, (_, index) => (
+                <div className="pulse-parameters__calibration-row" key={index}>
+                  <strong>q{index}</strong>
+                  {([
+                    ['networkT1MaxUs', '最大 T1 [us]', form.networkT1MaxUs, 0.001, undefined],
+                    ['networkTphiMaxUs', '最大 Tφ [us]', form.networkTphiMaxUs, 0.001, undefined],
+                    ['networkReadoutP10', 'p10', form.networkReadoutP10, 0, 1],
+                    ['networkReadoutP01', 'p01', form.networkReadoutP01, 0, 1],
+                  ] as const).map(([field, label, values, min, max]) => (
+                    <label key={field}>
+                      <span>{label}</span>
+                      <input
+                        type="number"
+                        min={min}
+                        max={max}
+                        step={field.includes('Readout') ? 0.001 : 1}
+                        value={values[index]}
+                        disabled={disabled || (field.includes('Readout') && !form.readoutErrorEnabled)}
+                        onChange={(event) => {
+                          const nextValues = [...values]
+                          nextValues[index] = event.target.valueAsNumber
+                          onChange({ ...form, [field]: nextValues })
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ))}
+              {errors.networkT1MaxUs || errors.networkTphiMaxUs || errors.networkReadoutP01 ? (
+                <p className="pulse-parameters__error">
+                  {errors.networkT1MaxUs ?? errors.networkTphiMaxUs ?? errors.networkReadoutP01}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <p className="pulse-parameters__model-note">
             q2 以降の基準離調は現在 0 です。密度行列は {form.localLevels}<sup>N</sup> 次元になるため、
             台数に応じて計算量とスナップショット数を自動制限します。
@@ -297,6 +352,32 @@ export function PulseEnvironmentPanel({
           </div>
         </div>
       ) : null}
+
+      <div className="pulse-parameters__environment">
+        <h3>読み出し誤差</h3>
+        <p className="pulse-parameters__model-note">
+          最終観測と確率表示だけに適用します。状態、純度、忠実度、リーク確率は変更しません。
+          3準位では |2⟩ を保持し、|0⟩ と |1⟩ の間だけを誤分類します。
+        </p>
+        <div className="pulse-parameters__selectors">
+          <label>
+            <span>観測モデル</span>
+            <select
+              value={form.readoutErrorEnabled ? 'enabled' : 'disabled'}
+              disabled={disabled}
+              onChange={(event) => onChange({
+                ...form,
+                readoutErrorEnabled: event.target.value === 'enabled',
+              })}
+            >
+              <option value="disabled">無効</option>
+              <option value="enabled">有効</option>
+            </select>
+          </label>
+          <NumberField field="readoutP10" label="p10 = P(観測1 | 真の0)" value={form.readoutP10} error={errors.readoutP10} step={0.001} min={0} max={1} disabled={disabled || !form.readoutErrorEnabled} onChange={setNumber} />
+          <NumberField field="readoutP01" label="p01 = P(観測0 | 真の1)" value={form.readoutP01} error={errors.readoutP01} step={0.001} min={0} max={1} disabled={disabled || !form.readoutErrorEnabled} onChange={setNumber} />
+        </div>
+      </div>
 
       <div className="pulse-parameters__environment">
         <h3>{form.environmentMode === 'physical' ? '外界の物理環境' : '外界との結合率'}</h3>

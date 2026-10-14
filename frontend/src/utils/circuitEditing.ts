@@ -266,9 +266,9 @@ export function removeLastEmptyColumn(circuit: CircuitEditorState): CircuitEdito
   }
 }
 
-function clampLogicalQubitCount(logicalQubits: number) {
+function clampLogicalQubitCount(logicalQubits: number, minimumLogicalQubits: 1 | 2) {
   const normalized = Math.trunc(logicalQubits)
-  return Math.min(MAX_SUPPORTED_LOGICAL_QUBITS, Math.max(MIN_SUPPORTED_LOGICAL_QUBITS, normalized))
+  return Math.min(MAX_SUPPORTED_LOGICAL_QUBITS, Math.max(minimumLogicalQubits, normalized))
 }
 
 function isQubitIndexValid(qubitIndex: number, logicalQubits: number) {
@@ -365,8 +365,9 @@ function normalizeCircuitColumns(
 export function resizeCircuitEditorState(
   circuit: CircuitEditorState,
   logicalQubits: number,
+  minimumLogicalQubits: 1 | 2 = MIN_SUPPORTED_LOGICAL_QUBITS,
 ): CircuitEditorState {
-  const nextLogicalQubits = clampLogicalQubitCount(logicalQubits)
+  const nextLogicalQubits = clampLogicalQubitCount(logicalQubits, minimumLogicalQubits)
   const nextInitialStates = normalizeInitialStates(
     circuit.initial_states,
     nextLogicalQubits,

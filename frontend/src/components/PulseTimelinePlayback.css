@@ -14,9 +14,9 @@
 }
 
 .pulse-playback__heading span {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -74,7 +74,7 @@
 }
 
 .pulse-playback__span[data-active='true'] {
-  outline: 1px solid var(--tt-accent);
+  outline: 1px solid var(--tt-interact);
   outline-offset: -1px;
 }
 

@@ -70,6 +70,14 @@ export type PulseLabForm = {
   networkQuasiStaticSigmaRadPerUs: number
   networkQuasiStaticAdjacentCorrelation: number
   networkQuasiStaticQuadratureOrder: 3 | 5
+  networkPerQubitCalibrationEnabled: boolean
+  networkT1MaxUs: number[]
+  networkTphiMaxUs: number[]
+  networkReadoutP10: number[]
+  networkReadoutP01: number[]
+  readoutErrorEnabled: boolean
+  readoutP10: number
+  readoutP01: number
   snapshotCount: number
 }
 
@@ -98,6 +106,16 @@ export type PulseEvolutionDiagnostics = {
   raw_minimum_eigenvalue: number
   cleanup_correction_norm: number
   actual_duration_us: number
+}
+
+export type PulseReadout = {
+  enabled: boolean
+  model_id: 'independent_affine_binary_readout_v1'
+  assignment_errors: Array<{ p10: number; p01: number }>
+  true_probabilities: Record<string, number>
+  observed_probabilities: Record<string, number>
+  preserves_state_metrics: true
+  noncomputational_level_policy: 'preserve'
 }
 
 export type TwoLevelPulsePoint = {
@@ -139,6 +157,7 @@ export type TwoLevelPulseResponse = {
   trajectory: TwoLevelPulsePoint[]
   pulse_end: TwoLevelPulseState
   final: TwoLevelPulseState
+  readout: PulseReadout
   diagnostics: PulseDiagnostics
   warnings: string[]
   limitations: string[]
@@ -189,6 +208,7 @@ export type QutritPulseResponse = {
   }
   pulse_end: QutritPulsePoint
   final: QutritPulsePoint
+  readout: PulseReadout
   diagnostics: PulseDiagnostics
   warnings: string[]
   limitations: string[]
@@ -229,6 +249,7 @@ export type CoupledTransmonNetworkResponse = {
   }
   pulse_end: TransmonNetworkPoint
   final: TransmonNetworkPoint
+  readout: PulseReadout
   diagnostics: Record<string, unknown> & PulseDiagnostics
   warnings: string[]
   limitations: string[]

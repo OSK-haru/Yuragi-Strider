@@ -1,14 +1,14 @@
 /*
- * ホームのドラムに載せる3つの行き先。
+ * ホームのドラムに載せる4つの行き先。
  *
  * データを HomeModeDrum から出してあるのは、背景のゆらぎ（
  * QuantumFluctuationField）が同じ ModeId で相を切り替えるため。
  * 両方が1つの定義を見るようにしておく。
  */
 
-export const HOME_MODE_COUNT = 3
+export const HOME_MODE_COUNT = 4
 
-export type ModeId = 'gate-aware' | 'pulse' | 'docs'
+export type ModeId = 'gate-aware' | 'pulse' | 'attack' | 'docs'
 
 export type ModeEntry = {
   id: ModeId
@@ -18,7 +18,7 @@ export type ModeEntry = {
   detail: string
   callToAction: string
   readouts: { label: string; value: string }[]
-  signature: 'gate' | 'pulse' | 'docs'
+  signature: 'gate' | 'pulse' | 'attack' | 'docs'
 }
 
 export const MODE_ENTRIES: ModeEntry[] = [
@@ -55,8 +55,24 @@ export const MODE_ENTRIES: ModeEntry[] = [
     signature: 'pulse',
   },
   {
+    id: 'attack',
+    unit: 'MODE 03 / ATTACK',
+    title: '攻撃シミュレーター',
+    tagline: '量子コンピューターを攻撃する側に立つ',
+    detail:
+      '攻撃の環境を用意して、コマンドターミナルから操作します。'
+      + '攻撃がどの層に、どれだけ効くのかを、守る側の指標と並べて観察します。実験的な層。',
+    callToAction: '攻撃シミュレーターを開始',
+    readouts: [
+      { label: 'CONSOLE', value: 'TERMINAL' },
+      { label: 'LAYER', value: 'ATTACK' },
+      { label: 'STATUS', value: 'EXPERIMENTAL' },
+    ],
+    signature: 'attack',
+  },
+  {
     id: 'docs',
-    unit: 'REF 03 / DOCUMENTATION',
+    unit: 'REF 04 / DOCUMENTATION',
     title: '公式ドキュメント',
     tagline: '何を計算しているのかを確かめる',
     detail:

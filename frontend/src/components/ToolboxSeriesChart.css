@@ -1,0 +1,125 @@
+.toolbox-series {
+  display: grid;
+  gap: 10px;
+}
+
+.toolbox-series__chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  touch-action: pan-y;
+}
+
+.toolbox-series__grid {
+  stroke: rgb(var(--tt-ink-mid-rgb) / 0.18);
+  stroke-width: 1;
+}
+
+.toolbox-series__tick {
+  fill: var(--tt-ink-mid);
+  font-family: var(--tt-mono);
+  font-size: 11px;
+}
+
+.toolbox-series__line {
+  fill: none;
+  stroke: var(--tt-ink);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.toolbox-series__dot {
+  fill: var(--tt-ink);
+  stroke: var(--tt-void);
+  stroke-width: 2;
+}
+
+.toolbox-series__cursor line {
+  stroke: var(--tt-accent);
+  stroke-width: 2;
+}
+
+.toolbox-series__cursor circle {
+  fill: var(--tt-accent);
+  stroke: var(--tt-void);
+  stroke-width: 2;
+}
+
+.toolbox-series__hover line {
+  stroke: rgb(var(--tt-ink-rgb) / 0.45);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.toolbox-series__hover circle {
+  fill: var(--tt-void);
+  stroke: var(--tt-ink);
+  stroke-width: 2;
+}
+
+.toolbox-series__hover text {
+  fill: var(--tt-ink);
+  stroke: var(--tt-void);
+  stroke-width: 4px;
+  paint-order: stroke fill;
+  font-family: var(--tt-mono);
+  font-size: 12px;
+}
+
+.toolbox-series__values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin: 0;
+}
+
+.toolbox-series__values div {
+  display: grid;
+  gap: 2px;
+}
+
+.toolbox-series__values dt {
+  color: var(--tt-ink-mid);
+  font-size: 0.74rem;
+}
+
+.toolbox-series__values dd {
+  margin: 0;
+  color: var(--tt-ink);
+  font-family: var(--tt-mono);
+  font-size: 0.95rem;
+}
+
+.toolbox-series__table summary {
+  color: var(--tt-ink-mid);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.toolbox-series__table table {
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-family: var(--tt-mono);
+  font-size: 0.78rem;
+}
+
+.toolbox-series__table caption {
+  text-align: left;
+  color: var(--tt-ink-mid);
+  padding-bottom: 4px;
+}
+
+.toolbox-series__table th,
+.toolbox-series__table td {
+  padding: 3px 14px 3px 0;
+  border-bottom: 1px solid rgb(var(--tt-ink-mid-rgb) / 0.16);
+  text-align: right;
+}
+
+.toolbox-series__empty {
+  margin: 0;
+  color: var(--tt-ink-mid);
+  font-size: 0.85rem;
+}

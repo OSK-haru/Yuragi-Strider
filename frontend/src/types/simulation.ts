@@ -128,6 +128,26 @@ export type MeasurementOptions = {
   seed: number
 }
 
+export type ReadoutErrorSettings = {
+  enabled: boolean
+  p10: number
+  p01: number
+}
+
+export type QubitCalibration = {
+  t1_max_us: number
+  tphi_max_us: number
+  p10: number
+  p01: number
+}
+
+export type PerQubitCalibrationSettings = {
+  enabled: boolean
+  values: QubitCalibration[]
+}
+
+export type ReadoutErrorSettingsErrors = Partial<Record<'p10' | 'p01' | 'span', string>>
+
 export type MeasurementResult = {
   mode: string
   shots: number
@@ -211,6 +231,8 @@ export type SimulationRates = {
   t2_effective_us: number | null
   gamma1_per_us: number | null
   gamma1_per_us_deprecation: string
+  per_qubit?: Array<Record<string, string | number | boolean | null>>
+  per_qubit_environment_enabled?: boolean
 }
 
 export type PhysicalSimulationParameters = {
@@ -344,8 +366,120 @@ export type SimulationResponse = {
   measurement: MeasurementResult
   state_snapshots: StateSnapshot[]
   run: RunPanelData
+  /* 実行前にツール箱で選んだ状態指標。選ばなければ無い。 */
+  toolbox?: ToolboxResponse
   warnings: string[]
   issues: SimulationIssue[]
+}
+
+/*
+ * ツール箱の状態指標。各 values は state_snapshots と同じ並びで1つずつ。
+ * unavailable は要求したが計算できなかった項目と、その理由コード。
+ */
+export type ToolboxResponse = {
+  schema_version: 'toolbox-v1'
+  times_us: number[]
+  unavailable: Partial<Record<ToolboxSnapshotMetricKey, 'no_snapshots' | 'no_ideal_snapshots'>>
+  entropy?: { qubits: number[]; values: number[] }
+  concurrence?: { qubits: number[]; values: number[] }
+  negativity?: { subsystem: number[]; values: number[] }
+  mutual_information?: { a: number[]; b: number[]; values: number[] }
+  trace_distance?: { values: Array<number | null> }
+  observables?: Array<{ pauli: string; values: number[] }>
+  elapsed_ms?: number
+}
+
+export type ToolboxSnapshotMetricKey =
+  | 'entropy'
+  | 'concurrence'
+  | 'negativity'
+  | 'mutual_information'
+  | 'trace_distance'
+  | 'observables'
+
+export type ProcessCharacterizationResponse = {
+  schema_version: 'process-characterization-v1'
+  method: 'exact_tomography' | 'monte_carlo'
+  average_gate_fidelity: number
+  standard_error: number
+  confidence_interval_95: [number, number] | null
+  simulation_count: number
+  monte_carlo_samples?: number
+  monte_carlo_seed?: number
+  qubit_count: number
+  circuit_duration_us: number
+  noise_free_environment: boolean
+  elapsed_ms: number
+  process_matrix?: {
+    basis: string[]
+    noisy: SerializableComplexMatrix
+    ideal: SerializableComplexMatrix
+    trace: number
+    minimum_eigenvalue: number
+  }
+}
+
+export type SweepPoint = {
+  delay_us: number
+  true_p1: number
+  observed_p1: number
+  fitted_observed_p1: number
+  residual: number
+}
+
+export type SweepReadout = {
+  enabled: boolean
+  p10: number
+  p01: number
+}
+
+export type T1SweepResponse = {
+  schema_version: 't1-sweep-v1'
+  model: 'single_exponential_with_observation_floor'
+  points: SweepPoint[]
+  fit: {
+    amplitude: number
+    observation_floor: number
+    t1_us: number
+    root_mean_square_error: number
+    maximum_absolute_error: number
+    r_squared: number | null
+  }
+  reference: {
+    t1_effective_us: number | null
+    gamma_population_relaxation_per_us: number | null
+    temperature_mk: number
+  }
+  readout: SweepReadout
+}
+
+export type RamseyFit = {
+  model: 'exponential_envelope' | 'gaussian_envelope'
+  envelope_power: 1 | 2
+  amplitude: number
+  observation_floor: number
+  t2_star_us: number
+  frequency_mhz: number
+  phase_rad: number
+  root_mean_square_error: number
+  maximum_absolute_error: number
+  r_squared: number | null
+  aicc: number
+  delta_aicc: number
+}
+
+export type RamseySweepResponse = {
+  schema_version: 'ramsey-sweep-v1'
+  selected_model: RamseyFit['model']
+  points: SweepPoint[]
+  fit: RamseyFit
+  candidate_ranking_by_aicc: RamseyFit[]
+  reference: {
+    t2_effective_us: number | null
+    detuning_mhz: number
+    temperature_mk: number
+  }
+  readout: SweepReadout
 }
 
 export type MockSimulationResult = SimulationSummaryData & {

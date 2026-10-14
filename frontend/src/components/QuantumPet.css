@@ -66,12 +66,12 @@
 }
 
 .quantum-pet__stage:hover {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-interact);
   background: var(--tt-void);
 }
 
 .quantum-pet__stage:focus-visible {
-  outline: var(--tt-bar) solid var(--tt-accent);
+  outline: var(--tt-bar) solid var(--tt-interact);
   outline-offset: -4px;
 }
 
@@ -271,7 +271,7 @@
 .quantum-pet__bubble-eyebrow {
   color: var(--pet-accent);
   font-family: var(--tt-mono);
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -294,7 +294,7 @@
 .quantum-pet__bubble-meta {
   color: var(--tt-ink-dim);
   font-family: var(--tt-mono);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.14em;
 }
@@ -470,7 +470,8 @@
 }
 
 .quantum-pet__action:hover {
-  background: var(--tt-accent-hot);
+  background: var(--tt-interact-fill);
+  color: var(--tt-on-interact);
 }
 
 .quantum-pet__action:focus-visible {
@@ -500,7 +501,7 @@
 
   color: var(--tt-accent-hot);
   font-family: var(--tt-mono);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   letter-spacing: 0.1em;
 
   animation: quantum-pet-waiting 1600ms steps(2, end) infinite;

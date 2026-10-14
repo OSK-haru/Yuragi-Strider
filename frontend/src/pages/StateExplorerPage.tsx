@@ -6,15 +6,20 @@ import { DensityMatrixViewer } from '../components/DensityMatrixViewer'
 import { MetricTimeline } from '../components/MetricTimeline'
 import { PhysicalTimelinePlayback } from '../components/PhysicalTimelinePlayback'
 import { OutputProbabilities } from '../components/OutputProbabilities'
-import { QuantumPet, type QuantumPetPhase } from '../components/QuantumPet'
 import { ResultImportButton } from '../components/ResultImportButton'
 import { RunComparisonBar } from '../components/RunComparisonBar'
 import { StateProbabilityComparison } from '../components/StateProbabilityComparison'
+import { ToolboxSeriesChart } from '../components/ToolboxSeriesChart'
+import {
+  AverageGateFidelityView,
+  ProcessMatrixView,
+  RamseySweepView,
+  T1SweepView,
+} from '../components/ToolboxResultViews'
 import { useCircuitContext } from '../context/useCircuitContext'
 import { useTutorial } from '../context/useTutorial'
 import type { GateDurationDefaults, SimulationResponse } from '../types/simulation'
 import { nearestSnapshotIndex } from '../utils/physicalTimeline'
-import { stateExplorerTips } from '../utils/quantumPetTips'
 import { coherenceTimeRows, decayRateRows } from '../utils/rateRows'
 import { useInternalInfoVisible } from '../context/useAdminMode'
 import {
@@ -23,6 +28,24 @@ import {
   type CircuitConfig,
 } from '../utils/circuitConfig'
 import type { GateAwareComparisonState } from '../utils/simulateSettings'
+import {
+  EXPLORER_PANEL_KEYS,
+  EXPLORER_PANEL_LABELS as TOOLBOX_PANEL_LABELS,
+  TOOLBOX_METRIC_KEYS,
+  TOOLBOX_METRIC_LABELS,
+  type ExplorerPanelKey as ToolboxPanelKey,
+  type ToolboxJobKey,
+  type ToolboxJobState,
+  type ToolboxJobsState,
+  type ToolboxMetricKey,
+  type ToolboxSettings,
+} from '../utils/toolbox'
+import type {
+  ProcessCharacterizationResponse,
+  RamseySweepResponse,
+  T1SweepResponse,
+  ToolboxResponse,
+} from '../types/simulation'
 import {
   buildGateAwareResultBundle,
   downloadJson,
@@ -53,16 +76,45 @@ type StateExplorerPageProps = {
     circuitConfig: CircuitConfig,
     gateDurationDefaults: GateDurationDefaults | null,
   ) => void
+  /*
+   * 表示項目の on/off と追加指標の選択。シミュレーション側のツール箱と同じ1つを
+   * 共有する。ここで別に持つと、2か所の on/off が食い違う。
+   */
+  toolbox: ToolboxSettings
+  onToolboxChange: (toolbox: ToolboxSettings) => void
+  /* 通常実行に続く追加実行（プロセス評価・スイープ）の進み具合。 */
+  toolboxJobs: ToolboxJobsState | null
 }
 
-type ExplorerPanelKey = 'playback' | 'physical' | 'metrics' | 'probabilities' | 'output' | 'bloch' | 'density' | 'transfer' | 'rates'
+/* Message → Receive は回路に送受信があるときだけ出る項目で、ツール箱には並べない。 */
+type ExplorerPanelKey = ToolboxPanelKey | 'transfer' | ToolboxMetricKey
 const EXPLORER_PANEL_LABELS: Record<ExplorerPanelKey, string> = {
   transfer: 'Message → Receive',
-  playback: '再生バー',
-  physical: '物理時間', metrics: '指標タイムライン',
-  probabilities: '確率比較', output: '出力確率', bloch: 'Bloch球', density: '密度行列',
-  rates: '環境レート',
+  ...TOOLBOX_PANEL_LABELS,
+  ...TOOLBOX_METRIC_LABELS,
 }
+
+/* 状態指標のうち、この応答に結果（または計算できなかった理由）があるもの。 */
+const SNAPSHOT_RESULT_KEYS: Partial<Record<ToolboxMetricKey, keyof ToolboxResponse>> = {
+  entropy: 'entropy',
+  concurrence: 'concurrence',
+  negativity: 'negativity',
+  mutualInformation: 'mutual_information',
+  traceDistance: 'trace_distance',
+  observables: 'observables',
+}
+const JOB_FOR_METRIC: Partial<Record<ToolboxMetricKey, ToolboxJobKey>> = {
+  averageGateFidelity: 'process',
+  processMatrix: 'process',
+  t1Sweep: 't1Sweep',
+  ramseySweep: 'ramseySweep',
+}
+const UNAVAILABLE_REASONS: Record<string, string> = {
+  no_snapshots: 'この実行には密度行列スナップショットがないため計算できませんでした。',
+  no_ideal_snapshots: '理想状態のスナップショットがないため計算できませんでした。',
+}
+const NOT_COMPUTED = 'この結果では計算していません。シミュレーションを実行し直すと計算します。'
+
 /*
  * 非表示にした項目は畳んだ見出しも残さず、まるごと消す。並んだ空バーは
  * 中身がないぶん読み飛ばす対象にしかならないので、出す・出さないの管理は
@@ -187,6 +239,9 @@ export function StateExplorerPage({
   onComparisonChange,
   onOpenSimulation,
   onImportedResult,
+  toolbox,
+  onToolboxChange,
+  toolboxJobs,
 }: StateExplorerPageProps) {
   const { circuitState, handleReplaceCircuitConfig } = useCircuitContext()
   const internalInfoVisible = useInternalInfoVisible()
@@ -211,23 +266,33 @@ export function StateExplorerPage({
    * 別の実行を保持できると、隣り合う図が別々の条件を指してしまう。
    */
   const { heldResult, comparing } = comparison
-  const [openPanels, setOpenPanels] = useState<Record<ExplorerPanelKey, boolean>>({
-    playback: true,
-    physical: false, metrics: false, probabilities: true, output: false, bloch: true, density: false, transfer: false,
-    rates: false,
-  })
+  const [transferOpen, setTransferOpen] = useState(false)
+  const openPanels = useMemo(() => {
+    const panels = { transfer: transferOpen } as Record<ExplorerPanelKey, boolean>
+    for (const key of EXPLORER_PANEL_KEYS) panels[key] = toolbox.panels[key]
+    for (const key of TOOLBOX_METRIC_KEYS) panels[key] = toolbox.metrics[key]
+    return panels
+  }, [toolbox, transferOpen])
+  const setPanelVisibility = useCallback((changes: Partial<Record<ExplorerPanelKey, boolean>>) => {
+    const panels = { ...toolbox.panels }
+    const metrics = { ...toolbox.metrics }
+    for (const [key, visible] of Object.entries(changes) as Array<[ExplorerPanelKey, boolean]>) {
+      if (key === 'transfer') setTransferOpen(visible)
+      else if ((EXPLORER_PANEL_KEYS as readonly string[]).includes(key)) panels[key as ToolboxPanelKey] = visible
+      else metrics[key as ToolboxMetricKey] = visible
+    }
+    onToolboxChange({ ...toolbox, panels, metrics })
+  }, [toolbox, onToolboxChange])
   /*
-   * 比較線を描くのは指標タイムラインと確率比較の2枚だけ。指標タイムラインは
-   * 既定で閉じているので、比較を入れたのに線がどこにも見えない、という状態に
-   * なりうる。比較を入れたときは、線が出るパネルを開いておく。
+   * 比較線を描くのは指標タイムラインと確率比較の2枚だけ。どちらかを閉じていると、
+   * 比較を入れたのに線がどこにも見えない、という状態になりうる。
+   * 比較を入れたときは、線が出るパネルを開いておく。
    */
   const openComparisonPanels = useCallback(() => {
-    setOpenPanels((current) => (
-      current.metrics && current.probabilities
-        ? current
-        : { ...current, metrics: true, probabilities: true }
-    ))
-  }, [])
+    if (!toolbox.panels.metrics || !toolbox.panels.probabilities) {
+      setPanelVisibility({ metrics: true, probabilities: true })
+    }
+  }, [toolbox.panels.metrics, toolbox.panels.probabilities, setPanelVisibility])
   const setComparing = useCallback(
     (nextComparing: boolean) => {
       if (nextComparing) {
@@ -377,19 +442,8 @@ export function StateExplorerPage({
       ? '保持した実行にはスナップショットも指標もないため、比較線を引けません。'
       : null
   const togglePanel = useCallback((panelKey: ExplorerPanelKey) => {
-    setOpenPanels((current) => ({ ...current, [panelKey]: !current[panelKey] }))
-  }, [])
-  const setAllPanels = useCallback((visible: boolean) => {
-    setOpenPanels((current) => {
-      const next = { ...current }
-      for (const panelKey of Object.keys(EXPLORER_PANEL_LABELS) as ExplorerPanelKey[]) {
-        next[panelKey] = visible
-      }
-      return next
-    })
-  }, [])
-  const showAllPanels = useCallback(() => setAllPanels(true), [setAllPanels])
-  const hideAllPanels = useCallback(() => setAllPanels(false), [setAllPanels])
+    setPanelVisibility({ [panelKey]: !openPanels[panelKey] })
+  }, [openPanels, setPanelVisibility])
 
   /*
    * チュートリアルの結果解説の章のあいだは、指標タイムラインを開いた扱いにする。
@@ -423,15 +477,41 @@ export function StateExplorerPage({
   )
   const hasTransfer = circuitState.columns.some((column) => column.gates.some((gate) => gate.type === 'MESSAGE'))
     && circuitState.columns.some((column) => column.gates.some((gate) => gate.type === 'RECEIVED'))
+  const toolboxResult = activeResponse?.toolbox ?? null
+  const activeJobs = useMemo(
+    () => (toolboxJobs !== null && toolboxJobs.response === activeResponse ? toolboxJobs.jobs : {}),
+    [toolboxJobs, activeResponse],
+  )
+  /* 選んでいるか、この結果に値がある追加指標だけをメニューに並べる。 */
+  const metricHasResult = useCallback((key: ToolboxMetricKey) => {
+    const resultKey = SNAPSHOT_RESULT_KEYS[key]
+    if (resultKey !== undefined) {
+      return toolboxResult !== null
+        && (toolboxResult[resultKey] !== undefined || toolboxResult.unavailable[resultKey as keyof ToolboxResponse['unavailable']] !== undefined)
+    }
+    const job = JOB_FOR_METRIC[key]
+    return job !== undefined && activeJobs[job] !== undefined
+  }, [toolboxResult, activeJobs])
   const availablePanelKeys = useMemo(
     () => (Object.keys(EXPLORER_PANEL_LABELS) as ExplorerPanelKey[]).filter((panelKey) => {
       if (panelKey === 'transfer') return hasTransfer
       if (panelKey === 'probabilities') return qubitCount !== null
       if (panelKey === 'bloch' || panelKey === 'density') return snapshots.length > 0
       if (panelKey === 'rates') return coherenceRows.length > 0 || decayRows.length > 0
+      if ((TOOLBOX_METRIC_KEYS as readonly string[]).includes(panelKey)) {
+        return toolbox.metrics[panelKey as ToolboxMetricKey] || metricHasResult(panelKey as ToolboxMetricKey)
+      }
       return true
     }),
-    [hasTransfer, qubitCount, snapshots.length, coherenceRows.length, decayRows.length],
+    [hasTransfer, qubitCount, snapshots.length, coherenceRows.length, decayRows.length, toolbox.metrics, metricHasResult],
+  )
+  const showAllPanels = useCallback(
+    () => setPanelVisibility(Object.fromEntries(availablePanelKeys.map((key) => [key, true]))),
+    [availablePanelKeys, setPanelVisibility],
+  )
+  const hideAllPanels = useCallback(
+    () => setPanelVisibility(Object.fromEntries(availablePanelKeys.map((key) => [key, false]))),
+    [availablePanelKeys, setPanelVisibility],
   )
   const handlePlaybackSimulationTimeChange = useCallback((simulationTimeUs: number) => {
     setPlaybackSimulationTimeUs(simulationTimeUs)
@@ -439,29 +519,8 @@ export function StateExplorerPage({
     if (nextSnapshotIndex >= 0) setSnapshotIndex(nextSnapshotIndex)
   }, [snapshots])
 
-  /*
-   * ここは計算をしないページなので、黄（計算中）は出てこない。
-   * 完了した結果を見ている状態を菫、結果がない状態を緑とする。
-   */
-  const petPhase: QuantumPetPhase = activeResponse === null ? 'idle' : 'done'
-  const petMessage = activeResponse !== null
-    ? null
-    : staleResult
-      ? '回路が変わったみたい。もう一度実行すると、ここに結果が戻ってくるよ。'
-      : 'まだ結果がないよ。先にGate-awareシミュレーションを実行してね。'
-
   return (
-    <main className="state-explorer-page">
-      <header className="state-explorer-page__header">
-        <div>
-          <span className="state-explorer-page__eyebrow">Yuragi-Strider / Gate-aware results</span>
-          <h1>Gate-aware 状態エクスプローラー</h1>
-          <p className="state-explorer-page__scope">
-            Gate-awareシミュレーションの回路スナップショット専用です。Pulseラボの結果は
-            ここには読み込まれません。Pulseの軌跡には専用のPulse 状態エクスプローラーがあります。
-          </p>
-        </div>
-      </header>
+    <div className="state-explorer-page">
 
       {activeResponse === null ? (
         <section className="state-explorer-page__empty" aria-labelledby="state-explorer-empty-title">
@@ -476,9 +535,9 @@ export function StateExplorerPage({
           <p>
             {staleResult
               ? `現在は${currentCircuitConfig.logical_qubits}量子ビット回路ですが、保存済み結果は${response?.circuit.qubit_count ?? '不明'}量子ビットです。現在の回路を再実行してください。`
-              : '先にGate-awareシミュレーションを実行してください。'}
+              : '回路を組んで、上のツールバーの「シミュレーションを実行」を押してください。'}
           </p>
-          <button type="button" onClick={onOpenSimulation}>Gate-aware シミュレーションを開く</button>
+          <button type="button" onClick={onOpenSimulation}>回路エディターに戻る</button>
           {/*
             * 結果が無い状態でも読み込みは要る。人から受け取ったファイルを
             * 開くのは、たいてい自分ではまだ何も実行していないときだから。
@@ -666,11 +725,103 @@ export function StateExplorerPage({
             ) : null}
             </CollapsiblePanel>
           ) : null}
+          {TOOLBOX_METRIC_KEYS.filter((key) => availablePanelKeys.includes(key)).map((key) => (
+            <CollapsiblePanel key={key} panelKey={key} open={visiblePanels[key]} onToggle={() => togglePanel(key)}>
+              <ToolboxMetricBody
+                metric={key}
+                toolbox={toolboxResult}
+                jobs={activeJobs}
+                cursorTimeUs={playbackSimulationTimeUs}
+                qubitCount={qubitCount ?? 0}
+              />
+            </CollapsiblePanel>
+          ))}
         </>
       )}
-      <QuantumPet phase={petPhase} message={petMessage} tips={stateExplorerTips} />
-    </main>
+    </div>
   )
+}
+
+function ToolboxMetricBody({
+  metric,
+  toolbox,
+  jobs,
+  cursorTimeUs,
+  qubitCount,
+}: {
+  metric: ToolboxMetricKey
+  toolbox: ToolboxResponse | null
+  jobs: Partial<Record<ToolboxJobKey, ToolboxJobState>>
+  cursorTimeUs: number
+  qubitCount: number
+}) {
+  const job = JOB_FOR_METRIC[metric]
+  if (job !== undefined) {
+    const state = jobs[job]
+    if (state === undefined) return <p className="state-explorer-page__toolbox-note">{NOT_COMPUTED}</p>
+    if (state.status === 'pending') return <p className="state-explorer-page__toolbox-note" role="status">計算中…</p>
+    if (state.status === 'error') return <p className="state-explorer-page__toolbox-note" role="alert">{state.message}</p>
+    if (metric === 'averageGateFidelity') return <AverageGateFidelityView result={state.data as ProcessCharacterizationResponse} />
+    if (metric === 'processMatrix') return <ProcessMatrixView result={state.data as ProcessCharacterizationResponse} />
+    if (metric === 't1Sweep') return <T1SweepView result={state.data as T1SweepResponse} />
+    return <RamseySweepView result={state.data as RamseySweepResponse} />
+  }
+
+  const resultKey = SNAPSHOT_RESULT_KEYS[metric] as keyof ToolboxResponse['unavailable']
+  const reason = toolbox?.unavailable[resultKey]
+  if (reason !== undefined) {
+    return <p className="state-explorer-page__toolbox-note">{UNAVAILABLE_REASONS[reason] ?? reason}</p>
+  }
+  if (toolbox === null || toolbox[resultKey] === undefined) {
+    return <p className="state-explorer-page__toolbox-note">{NOT_COMPUTED}</p>
+  }
+
+  const times = toolbox.times_us
+  const qubitList = (qubits: number[]) => qubits.map((qubit) => `q${qubit}`).join(',')
+  const bits = (value: number) => `${value.toFixed(4)} bit`
+  const plain = (value: number) => value.toFixed(4)
+  const chart = (label: string, values: Array<number | null>, domain: [number, number], format: (value: number) => string, description: string) => (
+    <>
+      <p className="state-explorer-page__toolbox-note">{description}</p>
+      <ToolboxSeriesChart label={label} times={times} values={values} yDomain={domain} format={format} cursorTimeUs={cursorTimeUs} />
+    </>
+  )
+
+  if (metric === 'entropy' && toolbox.entropy) {
+    const { qubits, values } = toolbox.entropy
+    return chart(`S(${qubitList(qubits)})`, values, [0, qubits.length], bits, `${qubitList(qubits)} の縮約状態のフォン・ノイマン・エントロピー。全体が純粋なら、残りの量子ビットとのエンタングルメントの量。`)
+  }
+  if (metric === 'concurrence' && toolbox.concurrence) {
+    const { qubits, values } = toolbox.concurrence
+    return chart(`C(${qubitList(qubits)})`, values, [0, 1], plain, `${qubitList(qubits)} の縮約状態のコンカレンス。0 は分離可能、1 は最大エンタングル。`)
+  }
+  if (metric === 'negativity' && toolbox.negativity) {
+    const { subsystem, values } = toolbox.negativity
+    /* 最大値は (min(d_A, d_B) − 1) / 2。 */
+    const smaller = Math.min(subsystem.length, Math.max(1, qubitCount - subsystem.length))
+    const upper = (2 ** smaller - 1) / 2
+    return chart(`N(${qubitList(subsystem)} | 残り)`, values, [0, upper], plain, `${qubitList(subsystem)} とそれ以外の分割に対するネガティビティ。0 より大きければエンタングルしている。`)
+  }
+  if (metric === 'mutualInformation' && toolbox.mutual_information) {
+    const { a, b, values } = toolbox.mutual_information
+    return chart(`I(${qubitList(a)} : ${qubitList(b)})`, values, [0, 2 * Math.min(a.length, b.length)], bits, `A=${qubitList(a)} と B=${qubitList(b)} の相互情報量。古典相関と量子相関の合計。`)
+  }
+  if (metric === 'traceDistance' && toolbox.trace_distance) {
+    return chart('トレース距離', toolbox.trace_distance.values, [0, 1], plain, '同じ時刻の理想状態とのトレース距離。理想と対応しないスナップショットは空けてある。')
+  }
+  if (metric === 'observables' && toolbox.observables) {
+    return (
+      <div className="state-explorer-page__toolbox-multiples">
+        {toolbox.observables.map((entry) => (
+          <section key={entry.pauli}>
+            <h3>⟨{entry.pauli}⟩</h3>
+            <ToolboxSeriesChart label={`⟨${entry.pauli}⟩`} times={times} values={entry.values} yDomain={[-1, 1]} format={plain} cursorTimeUs={cursorTimeUs} compact />
+          </section>
+        ))}
+      </div>
+    )
+  }
+  return <p className="state-explorer-page__toolbox-note">{NOT_COMPUTED}</p>
 }
 
 /*

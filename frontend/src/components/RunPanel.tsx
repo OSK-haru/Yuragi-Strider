@@ -44,6 +44,8 @@ type RunPanelProps = {
   onCompilationModeChange: (mode: GateCompilationMode) => void
   onSimulationBackendChange: (backend: SimulationBackend) => void
   onRunSimulation: () => void
+  /* IDE画面では実行をツールバーに置くので、ここのボタンは出さない。 */
+  showRunButton?: boolean
 }
 
 const evolutionMethodDescriptions: Record<GateAwareEvolutionMethod, string> = {
@@ -125,6 +127,7 @@ export function RunPanel({
   onCompilationModeChange,
   onSimulationBackendChange,
   onRunSimulation,
+  showRunButton = true,
 }: RunPanelProps) {
   const internalInfoVisible = useInternalInfoVisible()
   const canRun = run.can_run ?? true
@@ -280,7 +283,7 @@ export function RunPanel({
         </ResultDrawer>
       ) : null}
 
-      <div className="run-panel__actions">
+      {showRunButton ? <div className="run-panel__actions">
         <button
           className="run-panel__button"
           type="button"
@@ -290,7 +293,7 @@ export function RunPanel({
         >
           {isRequestPending ? '実行中…' : 'シミュレーションを実行'}
         </button>
-      </div>
+      </div> : null}
 
       <RunCostNotice estimate={costEstimate} />
 

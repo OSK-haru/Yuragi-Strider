@@ -195,6 +195,30 @@ details[open] > .parameter-panel__section-summary .parameter-panel__section-togg
   line-height: 1.35;
 }
 
+.parameter-panel__per-qubit-toggle {
+  max-width: 280px;
+}
+
+.parameter-panel__qubit-calibrations {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.parameter-panel__qubit-calibration {
+  display: grid;
+  grid-template-columns: 48px repeat(4, minmax(110px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid rgb(var(--tt-ink-mid-rgb) / 0.14);
+}
+
+.parameter-panel__qubit-calibration > strong {
+  align-self: center;
+  color: var(--tt-ink-max);
+}
+
 @media (max-width: 640px) {
   .parameter-panel {
     padding: 18px 16px 16px;
@@ -202,5 +226,9 @@ details[open] > .parameter-panel__section-summary .parameter-panel__section-togg
 
   .parameter-panel__header {
     flex-direction: column;
+  }
+
+  .parameter-panel__qubit-calibration {
+    grid-template-columns: 1fr 1fr;
   }
 }

@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from pydantic import TypeAdapter, ValidationError
 
 from api.main import pulse_simulate
+from api.pulse_transmon_network_service import _build_rates
 from api.pulse_models import (
     CoupledTransmonNetworkPulseSimulateRequest,
     CoupledTransmonNetworkPulseSimulateResponse,
@@ -37,6 +38,49 @@ from core.pulse_transmon_network import (
 
 
 class CoupledTransmonNetworkApiTests(unittest.TestCase):
+    def test_network_accepts_per_qubit_coherence_calibration(self) -> None:
+        payload = _network_payload()
+        payload["environment"] = {
+            "input_mode": "physical",
+            "device_quality": 1.0,
+            "temperature_mk": 0.0,
+            "flux_noise_phi0": 0.0,
+            "qubit_frequency_ghz": 5.0,
+            "t1_max_us": 100.0,
+            "tphi_max_us": 100.0,
+            "per_qubit": [
+                {"t1_max_us": 10.0, "tphi_max_us": 20.0},
+                {"t1_max_us": 100.0, "tphi_max_us": 200.0},
+                {"t1_max_us": 1000.0, "tphi_max_us": 2000.0},
+            ],
+        }
+        request = CoupledTransmonNetworkPulseSimulateRequest.model_validate(payload)
+
+        rates = _build_rates(request)
+
+        self.assertGreater(rates[0].gamma_10_down_per_us, rates[1].gamma_10_down_per_us)
+        self.assertGreater(rates[1].gamma_10_down_per_us, rates[2].gamma_10_down_per_us)
+        self.assertGreater(
+            rates[0].gamma_phi_adjacent_per_us,
+            rates[1].gamma_phi_adjacent_per_us,
+        )
+
+    def test_network_rejects_per_qubit_coherence_count_mismatch(self) -> None:
+        payload = _network_payload()
+        payload["environment"] = {
+            "input_mode": "physical",
+            "device_quality": 1.0,
+            "temperature_mk": 0.0,
+            "flux_noise_phi0": 0.0,
+            "qubit_frequency_ghz": 5.0,
+            "t1_max_us": 100.0,
+            "tphi_max_us": 100.0,
+            "per_qubit": [{"t1_max_us": 10.0, "tphi_max_us": 20.0}],
+        }
+
+        with self.assertRaises(ValidationError):
+            CoupledTransmonNetworkPulseSimulateRequest.model_validate(payload)
+
     def test_network_is_discoverable_and_selected_by_discriminator(self) -> None:
         self.assertIn(
             DRIVEN_COUPLED_TRANSMON_NETWORK_RWA_EXPERIMENTAL_MODEL,

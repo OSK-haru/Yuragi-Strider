@@ -4,6 +4,9 @@ import { SectionHeader } from './SectionHeader'
 import type {
   GateDurationDefaultErrors,
   GateDurationDefaults,
+  PerQubitCalibrationSettings,
+  ReadoutErrorSettings,
+  ReadoutErrorSettingsErrors,
   SimulateRequestParameterErrors,
   SimulateRequestParameters,
 } from '../types/simulation'
@@ -13,8 +16,15 @@ type ParameterPanelProps = {
   gateDurationDefaults: GateDurationDefaults
   validationMessages: SimulateRequestParameterErrors
   gateDurationValidationMessages: GateDurationDefaultErrors
+  readoutError: ReadoutErrorSettings
+  readoutErrorValidationMessages: ReadoutErrorSettingsErrors
+  logicalQubits: number
+  perQubitCalibration: PerQubitCalibrationSettings
+  perQubitCalibrationError: string | null
   onEditableParametersChange: (parameters: SimulateRequestParameters) => void
   onGateDurationDefaultsChange: (gateDurations: GateDurationDefaults) => void
+  onReadoutErrorChange: (readoutError: ReadoutErrorSettings) => void
+  onPerQubitCalibrationChange: (settings: PerQubitCalibrationSettings) => void
 }
 
 type EditableParameterName = keyof SimulateRequestParameters
@@ -146,8 +156,15 @@ export function ParameterPanel({
   gateDurationDefaults,
   validationMessages,
   gateDurationValidationMessages,
+  readoutError,
+  readoutErrorValidationMessages,
+  logicalQubits,
+  perQubitCalibration,
+  perQubitCalibrationError,
   onEditableParametersChange,
   onGateDurationDefaultsChange,
+  onReadoutErrorChange,
+  onPerQubitCalibrationChange,
 }: ParameterPanelProps) {
   function updateParameter(name: EditableParameterName, value: number) {
     if (!Number.isFinite(value)) {
@@ -341,6 +358,126 @@ export function ParameterPanel({
               '0.0〜1.0',
             )}
           </div>
+        </article>
+
+        <article className="parameter-panel__section">
+          <SectionHeader
+            className="parameter-panel__section-header"
+            icon="bars"
+            title="読み出し誤差"
+            headingLevel="h3"
+          />
+          <p className="parameter-panel__section-note">
+            終端の観測確率と測定カウントだけに適用します。密度行列、忠実度、純度には影響しません。
+          </p>
+          <div className="parameter-panel__fields parameter-panel__fields--compact">
+            <label className="parameter-panel__field">
+              <span className="parameter-panel__field-label">観測モデル</span>
+              <select
+                className="parameter-panel__input"
+                value={readoutError.enabled ? 'enabled' : 'disabled'}
+                onChange={(event) => onReadoutErrorChange({
+                  ...readoutError,
+                  enabled: event.currentTarget.value === 'enabled',
+                })}
+              >
+                <option value="disabled">無効</option>
+                <option value="enabled">有効</option>
+              </select>
+            </label>
+            <label className="parameter-panel__field">
+              <span className="parameter-panel__field-label">p10 = P(観測1 | 真の0)</span>
+              <input
+                className={`parameter-panel__input${readoutErrorValidationMessages.p10 ? ' parameter-panel__input--invalid' : ''}`}
+                type="number"
+                min={0}
+                max={1}
+                step={0.001}
+                value={readoutError.p10}
+                disabled={!readoutError.enabled}
+                onChange={(event) => onReadoutErrorChange({ ...readoutError, p10: event.currentTarget.valueAsNumber })}
+              />
+              {readoutErrorValidationMessages.p10 ? <span className="parameter-panel__validation">{readoutErrorValidationMessages.p10}</span> : null}
+            </label>
+            <label className="parameter-panel__field">
+              <span className="parameter-panel__field-label">p01 = P(観測0 | 真の1)</span>
+              <input
+                className={`parameter-panel__input${readoutErrorValidationMessages.p01 ? ' parameter-panel__input--invalid' : ''}`}
+                type="number"
+                min={0}
+                max={1}
+                step={0.001}
+                value={readoutError.p01}
+                disabled={!readoutError.enabled}
+                onChange={(event) => onReadoutErrorChange({ ...readoutError, p01: event.currentTarget.valueAsNumber })}
+              />
+              {readoutErrorValidationMessages.p01 ? <span className="parameter-panel__validation">{readoutErrorValidationMessages.p01}</span> : null}
+            </label>
+          </div>
+          {readoutErrorValidationMessages.span ? <p className="parameter-panel__validation">{readoutErrorValidationMessages.span}</p> : null}
+        </article>
+
+        <article className="parameter-panel__section">
+          <SectionHeader
+            className="parameter-panel__section-header"
+            icon="atom"
+            title="量子ビット別校正値"
+            headingLevel="h3"
+          />
+          <p className="parameter-panel__section-note">
+            共通値を量子ビットごとの T1・Tφ・読み出し誤差で上書きします。
+            読み出し列は上の観測モデルが有効な場合だけ適用されます。
+          </p>
+          <label className="parameter-panel__field parameter-panel__per-qubit-toggle">
+            <span className="parameter-panel__field-label">個別校正</span>
+            <select
+              className="parameter-panel__input"
+              value={perQubitCalibration.enabled ? 'enabled' : 'disabled'}
+              onChange={(event) => onPerQubitCalibrationChange({
+                ...perQubitCalibration,
+                enabled: event.currentTarget.value === 'enabled',
+              })}
+            >
+              <option value="disabled">共通値を使用</option>
+              <option value="enabled">量子ビット別に設定</option>
+            </select>
+          </label>
+          {perQubitCalibration.enabled ? (
+            <div className="parameter-panel__qubit-calibrations">
+              {perQubitCalibration.values.slice(0, logicalQubits).map((entry, qubit) => (
+                <div className="parameter-panel__qubit-calibration" key={qubit}>
+                  <strong>q{qubit}</strong>
+                  {(['t1_max_us', 'tphi_max_us', 'p10', 'p01'] as const).map((name) => (
+                    <label className="parameter-panel__field" key={name}>
+                      <span className="parameter-panel__field-label">
+                        {name === 't1_max_us' ? 'T1 max [μs]' : name === 'tphi_max_us' ? 'Tφ max [μs]' : name}
+                      </span>
+                      <input
+                        className="parameter-panel__input"
+                        type="number"
+                        min={name === 'p10' || name === 'p01' ? 0 : 0.001}
+                        max={name === 'p10' || name === 'p01' ? 1 : undefined}
+                        step={name === 'p10' || name === 'p01' ? 0.001 : 1}
+                        value={entry[name]}
+                        disabled={(name === 'p10' || name === 'p01') && !readoutError.enabled}
+                        onChange={(event) => {
+                          const values = perQubitCalibration.values.map((value, index) => (
+                            index === qubit
+                              ? { ...value, [name]: event.currentTarget.valueAsNumber }
+                              : value
+                          ))
+                          onPerQubitCalibrationChange({ ...perQubitCalibration, values })
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {perQubitCalibrationError ? (
+            <p className="parameter-panel__validation">{perQubitCalibrationError}</p>
+          ) : null}
         </article>
 
         <details className="parameter-panel__section parameter-panel__section--collapsible">

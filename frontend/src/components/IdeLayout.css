@@ -1,0 +1,213 @@
+/* ==========================================================================
+   IDE layout (Quartus-like)
+   タイトル / ツールバー / ナビゲーター・作業領域・プロパティ / メッセージ /
+   ステータスバー。ペインごとにスクロールし、文字と余白は詰める。
+   攻撃シミュレーターと通常モードのIDE画面が共有する。
+   ========================================================================== */
+
+.ide {
+  --ide-pane-head: 26px;
+  /* 通知行は出たり消えたりするので、行数を固定するグリッドではなく縦の flex にする。 */
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+  height: calc(100dvh - 41px);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--tt-void);
+  color: var(--tt-ink);
+  font-size: .8rem;
+}
+
+.ide button {
+  padding: 4px 10px;
+  font-size: .72rem;
+  letter-spacing: .02em;
+  text-transform: none;
+}
+
+.ide input, .ide select { padding: 3px 6px; font-size: .75rem; }
+.ide label { font-size: .75rem; margin: 0 0 6px; }
+.ide p { margin: 4px 0; line-height: 1.5; }
+.ide small { font-size: .7rem; line-height: 1.45; }
+.ide h2 { font-size: .85rem; margin: 0 0 8px; }
+.ide h3 { margin: 10px 0 6px; font-size: .78rem; }
+/* コマンドや qN → cN のような表記は大文字化すると意味が変わるので、IDE内では変換しない。 */
+.ide label, .ide small, .ide code, .ide pre { text-transform: none; letter-spacing: .01em; }
+
+/* --- title bar & toolbar -------------------------------------------------- */
+
+.ide__titlebar,
+.ide__toolbar,
+.ide__statusbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--tt-rule-mid);
+  background: var(--tt-panel-2);
+}
+
+.ide__titlebar { height: 30px; }
+.ide__titlebar h1 { margin: 0 8px 0 0; font-size: .8rem; font-weight: 700; white-space: nowrap; }
+.ide__badge { margin-left: auto; padding: 2px 8px; border: 1px solid var(--tt-rule-mid); font: .7rem var(--tt-mono); white-space: nowrap; }
+
+.ide__toolbar { min-height: 32px; flex-wrap: wrap; padding-block: 3px; background: var(--tt-panel); }
+.ide__toolbar-note { margin-left: auto; color: var(--tt-ink-mid); font-size: .7rem; }
+.ide__danger:hover:not(:disabled) { border-color: var(--tt-accent); background: var(--tt-accent-wash); color: var(--tt-ink-max); }
+.ide__notice { flex: none; margin: 0; padding: 4px 10px; border-left: 3px solid var(--tt-accent); background: var(--tt-panel); font-size: .75rem; }
+
+/* --- docked panes --------------------------------------------------------- */
+
+.ide__body {
+  /* 列・行・領域は IdeWorkbench がペインの表示状態と大きさから組み立てる。 */
+  flex: 1 1 auto;
+  display: grid;
+  min-height: 0;
+  background: var(--tt-rule-mid);
+}
+
+.ide__slot { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; }
+.ide__slot > .ide__pane { height: 100%; }
+
+/* 閉じるボタン: ペインの見出し行の右端に重ねる */
+.ide__pane-close {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0 !important;
+  border: 0;
+  background: transparent;
+  color: var(--tt-ink-mid);
+  font-size: .85rem !important;
+  line-height: 1;
+}
+.ide__pane-close:hover { color: var(--tt-ink-max); background: var(--tt-interact-wash); }
+
+/* 分割線: 細い線だが、掴める幅は5px取る */
+.ide__splitter { position: relative; background: var(--tt-rule-mid); touch-action: none; }
+.ide__splitter--vertical { cursor: col-resize; }
+.ide__splitter--horizontal { cursor: row-resize; }
+.ide__splitter:hover,
+.ide__splitter:focus-visible { background: var(--tt-interact); }
+.ide__splitter:focus-visible { outline-offset: 0; }
+
+/* 表示メニュー */
+.ide__view-toggles { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.ide__view-label { color: var(--tt-ink-mid); font-size: .7rem; margin-right: 2px; }
+.ide__view-toggles button { padding: 2px 8px; border-color: var(--tt-rule-mid); background: transparent; font-size: .68rem; }
+.ide__view-toggles button[aria-pressed=false] { color: var(--tt-ink-dim); }
+.ide__view-toggles + .ide__badge { margin-left: 8px; }
+
+.ide__pane {
+  display: grid;
+  grid-template-rows: var(--ide-pane-head) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--tt-panel);
+}
+
+.ide__pane-title,
+.ide__doc-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--tt-rule-mid);
+  background: var(--tt-panel-2);
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+.ide__pane-title { align-items: center; padding: 0 8px; }
+.ide__doc-tab,
+.ide__doc-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid var(--tt-rule-mid);
+  background: transparent;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.ide__doc-tab,
+.ide__doc-tabs button[aria-pressed=true] { background: var(--tt-panel); box-shadow: inset 0 2px var(--tt-interact); }
+.ide__doc-tabs button span { color: var(--tt-ink-mid); font-family: var(--tt-mono); }
+
+/* title bar tabs (screen switcher) */
+.ide__tabs { display: flex; gap: 0; margin: 0; align-self: stretch; }
+.ide__tabs button { height: 100%; border-width: 0 1px 0 0; border-color: var(--tt-rule-mid); background: transparent; }
+.ide__tabs button[aria-pressed=true] { background: var(--tt-panel); box-shadow: inset 0 2px var(--tt-interact); }
+
+.ide__pane-body { min-height: 0; overflow: auto; padding: 8px 10px; }
+.ide__editor > .ide__pane-body { padding: 0; }
+
+.ide__group { padding: 0 0 10px; margin: 0 0 10px; border-bottom: 1px solid var(--tt-rule); }
+.ide__group:last-child { border-bottom: 0; }
+.ide__group h3:first-child { margin-top: 0; }
+.ide__group > small { display: block; margin: 2px 0 6px; }
+.ide__group > button { margin: 2px 0 4px; }
+
+.ide__facts { display: grid; gap: 4px; margin: 8px 0; }
+.ide__facts div { display: flex; justify-content: space-between; gap: 8px; }
+.ide__facts dt { color: var(--tt-ink-mid); }
+.ide__facts dd { margin: 0; font-family: var(--tt-mono); }
+
+/* tree-like list for the navigator */
+.ide__tree { display: grid; gap: 0; margin: 0 -10px; padding: 0; list-style: none; }
+.ide__tree button {
+  display: grid;
+  width: 100%;
+  gap: 1px;
+  padding: 5px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--tt-rule);
+  border-left: 2px solid transparent;
+  background: transparent;
+  text-align: left;
+}
+.ide__tree button[aria-pressed=true] { border-left-color: var(--tt-interact); background: var(--tt-interact-wash); box-shadow: none; }
+.ide__tree small { color: var(--tt-ink-mid); font-size: .68rem; }
+
+.ide__messages .ide__pane-body { padding: 0; }
+.ide__messages pre { margin: 1px 0; font-size: .75rem; }
+.ide__inline-code { display: inline !important; margin: 0 !important; font: inherit; font-family: var(--tt-mono); color: var(--tt-ink); }
+
+/* status bar */
+.ide__statusbar { height: 22px; gap: 16px; border-top: 1px solid var(--tt-rule-mid); border-bottom: 0; font: .68rem var(--tt-mono); color: var(--tt-ink-mid); }
+.ide__statusbar output { color: var(--tt-ink); }
+.ide__statusbar span:first-child { min-width: 64px; }
+
+/* --- compact circuit editor inside the work area ------------------------- */
+
+.ide .circuit-workspace { gap: 6px; padding: 6px; border: 0; }
+.ide .circuit-workspace__toolbar { gap: 6px; padding: 4px; }
+.ide .circuit-workspace__tool-group { gap: 4px; padding: 2px 4px; }
+.ide .circuit-workspace__body { gap: 6px; }
+.ide .circuit-workspace__status-row { gap: 6px; padding: 4px 8px; }
+.ide .circuit-workspace__shortcut-hints { font-size: .72rem; }
+
+/* --- narrow screens: stack the panes ------------------------------------- */
+
+@media (max-width: 760px) {
+  .ide { height: auto; overflow: visible; }
+  /* 狭い画面では分割線を使わず縦に積む（格子のインライン指定を打ち消す）。 */
+  .ide__body { display: flex !important; flex-direction: column; }
+  .ide__splitter { display: none; }
+  .ide__view-toggles { margin-left: 0; flex-wrap: wrap; }
+  .ide__pane { grid-template-rows: auto auto; }
+  .ide__pane-title, .ide__doc-tabs { min-height: var(--ide-pane-head); }
+  .ide__pane-body { overflow: visible; }
+  .ide__titlebar { height: auto; flex-wrap: wrap; padding-block: 4px; }
+  .ide__toolbar-note { margin-left: 0; width: 100%; }
+}

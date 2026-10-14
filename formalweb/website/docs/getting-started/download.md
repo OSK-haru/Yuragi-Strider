@@ -160,4 +160,4 @@ Rust toolchainがある環境では、高速化カーネルをPython仮想環境
 
 ## 次に読む
 
-起動できたら、[画面別チュートリアル](../tutorials/index.md)から操作を確認してください。まずはGate-awareモードの[シミュレーションワークスペース](../tutorials/gate-aware/simulate.md)が入口になります。
+起動できたら、[画面別チュートリアル](../tutorials/index.md)から操作を確認してください。まずはGate-awareモードの[IDEワークスペース](../tutorials/gate-aware/index.md)が入口になります。

@@ -1,12 +1,15 @@
 /* ============================================================================
    HOME MODE DRUM // ROTARY SELECTOR
-   正三角柱のドラム。面が3枚、120°ごと。回転半径は面の高さ h に対して
-   r = h / (2·tan 60°) = 0.2887·h。高さを1つ決めれば残りは従属する。
+   四角柱のドラム。面が4枚、90°ごと。回転半径は面の高さ h に対して
+   r = h / (2·tan 45°) = 0.5·h。高さを1つ決めれば残りは従属する。
+   面の数を変えるときは --drum-step と半径の係数の両方を直す
+   （HomeModeDrum.tsx の FACE_ANGLE_DEG も同じ値）。
    ========================================================================= */
 
 .mode-drum {
   --drum-height: clamp(330px, 34vw, 392px);
-  --drum-radius: calc(var(--drum-height) * 0.2887);
+  --drum-step: 90deg;
+  --drum-radius: calc(var(--drum-height) * 0.5);
   --drum-face-tint: 0.62;
   --drum-frame-tint: 0.18;
 
@@ -98,7 +101,7 @@
 
   background: rgb(var(--tt-panel-rgb) / var(--drum-face-tint));
 
-  transform: rotateX(calc(120deg * var(--face-index, 0))) translateZ(var(--drum-radius));
+  transform: rotateX(calc(var(--drum-step) * var(--face-index, 0))) translateZ(var(--drum-radius));
   backface-visibility: hidden;
   transition: opacity 240ms ease;
   opacity: 0.15;
@@ -130,6 +133,14 @@
   );
 }
 
+.mode-drum__face--attack::before {
+  background: repeating-linear-gradient(
+    180deg,
+    var(--tt-accent) 0 3px,
+    transparent 3px 6px
+  );
+}
+
 .mode-drum__face--docs::before {
   background: var(--tt-rule-strong);
 }
@@ -150,9 +161,9 @@
 }
 
 .mode-drum__unit {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -240,7 +251,7 @@
 
   background: rgb(var(--tt-panel-2-rgb) / 0.85);
   font-family: var(--tt-mono);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   letter-spacing: 0.1em;
 }
 
@@ -287,9 +298,10 @@
 }
 
 .mode-drum__cta:hover {
-  border-color: var(--tt-accent-hot);
-  background: var(--tt-accent-hot);
+  border-color: var(--tt-ink-max);
+  background: var(--tt-interact-fill);
   transform: translateX(2px);
+  color: var(--tt-on-interact);
 }
 
 .mode-drum__face--docs .mode-drum__cta {
@@ -299,9 +311,9 @@
 }
 
 .mode-drum__face--docs .mode-drum__cta:hover {
-  border-color: var(--tt-accent);
-  background: var(--tt-accent);
-  color: var(--tt-on-accent);
+  border-color: var(--tt-interact);
+  background: var(--tt-interact-fill);
+  color: var(--tt-on-interact);
 }
 
 .mode-drum__cta--latched {
@@ -382,11 +394,11 @@
 
 .mode-drum__rail-slot:hover,
 .mode-drum__rail-slot:focus-visible {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-interact);
 }
 
 .mode-drum__rail-slot:focus-visible {
-  outline: var(--tt-hair) solid var(--tt-accent);
+  outline: var(--tt-hair) solid var(--tt-interact);
   outline-offset: 3px;
 }
 
@@ -481,9 +493,9 @@
   border: 0;
   background: transparent;
 
-  color: var(--tt-ink-faint);
+  color: var(--tt-ink-dim);
   font-family: var(--tt-mono);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.06em;
 
@@ -519,7 +531,8 @@
 
 .mode-drum__detent--active .mode-drum__detent-tick {
   width: 13px;
-  background: var(--tt-accent);
+  background: var(--tt-interact-fill);
+  color: var(--tt-on-interact);
 }
 
 /* --- Transport ------------------------------------------------------------ */
@@ -553,7 +566,7 @@
 }
 
 .mode-drum__step:hover {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-interact);
   color: var(--tt-ink-max);
 }
 
@@ -591,7 +604,7 @@
 .mode-drum__count {
   color: var(--tt-ink-dim);
   font-family: var(--tt-mono);
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.14em;
 }
@@ -631,7 +644,7 @@ html[data-theme='light'] .mode-drum__cta {
 
 html[data-theme='light'] .mode-drum__cta:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 0 var(--tt-accent-deep);
+  box-shadow: 0 6px 0 var(--tt-rule-strong);
 }
 
 html[data-theme='light'] .mode-drum__face--docs .mode-drum__cta {

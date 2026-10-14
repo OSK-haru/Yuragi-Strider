@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import mimetypes
 import os
 import socket
 import sys
@@ -31,7 +32,9 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.main import app
+from api.main import app, configure_attack_simulator
+from api.attack_live_websocket import MAX_WEBSOCKET_MESSAGE_BYTES
+from api.attack_web_ownership import WebOwnershipSettings
 
 
 def configure_launcher_logging() -> None:
@@ -78,6 +81,10 @@ def configure_static_ui(ui_directory: Path) -> None:
     if not assets_directory.is_dir():
         raise RuntimeError("The built frontend assets directory is missing.")
 
+    # The script runner imports Pyodide's .mjs as modules and streams its .wasm;
+    # browsers require the exact types, and the Windows registry may not supply them.
+    mimetypes.add_type("text/javascript", ".mjs")
+    mimetypes.add_type("application/wasm", ".wasm")
     app.mount("/assets", StaticFiles(directory=assets_directory), name="desktop-assets")
 
     ui_root = ui_directory.resolve()
@@ -128,9 +135,13 @@ def main() -> int:
 
     configure_launcher_logging()
     logging.info("Starting Yuragi-Strider desktop launcher.")
-    ui_directory = resource_root() / "frontend" / "dist"
-    configure_static_ui(ui_directory)
     port = find_available_port(args.host, args.port)
+    # The per-run cookie namespace prevents collisions between desktop instances.
+    ownership_settings = WebOwnershipSettings.desktop(args.host, port)
+    configure_attack_simulator(profile="desktop", ownership_settings=ownership_settings)
+    ui_directory = resource_root() / "frontend" / "dist"
+    # Keep the SPA fallback after API routers so it cannot shadow their paths.
+    configure_static_ui(ui_directory)
     url = f"http://{args.host}:{port}/"
     if not args.no_browser:
         open_when_ready(url, args.host, port)
@@ -140,6 +151,9 @@ def main() -> int:
             app,
             host=args.host,
             port=port,
+            # The opt-in attack simulator uses the bundled WebSocket protocol.
+            ws="websockets",
+            ws_max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
             log_config=None,
             access_log=False,
         )

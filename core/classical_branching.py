@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any
 
 from core.circuit_model import CircuitConfig, GateOperation
@@ -51,7 +52,7 @@ def execute_classical_branches(
     circuit: CircuitConfig,
     *,
     max_branches: int = MAX_CLASSICAL_BRANCHES,
-    environment_rates: EnvironmentRates | None = None,
+    environment_rates: EnvironmentRates | Sequence[EnvironmentRates] | None = None,
     evolution_method: str = "fixed_step_rk4",
     simulation_backend: str = "python_dense",
 ) -> ClassicalBranchingResult:
@@ -73,10 +74,18 @@ def execute_classical_branches(
                 environment_rates,
             )
         )
+        local_rates = (
+            environment_rates
+            if isinstance(environment_rates, Sequence)
+            else (environment_rates,)
+        )
         max_rate = max(
-            float(environment_rates.gamma_down_per_us),
-            float(environment_rates.gamma_up_per_us),
-            float(environment_rates.gamma_phi_per_us),
+            max(
+                float(rate.gamma_down_per_us),
+                float(rate.gamma_up_per_us),
+                float(rate.gamma_phi_per_us),
+            )
+            for rate in local_rates
         )
         if evolution_method == EXPLICIT_CPTP:
             from core.gate_aware_cptp import GateAwareCPTPEvolver

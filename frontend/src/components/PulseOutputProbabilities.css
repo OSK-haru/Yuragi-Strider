@@ -99,7 +99,7 @@
 }
 
 .pulse-output__row[data-computational='false'] .pulse-output__state {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
 }
 
 .pulse-output__bar-track {

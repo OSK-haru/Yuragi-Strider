@@ -38,10 +38,21 @@ export const PULSE_RESULT_KIND = 'quantscope_pulse_result'
  */
 const GENERATOR = 'Yuragi-Strider'
 
+/*
+ * ビルド時に vite.config.ts が埋め込むコミット識別子。Vite を通さずに
+ * このファイルを読む検証スクリプトでは未定義なので、typeof で確かめる。
+ */
+declare const __APP_BUILD__: string | undefined
+function appBuild(): string {
+  return typeof __APP_BUILD__ === 'string' ? __APP_BUILD__ : 'unknown'
+}
+
 export type ResultExportMeta = {
   generator: typeof GENERATOR
   /* 書き出した時刻（ISO 8601, UTC）。実行時刻とは別物。 */
   exported_at: string
+  /* 書き出したアプリのコミット識別子。古いファイルには無い。 */
+  build?: string
 }
 
 export type GateAwareResultBundle = {
@@ -80,6 +91,7 @@ function createMeta(now: Date): ResultExportMeta {
   return {
     generator: GENERATOR,
     exported_at: now.toISOString(),
+    build: appBuild(),
   }
 }
 

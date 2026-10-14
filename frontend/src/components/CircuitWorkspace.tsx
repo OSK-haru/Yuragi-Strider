@@ -26,6 +26,8 @@ type PendingCnotControl = {
 }
 
 type CircuitWorkspaceProps = {
+  minimumLogicalQubits?: 1 | 2
+  maximumLogicalQubits?: number
   circuit: CircuitEditorState
   gateDurationDefaults: GateDurationDefaults
   selectedGateType: GateType | null
@@ -179,6 +181,8 @@ function getWorkspaceStatus({
 }
 
 export function CircuitWorkspace({
+  minimumLogicalQubits = 2,
+  maximumLogicalQubits,
   circuit,
   gateDurationDefaults,
   selectedGateType,
@@ -223,6 +227,7 @@ export function CircuitWorkspace({
   const [showConfigPreview, setShowConfigPreview] = useState(false)
   const [transferStatus, setTransferStatus] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const workspaceRef = useRef<HTMLElement | null>(null)
   const selectedGateInfo = getSelectedGateInfo(circuit, selectedGateId)
   const viewport = useCircuitViewport({
     columnCount: circuit.columns.length,
@@ -242,7 +247,8 @@ export function CircuitWorkspace({
 
   useEffect(() => {
     function handleDeleteKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Delete' || isTypingTarget(event.target) || !canDeleteSelected) {
+      if (event.defaultPrevented || workspaceRef.current?.closest('[hidden]')
+        || event.key !== 'Delete' || isTypingTarget(event.target) || !canDeleteSelected) {
         return
       }
 
@@ -298,7 +304,7 @@ export function CircuitWorkspace({
   }
 
   return (
-    <section className="circuit-workspace" aria-label="回路編集ワークスペース">
+    <section className="circuit-workspace" aria-label="回路編集ワークスペース" ref={workspaceRef}>
       <div className="circuit-workspace__toolbar" aria-label="回路編集ツールバー">
         {/*
           ファイル操作は Word などと同じくツールバーの先頭（左上）に置く。
@@ -347,6 +353,8 @@ export function CircuitWorkspace({
           selectedGateType={selectedGateType}
           selectedControlValue={selectedControlValue}
           logicalQubits={circuit.logical_qubits}
+          minimumLogicalQubits={minimumLogicalQubits}
+          maximumLogicalQubits={maximumLogicalQubits}
           onSelectGateType={onSelectGateType}
           onSelectControlValue={onSelectControlValue}
           onControlMarkerDragStart={onControlMarkerDragStart}

@@ -189,6 +189,41 @@ class PulseSnapshotOptionsRequest(StrictPulseModel):
         return values
 
 
+class PulseReadoutErrorQubitRequest(StrictPulseModel):
+    p10: float = Field(default=0.0, ge=0.0, le=1.0)
+    p01: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_assignment_span(self) -> "PulseReadoutErrorQubitRequest":
+        if self.p10 + self.p01 >= 1.0:
+            raise ValueError("readout assignment span must be positive")
+        return self
+
+
+class PulseReadoutErrorRequest(PulseReadoutErrorQubitRequest):
+    """Independent affine readout errors applied only to observed probabilities."""
+
+    per_qubit: list[PulseReadoutErrorQubitRequest] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+
+    @property
+    def is_enabled(self) -> bool:
+        pairs = self.per_qubit or [self]
+        return any(item.p10 > 0.0 or item.p01 > 0.0 for item in pairs)
+
+    def assignment_errors(self, count: int) -> list[tuple[float, float]]:
+        if not self.per_qubit:
+            return [(self.p10, self.p01)] * count
+        if len(self.per_qubit) != count:
+            raise ValueError(
+                "readout_error.per_qubit must match the transmon count "
+                f"({count}), got {len(self.per_qubit)}"
+            )
+        return [(item.p10, item.p01) for item in self.per_qubit]
+
+
 class PulseSimulateRequest(StrictPulseModel):
     model_id: Literal["driven_two_level_rwa_experimental_v1"] = (
         DRIVEN_TWO_LEVEL_RWA_EXPERIMENTAL_MODEL
@@ -201,6 +236,7 @@ class PulseSimulateRequest(StrictPulseModel):
         "fixed_step_rk4"
     )
     environment: PulseEnvironmentRequest
+    readout_error: PulseReadoutErrorRequest | None = None
     snapshot_options: PulseSnapshotOptionsRequest = Field(
         default_factory=PulseSnapshotOptionsRequest
     )
@@ -222,13 +258,25 @@ class PulseSimulateRequest(StrictPulseModel):
                 "snapshot_options.custom_times_us must not exceed "
                 "total_simulation_time_us"
             )
+        if self.readout_error is not None:
+            self.readout_error.assignment_errors(1)
         return self
+
+
+class PulseQubitCoherenceRequest(StrictPulseModel):
+    t1_max_us: float = Field(gt=0.0)
+    tphi_max_us: float = Field(gt=0.0)
 
 
 class QutritPulsePhysicalEnvironmentRequest(
     PulsePhysicalEnvironmentRequest
 ):
     """Physical environment fields shared with the educational profile."""
+
+    per_qubit: list[PulseQubitCoherenceRequest] = Field(
+        default_factory=list,
+        max_length=4,
+    )
 
 
 class QutritPulseDirectRatesEnvironmentRequest(StrictPulseModel):
@@ -412,6 +460,7 @@ class QutritPulseSimulateRequest(StrictPulseModel):
         "fixed_step_rk4"
     )
     environment: QutritPulseEnvironmentRequest
+    readout_error: PulseReadoutErrorRequest | None = None
     quasi_static_noise: QuasiStaticDetuningNoiseRequest = Field(
         default_factory=QuasiStaticDetuningNoiseRequest
     )
@@ -447,6 +496,8 @@ class QutritPulseSimulateRequest(StrictPulseModel):
             self.environment,
             QutritPulsePhysicalEnvironmentRequest,
         ):
+            if self.environment.per_qubit and len(self.environment.per_qubit) != 1:
+                raise ValueError("environment.per_qubit must contain one qutrit entry")
             transition_12_frequency_ghz(
                 self.environment.qubit_frequency_ghz,
                 self.anharmonicity_mhz,
@@ -468,6 +519,8 @@ class QutritPulseSimulateRequest(StrictPulseModel):
                         or abs(left.imag + right.imag) > 1e-7
                     ):
                         raise ValueError("initial_density_matrix must be Hermitian")
+        if self.readout_error is not None:
+            self.readout_error.assignment_errors(1)
         return self
 
 
@@ -543,6 +596,7 @@ class CoupledTransmonNetworkPulseSimulateRequest(StrictPulseModel):
         "fixed_step_rk4"
     )
     environment: QutritPulseEnvironmentRequest
+    readout_error: PulseReadoutErrorRequest | None = None
     snapshot_options: PulseSnapshotOptionsRequest = Field(
         default_factory=PulseSnapshotOptionsRequest
     )
@@ -630,6 +684,14 @@ class CoupledTransmonNetworkPulseSimulateRequest(StrictPulseModel):
                 "quasi_static_detuning_sigmas_rad_per_us must be empty or "
                 "match transmon_count"
             )
+        if self.readout_error is not None:
+            self.readout_error.assignment_errors(count)
+        if isinstance(self.environment, QutritPulsePhysicalEnvironmentRequest):
+            if self.environment.per_qubit and len(self.environment.per_qubit) != count:
+                raise ValueError(
+                    "environment.per_qubit must match transmon_count "
+                    f"({count})"
+                )
 
         if self.evolution_method == "explicit_cptp":
             dimension = self.local_levels ** count
@@ -664,6 +726,21 @@ PulseApiRequest = Annotated[
 class PulseComplexValue(StrictPulseModel):
     real: float
     imag: float
+
+
+class PulseReadoutAssignmentResponse(StrictPulseModel):
+    p10: float
+    p01: float
+
+
+class PulseReadoutResponse(StrictPulseModel):
+    enabled: bool
+    model_id: Literal["independent_affine_binary_readout_v1"]
+    assignment_errors: list[PulseReadoutAssignmentResponse]
+    true_probabilities: dict[str, float]
+    observed_probabilities: dict[str, float]
+    preserves_state_metrics: Literal[True]
+    noncomputational_level_policy: Literal["preserve"]
 
 
 class PulsePhysicalityResponse(StrictPulseModel):
@@ -819,6 +896,7 @@ class PulseSimulateResponse(StrictPulseModel):
     trajectory: list[PulseTrajectoryPointResponse]
     pulse_end: PulseStateResponse
     final: PulseStateResponse
+    readout: PulseReadoutResponse
     diagnostics: PulseDiagnosticsResponse
     warnings: list[str]
     limitations: list[str]
@@ -941,6 +1019,7 @@ class QutritPulseSimulateResponse(StrictPulseModel):
     leakage: QutritLeakageResponse
     pulse_end: QutritPulseTrajectoryPointResponse
     final: QutritPulseTrajectoryPointResponse
+    readout: PulseReadoutResponse
     diagnostics: QutritPulseDiagnosticsResponse
     warnings: list[str]
     limitations: list[str]
@@ -971,6 +1050,7 @@ class CoupledTransmonNetworkPulseSimulateResponse(StrictPulseModel):
     leakage: QutritLeakageResponse
     pulse_end: TransmonNetworkTrajectoryPointResponse
     final: TransmonNetworkTrajectoryPointResponse
+    readout: PulseReadoutResponse
     diagnostics: dict[str, object]
     warnings: list[str]
     limitations: list[str]

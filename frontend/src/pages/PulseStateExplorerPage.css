@@ -11,7 +11,6 @@
   color: var(--tt-ink);
 }
 
-.pulse-explorer-page__header,
 .pulse-explorer-page__panels,
 .pulse-explorer-page__summary,
 .pulse-explorer-page__empty,
@@ -21,21 +20,12 @@
   margin: 0 auto;
 }
 
-.pulse-explorer-page__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: start;
-  gap: 20px;
-  padding-bottom: 16px;
-  border-bottom: var(--tt-bar) solid var(--tt-accent);
-}
-
 .pulse-explorer-page__eyebrow {
   display: inline-block;
   margin-bottom: 10px;
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -47,25 +37,6 @@
 
 .pulse-explorer-page__eyebrow::after {
   content: ' ]';
-}
-
-.pulse-explorer-page__header h1 {
-  margin: 0;
-  color: var(--tt-ink);
-  font-family: var(--tt-macro);
-  font-size: clamp(1.9rem, 4.5vw, 3.2rem);
-  font-weight: 900;
-  line-height: 0.88;
-  letter-spacing: -0.045em;
-  text-transform: uppercase;
-}
-
-.pulse-explorer-page__scope {
-  max-width: 660px;
-  margin: 12px 0 0;
-  color: var(--tt-ink-mid);
-  font-size: 0.88rem;
-  line-height: 1.55;
 }
 
 .pulse-explorer-page__stale {
@@ -80,7 +51,7 @@
 }
 
 .pulse-explorer-page__stale strong {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
   font-size: 0.78rem;
   letter-spacing: 0.14em;
@@ -105,7 +76,7 @@
 }
 
 .pulse-explorer-page__stale button:hover {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-interact);
 }
 
 .pulse-explorer-page__panel-menu {
@@ -315,7 +286,7 @@
 }
 
 .pulse-explorer-page__empty button:hover {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-interact);
 }
 
 @media (max-width: 640px) {
@@ -323,7 +294,6 @@
     padding: 24px 16px 40px;
   }
 
-  .pulse-explorer-page__header,
   .pulse-explorer-page__section-heading {
     flex-direction: column;
   }

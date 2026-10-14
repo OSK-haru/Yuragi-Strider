@@ -1,0 +1,450 @@
+"""Bounded local circuit IR, independent of actor roles and physical placement."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+import math
+from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+from core.attack_simulation.execution_regime import ExecutionRegime
+from core.attack_simulation.program_request import (
+    MAX_EDITOR_LOGICAL_QUBITS, PROGRAM_INITIALIZATIONS, ProgramRequestError, ProgramSubmitRequest,
+    interleave_operation_id,
+)
+from core.attack_simulation.resource_binding import PhysicalQubitLayout
+from core.circuit_model import CircuitConfig, GateOperation
+from core.gates import Matrix, gate_duration_us, gate_unitary
+
+if TYPE_CHECKING:
+    from core.attack_simulation.scenario_compiler import ResolvedScenarioManifest
+
+
+NATIVE_GATES = ("I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ",
+                "CNOT", "CZ", "CP", "CCX", "SWAP", "QFT", "ORACLE", "MEASURE")
+
+
+@dataclass(frozen=True)
+class CircuitInstruction:
+    kind: str
+    duration_us: float
+    unitary: Matrix | None = None
+    qubits: tuple[int, ...] = (0,)
+    classical_targets: tuple[int, ...] = ()
+    time_group: int = 0
+    depolarizing_probability: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"initialize", "reset", "unitary", "measure"}:
+            raise ValueError("unknown circuit instruction")
+        if not math.isfinite(self.duration_us) or self.duration_us < 0:
+            raise ValueError("invalid instruction duration")
+        probability = float(self.depolarizing_probability)
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError("depolarizing probability must be between zero and one")
+        if self.kind != "unitary" and probability != 0.0:
+            raise ValueError("only unitary instructions may carry a gate error channel")
+        object.__setattr__(self, "depolarizing_probability", probability)
+        qubits = tuple(self.qubits)
+        classical = tuple(self.classical_targets)
+        if (not qubits or len(set(qubits)) != len(qubits)
+                or any(type(q) is not int or q < 0 for q in qubits)):
+            raise ValueError("instruction qubits must be unique non-negative indices")
+        if type(self.time_group) is not int:
+            raise ValueError("time_group must be an integer")
+        if self.kind == "unitary":
+            dimension = 1 << len(qubits)
+            if (self.unitary is None or len(self.unitary) != dimension
+                    or any(len(row) != dimension for row in self.unitary)):
+                raise ValueError("unitary dimension must match its operands")
+            matrix = tuple(tuple(complex(value) for value in row) for row in self.unitary)
+            if any(not math.isfinite(v.real) or not math.isfinite(v.imag) for row in matrix for v in row):
+                raise ValueError("unitary must be finite")
+            object.__setattr__(self, "unitary", matrix)
+        elif self.unitary is not None:
+            raise ValueError("only unitary instructions have matrices")
+        if self.kind == "measure":
+            if (len(classical) != len(qubits) or len(set(classical)) != len(classical)
+                    or any(type(c) is not int or c < 0 for c in classical)):
+                raise ValueError("measurement needs one unique classical target per qubit")
+        elif classical:
+            raise ValueError("only measurements write classical bits")
+        object.__setattr__(self, "qubits", qubits)
+        object.__setattr__(self, "classical_targets", classical)
+
+
+@dataclass(frozen=True)
+class InterleavedVictim:
+    """Server-owned victim run that precedes every shot of an interleaved Program.
+
+    The attacker only names a public reference; the victim circuit, its tenant,
+    its layout and any secret input come from the frozen scenario. ``reference``
+    is ``victim`` for the scenario's real victim and ``training:0``/``training:1``
+    for a known-label calibration victim.
+    """
+
+    reference: str
+    tenant_id: str
+    operation: "CircuitExecutionOperation"
+    layout: PhysicalQubitLayout
+
+    def __post_init__(self) -> None:
+        interleave_operation_id(self.reference)
+        if not isinstance(self.tenant_id, str) or not self.tenant_id.strip():
+            raise ValueError("interleaved victim tenant is required")
+        if (type(self.operation) is not CircuitExecutionOperation or self.operation.shots != 1
+                or self.operation.interleave is not None or self.operation.initialization != "prepare"):
+            raise ValueError("interleaved victim must be one prepared, non-interleaved shot")
+        if not isinstance(self.layout, PhysicalQubitLayout):
+            raise TypeError("interleaved victim layout is required")
+
+
+@dataclass(frozen=True)
+class CircuitExecutionOperation:
+    instructions: tuple[CircuitInstruction, ...]
+    shots: int
+    sampling_seed: int
+    logical_qubits: int = 1
+    classical_bits: int = 1
+    initialization: str = "prepare"
+    interleave: InterleavedVictim | None = None
+
+    def __post_init__(self) -> None:
+        if self.interleave is not None:
+            if type(self.interleave) is not InterleavedVictim:
+                raise TypeError("interleave must be an InterleavedVictim")
+            if self.initialization != "inherit":
+                raise ValueError("interleaved programs must inherit the carried-over state")
+        if not isinstance(self.initialization, str) or self.initialization not in PROGRAM_INITIALIZATIONS:
+            raise ValueError("initialization must be prepare or inherit")
+        if type(self.logical_qubits) is not int or not 1 <= self.logical_qubits <= MAX_EDITOR_LOGICAL_QUBITS:
+            raise ValueError("logical qubits exceed circuit input support")
+        if type(self.classical_bits) is not int or not 1 <= self.classical_bits <= 32:
+            raise ValueError("invalid classical register width")
+        instructions = tuple(self.instructions)
+        if (not instructions or any(not isinstance(item, CircuitInstruction) for item in instructions)
+                or instructions[-1].kind != "measure"):
+            raise ValueError("sampling circuit needs final measurements")
+        initializations = tuple(i for i in instructions if i.kind == "initialize")
+        if self.initialization == "prepare":
+            if (len(initializations) != 1 or instructions[0].kind != "initialize"
+                    or instructions[0].qubits != tuple(range(self.logical_qubits))):
+                raise ValueError("preparation must initialize the declared logical register once")
+        elif initializations:
+            raise ValueError("inherited circuits must not initialize the register")
+        measuring = False
+        measured: set[int] = set()
+        written: set[int] = set()
+        for item in instructions:
+            if any(q >= self.logical_qubits for q in item.qubits):
+                raise ValueError("instruction operand is outside the circuit")
+            if item.kind == "measure":
+                measuring = True
+                if measured.intersection(item.qubits) or written.intersection(item.classical_targets):
+                    raise ValueError("final measurement targets must not repeat")
+                if any(c >= self.classical_bits for c in item.classical_targets):
+                    raise ValueError("measurement writes outside the classical register")
+                measured.update(item.qubits)
+                written.update(item.classical_targets)
+            elif measuring:
+                raise ValueError("only final measurement blocks are supported")
+        if type(self.shots) is not int or not 1 <= self.shots <= 4096:
+            raise ValueError("compiled circuit shots exceed runtime support")
+        if self.shots * len(instructions) > 65536:
+            raise ValueError("compiled circuit instruction work exceeds runtime support")
+        if type(self.sampling_seed) is not int or not 0 <= self.sampling_seed <= 2**32 - 1:
+            raise ValueError("invalid internal sampling seed")
+        object.__setattr__(self, "instructions", instructions)
+
+    @property
+    def catalog_operation_id(self) -> str:
+        return "program.submit"
+
+
+@dataclass(frozen=True)
+class LocalCircuitCompiler:
+    """Native gates on compact operand matrices; no full-register gate copies."""
+
+    supported_gates: tuple[str, ...] = NATIVE_GATES
+    max_shots: int = 4096
+    max_instruction_executions: int = 16384
+    max_program_qubits: int = MAX_EDITOR_LOGICAL_QUBITS
+    max_unitary_elements: int = 262144
+    supported_initializations: tuple[str, ...] = ("prepare",)
+    gate_durations_us: Mapping[str, float] | None = None
+    physical_qubit_ids: tuple[int, ...] = ()
+    cz_gate_calibrations: Mapping[str, Mapping[str, float]] | None = None
+    single_qubit_native_gates: Mapping[str, Mapping[str, Mapping[str, float]]] | None = None
+    single_qubit_gate_decompositions: Mapping[str, tuple[str, ...]] | None = None
+    additional_physical_qubit_ids: tuple[int, ...] = ()
+
+    @classmethod
+    def from_manifest(cls, manifest: ResolvedScenarioManifest) -> LocalCircuitCompiler:
+        if manifest.qpu_service_config.get("execution_regime") != ExecutionRegime.NISQ_PHYSICAL.value:
+            raise ProgramRequestError("this circuit compiler requires nisq_physical")
+        config = manifest.qpu_service_config.get("circuit_execution")
+        required = {"compiler_id", "supported_gates", "max_shots", "max_instruction_executions", "max_program_qubits"}
+        optional = {"max_unitary_elements", "supported_initializations", "gate_durations_us"}
+        optional |= {"cz_gate_calibrations", "single_qubit_native_gates", "single_qubit_gate_decompositions"}
+        if not isinstance(config, Mapping) or not required <= set(config) or set(config) - required - optional:
+            raise ProgramRequestError("circuit_execution requires an explicit local service profile")
+        if config["compiler_id"] != "local_sampling_v1":
+            raise ProgramRequestError("circuit compiler is not supported")
+        gates = config["supported_gates"]
+        if not isinstance(gates, (tuple, list)) or any(not isinstance(g, str) for g in gates):
+            raise ProgramRequestError("supported_gates must be a gate list")
+        region = manifest.qpu_service_config.get("retained_region")
+        physical_ids = region.get("physical_qubit_ids") if isinstance(region, Mapping) else ()
+        alternate = manifest.qpu_service_config.get("dedicated_region")
+        additional = alternate.get("physical_qubit_ids", ()) if isinstance(alternate, Mapping) else ()
+        return cls(tuple(gates), config["max_shots"], config["max_instruction_executions"],
+                   config["max_program_qubits"], config.get("max_unitary_elements", 262144),
+                   config.get("supported_initializations", ("prepare",)),
+                   config.get("gate_durations_us"), tuple(physical_ids or ()),
+                   config.get("cz_gate_calibrations"), config.get("single_qubit_native_gates"),
+                   config.get("single_qubit_gate_decompositions"), tuple(additional))
+
+    def __post_init__(self) -> None:
+        modes = self.supported_initializations
+        if (not isinstance(modes, (tuple, list)) or not modes
+                or any(not isinstance(mode, str) or mode not in PROGRAM_INITIALIZATIONS for mode in modes)
+                or len(set(modes)) != len(modes)):
+            raise ValueError("invalid compiler initialization capabilities")
+        object.__setattr__(self, "supported_initializations", tuple(modes))
+        gates = tuple(self.supported_gates)
+        if not gates or len(set(gates)) != len(gates) or not set(gates) <= set(NATIVE_GATES) or "MEASURE" not in gates:
+            raise ValueError("invalid compiler gate capabilities")
+        for name, maximum in (("max_shots", 4096), ("max_instruction_executions", 65536),
+                              ("max_program_qubits", MAX_EDITOR_LOGICAL_QUBITS), ("max_unitary_elements", 262144)):
+            if type(getattr(self, name)) is not int or not 1 <= getattr(self, name) <= maximum:
+                raise ValueError(f"{name} exceeds compiler support")
+        object.__setattr__(self, "supported_gates", gates)
+        physical_ids = tuple(self.physical_qubit_ids)
+        if (physical_ids and (len(physical_ids) < self.max_program_qubits
+                              or len(set(physical_ids)) != len(physical_ids)
+                              or any(type(value) is not int or value < 0 for value in physical_ids))):
+            raise ValueError("compiler physical allocation must cover its program limit")
+        object.__setattr__(self, "physical_qubit_ids", physical_ids)
+        additional = tuple(self.additional_physical_qubit_ids)
+        if (len(set(additional)) != len(additional)
+                or any(type(value) is not int or value < 0 for value in additional)
+                or set(additional) & set(physical_ids)):
+            raise ValueError("additional physical allocation must be disjoint")
+        object.__setattr__(self, "additional_physical_qubit_ids", additional)
+        calibrated_ids = physical_ids + additional
+        if (self.single_qubit_native_gates is None) != (self.single_qubit_gate_decompositions is None):
+            raise ValueError("single-qubit calibrations and decompositions must be declared together")
+        if self.single_qubit_native_gates is not None:
+            raw = self.single_qubit_native_gates
+            decompositions = self.single_qubit_gate_decompositions
+            if (not isinstance(raw, Mapping) or not physical_ids
+                    or set(raw) != {str(qid) for qid in calibrated_ids}
+                    or not isinstance(decompositions, Mapping) or not decompositions):
+                raise ValueError("single-qubit calibration must cover the frozen physical allocation")
+            frozen = {}
+            for qid, entries in raw.items():
+                if not isinstance(entries, Mapping) or set(entries) != {"rz", "sx", "x"}:
+                    raise ValueError("native single-qubit calibration requires rz, sx and x")
+                values = {}
+                for native, entry in entries.items():
+                    if not isinstance(entry, Mapping) or set(entry) != {"duration_us", "gate_error"}:
+                        raise ValueError("invalid native single-qubit calibration entry")
+                    duration, error = entry["duration_us"], entry["gate_error"]
+                    if (type(duration) not in (int, float) or not math.isfinite(float(duration)) or duration < 0
+                            or type(error) not in (int, float) or not math.isfinite(float(error))
+                            or not 0.0 <= error <= 1.0 or native != "rz" and error > 0.5):
+                        raise ValueError("native single-qubit calibration cannot represent its replacement channel")
+                    values[native] = MappingProxyType({"duration_us": float(duration), "gate_error": float(error)})
+                frozen[qid] = MappingProxyType(values)
+            sequences = {}
+            for gate, sequence in decompositions.items():
+                if (gate not in set(gates) & {"H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ"}
+                        or not isinstance(sequence, (list, tuple)) or not 1 <= len(sequence) <= 16
+                        or any(type(native) is not str or native not in {"rz", "sx", "x"} for native in sequence)):
+                    raise ValueError("invalid declared single-qubit gate decomposition")
+                sequences[gate] = tuple(sequence)
+            object.__setattr__(self, "single_qubit_native_gates", MappingProxyType(frozen))
+            object.__setattr__(self, "single_qubit_gate_decompositions", MappingProxyType(sequences))
+        if self.gate_durations_us is not None:
+            if not isinstance(self.gate_durations_us, Mapping):
+                raise ValueError("gate_durations_us must be a gate-to-duration object")
+            durations = dict(self.gate_durations_us)
+            calibrated_gates = set(self.single_qubit_gate_decompositions or {})
+            if set(durations) != set(gates) - {"MEASURE"} - calibrated_gates:
+                raise ValueError("gate_durations_us must specify every supported unitary gate")
+            for gate, duration in durations.items():
+                if (type(gate) is not str or type(duration) not in (int, float)
+                        or not math.isfinite(float(duration)) or duration < 0):
+                    raise ValueError("gate durations must be finite nonnegative numbers")
+                durations[gate] = float(duration)
+            object.__setattr__(self, "gate_durations_us", MappingProxyType(durations))
+        if self.cz_gate_calibrations is not None:
+            if not isinstance(self.cz_gate_calibrations, Mapping) or not physical_ids:
+                raise ValueError("per-edge CZ calibration requires a frozen physical allocation")
+            calibrations = {}
+            for edge_id, entry in self.cz_gate_calibrations.items():
+                if (type(edge_id) is not str or not isinstance(entry, Mapping)
+                        or set(entry) != {"duration_us", "depolarizing_probability"}):
+                    raise ValueError("invalid per-edge CZ calibration entry")
+                try:
+                    left, right = (int(part) for part in edge_id.split(":"))
+                except (ValueError, TypeError):
+                    raise ValueError("CZ edge IDs must use 'low:high' form") from None
+                if left >= right or left not in calibrated_ids or right not in calibrated_ids:
+                    raise ValueError("CZ calibration edge is outside the retained physical region")
+                duration, probability = entry["duration_us"], entry["depolarizing_probability"]
+                if (type(duration) not in (int, float) or not math.isfinite(float(duration)) or duration < 0
+                        or type(probability) not in (int, float) or not math.isfinite(float(probability))
+                        or not 0.0 <= probability <= 1.0):
+                    raise ValueError("CZ calibration values must be finite and bounded")
+                calibrations[edge_id] = MappingProxyType({
+                    "duration_us": float(duration),
+                    "depolarizing_probability": float(probability),
+                })
+            object.__setattr__(self, "cz_gate_calibrations", MappingProxyType(calibrations))
+
+    def compile(self, request: ProgramSubmitRequest, *, sampling_seed: int,
+                physical_qubit_ids: tuple[int, ...] | None = None) -> CircuitExecutionOperation:
+        if request.initialization not in self.supported_initializations:
+            raise ProgramRequestError("initialization is not supported by this service")
+        if request.shots > self.max_shots:
+            raise ProgramRequestError(f"shots exceed the service limit: {request.shots} > {self.max_shots}")
+        circuit = CircuitConfig.from_dict(request.program.to_circuit_dict())
+        if circuit.logical_qubits > self.max_program_qubits or circuit.classical_bits < 1:
+            raise ProgramRequestError(
+                f"circuit register exceeds service capabilities: {circuit.logical_qubits} qubits > "
+                f"{self.max_program_qubits}" if circuit.logical_qubits > self.max_program_qubits
+                else "circuit register exceeds service capabilities: no classical bit")
+        allocation = self.physical_qubit_ids if physical_qubit_ids is None else tuple(physical_qubit_ids)
+        if (self.physical_qubit_ids and (len(allocation) < circuit.logical_qubits
+                or len(set(allocation)) != len(allocation)
+                or not set(allocation) <= set(self.physical_qubit_ids + self.additional_physical_qubit_ids))):
+            raise ProgramRequestError("compiler allocation is outside the frozen physical calibration")
+        instructions = ([CircuitInstruction("initialize", 0.0, qubits=tuple(range(circuit.logical_qubits)), time_group=-3)]
+                        if request.initialization == "prepare" else [])
+        unitary_elements = 0
+
+        def gate_calibration(gate: GateOperation) -> tuple[float, float]:
+            if gate.type not in self.supported_gates or gate.conditions:
+                raise ProgramRequestError(f"gate or classical condition is not supported by this service: {gate.type}")
+            if self.single_qubit_gate_decompositions is not None and gate.type in self.single_qubit_gate_decompositions:
+                if gate.controls or len(gate.targets) != 1:
+                    raise ProgramRequestError("calibrated single-qubit gates require exactly one operand")
+                physical_id = str(allocation[gate.targets[0]])
+                natives = self.single_qubit_native_gates[physical_id]
+                sequence = self.single_qubit_gate_decompositions[gate.type]
+                duration = sum(natives[native]["duration_us"] for native in sequence)
+                # Local complete-mixing channels commute with all one-qubit
+                # unitaries. Their exact composition is another such channel;
+                # no intermediate physical dynamics is modeled inside a gate.
+                survival = math.prod(1.0 - 2.0 * natives[native]["gate_error"]
+                                     for native in sequence if native != "rz")
+                return duration, 1.0 - survival
+            if gate.type != "CZ" or self.cz_gate_calibrations is None:
+                if self.gate_durations_us is not None and gate.type not in self.gate_durations_us:
+                    raise ProgramRequestError("gate has no declared service duration")
+                duration = (self.gate_durations_us[gate.type]
+                            if self.gate_durations_us is not None else gate_duration_us(gate))
+                return duration, 0.0
+            operands = tuple((gate.controls or []) + gate.targets)
+            if len(operands) != 2:
+                raise ProgramRequestError("CZ requires exactly two physical operands")
+            physical = tuple(allocation[index] for index in operands)
+            edge_id = f"{min(physical)}:{max(physical)}"
+            calibration = self.cz_gate_calibrations.get(edge_id)
+            if calibration is None:
+                raise ProgramRequestError("CZ edge has no eligible snapshot calibration")
+            return calibration["duration_us"], calibration["depolarizing_probability"]
+
+        def append_gate(gate: GateOperation, duration: float, group: int,
+                        depolarizing_probability: float = 0.0) -> None:
+            nonlocal unitary_elements
+            if gate.type not in self.supported_gates or gate.conditions:
+                raise ProgramRequestError(f"gate or classical condition is not supported by this service: {gate.type}")
+            if gate.controls and gate.type not in {"CNOT", "CZ", "CP", "CCX"}:
+                raise ProgramRequestError("this gate does not support control operands")
+            allowed_params = {"RX": {"theta_rad"}, "RY": {"theta_rad"}, "RZ": {"theta_rad"},
+                              "CP": {"theta_rad"}, "CNOT": {"control_value", "control_state"},
+                              "ORACLE": {"marked_index"}}.get(gate.type, set())
+            if not set(gate.params or {}) <= allowed_params:
+                raise ProgramRequestError("gate parameters are not supported by this service")
+            if gate.type == "MEASURE":
+                if len(gate.classical_targets or ()) != len(gate.targets):
+                    raise ProgramRequestError("sampling measurements need classical targets")
+                instructions.append(CircuitInstruction("measure", duration, qubits=tuple(gate.targets),
+                                                       classical_targets=tuple(gate.classical_targets or ()), time_group=group))
+                return
+            operands = tuple((gate.controls or []) + gate.targets)
+            local_indices = {q: i for i, q in enumerate(operands)}
+            unitary_elements += 4 ** len(operands)
+            if unitary_elements > self.max_unitary_elements:
+                raise ProgramRequestError("compiled unitary storage exceeds the service limit")
+            local_gate = GateOperation(gate.type, [local_indices[q] for q in gate.targets],
+                                       [local_indices[q] for q in gate.controls or []], gate.params)
+            matrix = gate_unitary(local_gate, len(operands))
+            instructions.append(CircuitInstruction(
+                "unitary", duration, matrix, operands, time_group=group,
+                depolarizing_probability=depolarizing_probability,
+            ))
+
+        def expand_service_gate(gate: GateOperation) -> tuple[GateOperation, ...]:
+            """Lower logical CNOTs to calibrated single-qubit gates and CZ."""
+            if gate.type != "CNOT":
+                return (gate,)
+            if (self.single_qubit_gate_decompositions is None
+                    or self.cz_gate_calibrations is None):
+                return (gate,)
+            if gate.type not in self.supported_gates or gate.conditions:
+                raise ProgramRequestError(f"gate or classical condition is not supported by this service: {gate.type}")
+            if len(gate.controls or ()) != 1 or len(gate.targets) != 1:
+                raise ProgramRequestError("this service supports CNOT with one control and one target")
+            if gate.controls[0] == gate.targets[0]:
+                raise ProgramRequestError("CNOT control and target must be different")
+            if not set(gate.params or {}) <= {"control_value", "control_state"}:
+                raise ProgramRequestError("CNOT parameters are not supported by this service")
+            control_value = (gate.params or {}).get("control_value", 1.0)
+            control_state = (gate.params or {}).get("control_state")
+            if control_value not in {0.0, 1.0}:
+                raise ProgramRequestError("CNOT control value must be zero or one")
+            if control_state is not None and control_state not in {0.0, 1.0}:
+                raise ProgramRequestError("single-control CNOT state must be zero or one")
+            open_control = (control_state if control_state is not None else control_value) == 0.0
+            control, target = gate.controls[0], gate.targets[0]
+            before = [GateOperation("X", [control])] if open_control else []
+            after = [GateOperation("X", [control])] if open_control else []
+            return tuple((*before, GateOperation("H", [target]),
+                          GateOperation("CZ", [target], [control]),
+                          GateOperation("H", [target]), *after))
+
+        for group, kind, states in ((-2, "X", {"1", "-"}), (-1, "H", {"+", "-"})):
+            prepared = ([q for q, state in enumerate(circuit.initial_states) if state in states]
+                        if request.initialization == "prepare" else [])
+            prepared_gates = [GateOperation(kind, [q]) for q in prepared]
+            calibrations = [gate_calibration(gate) for gate in prepared_gates]
+            duration = max((value[0] for value in calibrations), default=0.0)
+            for index, (gate, (_, probability)) in enumerate(zip(prepared_gates, calibrations)):
+                append_gate(gate, duration if index == 0 else 0.0, group, probability)
+        for column in sorted(circuit.columns, key=lambda c: c.step):
+            expanded = [expand_service_gate(gate) for gate in column.gates
+                        if gate.type != "MEASURE"]
+            layer_count = max((len(gates) for gates in expanded), default=0)
+            for layer_index in range(layer_count):
+                layer = [gates[layer_index] for gates in expanded if layer_index < len(gates)]
+                calibrated = [(gate, *gate_calibration(gate)) for gate in layer]
+                layer_duration = max((item[1] for item in calibrated), default=0.0)
+                for index, (gate, _, error_probability) in enumerate(calibrated):
+                    append_gate(gate, layer_duration if index == 0 else 0.0,
+                                column.step, error_probability)
+            for gate in column.gates:
+                if gate.type == "MEASURE":
+                    append_gate(gate, 0.0, column.step)
+        if request.shots * len(instructions) > self.max_instruction_executions:
+            raise ProgramRequestError(
+                f"program exceeds the service instruction-work limit: {request.shots} shots x "
+                f"{len(instructions)} instructions > {self.max_instruction_executions}")
+        try:
+            return CircuitExecutionOperation(tuple(instructions), request.shots, sampling_seed,
+                                             circuit.logical_qubits, circuit.classical_bits, request.initialization)
+        except ValueError as error:
+            raise ProgramRequestError(str(error)) from error

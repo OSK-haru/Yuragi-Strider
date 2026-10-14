@@ -1,0 +1,164 @@
+/* 画面の枠・見出し・文字の大きさは components/IdeLayout.css（.ide）が持つ。ここでは重ねない。 */
+.attack-live button { cursor: pointer; }
+.attack-live button:disabled { cursor: default; opacity: .55; }
+.attack-live label { display: block; }
+.attack-live input, .attack-live select { min-width: 0; max-width: 100%; width: 100%; box-sizing: border-box; }
+.attack-live input[type=checkbox] { width: auto; }
+.attack-live input[aria-invalid=true], .attack-live select[aria-invalid=true] { border-color: var(--tt-accent); }
+.attack-live small, .attack-live__muted { color: var(--tt-ink-mid); }
+.attack-live small { display: block; overflow-wrap: anywhere; }
+.attack-live__row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.attack-live__setup-categories { display: flex; gap: 8px; overflow-x: auto; margin: 20px 0; padding: 2px 1px 8px; }
+.attack-live__setup-categories button { flex: 1 0 150px; min-width: 0; padding: 10px 12px; text-align: left; }
+.attack-live__setup-categories button[aria-pressed=true] { box-shadow: inset 0 -3px var(--tt-interact); }
+.attack-live__setup-categories small { white-space: nowrap; font-size: .68rem; }
+.attack-live__basis { margin-top: 8px; font-size: .78rem; }
+.attack-live__basis summary { display: inline-block; padding: 2px 0; }
+.attack-live__basis small { margin-top: 4px; }
+.attack-live__changes { padding-left: 22px; }
+.attack-live__changes li { padding: 8px 0; border-bottom: 1px solid var(--tt-rule-mid); }
+.attack-live__changes li small { margin-top: 3px; }
+.attack-live__challenge-list { margin-top: 24px; }
+.attack-live button[aria-pressed=true] { border-color: var(--tt-interact); background: var(--tt-interact-wash); }
+.attack-live__notice { border-left: 3px solid var(--tt-accent); padding: 14px 18px; background: var(--tt-panel); }
+.attack-live__panel { background: var(--tt-panel); border: 1px solid var(--tt-rule-mid); padding: 20px; margin: 16px 0; min-width: 0; }
+.attack-live__actions { display: flex; gap: 12px; }
+.attack-live__modes, .attack-live__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.attack-live__modes button { padding: 18px; text-align: left; }
+.attack-live__modes span { display: block; margin-top: 8px; color: var(--tt-ink-mid); font-size: .8rem; }
+.attack-live__mode-note, .attack-live__credential-note { color: var(--tt-ink-mid); font-size: .85rem; }
+.attack-live__mode-note { margin: 0 0 16px; }
+.attack-live__credential-note { margin: 0 0 16px; }
+.attack-live__field { margin: 16px 0; }
+.attack-live__field small { margin-top: 6px; }
+.attack-live__fields legend { padding: 0 8px; font-weight: 600; }
+.attack-live__source { border-left: 2px solid var(--tt-rule-strong); padding: 12px 18px; margin: 20px 0; }
+.attack-live__source p { margin: 6px 0; }
+.attack-live__source a { display: inline-block; margin-top: 8px; font-size: .8rem; }
+.attack-live__source details { margin-top: 14px; font-size: .85rem; }
+.attack-live summary { cursor: pointer; }
+.attack-live__source li { margin: 8px 0; }
+.attack-live__identity { font-size: .75rem; color: var(--tt-ink-mid); margin-bottom: 8px; }
+.attack-live__challenge p { color: var(--tt-ink-mid); font-size: .85rem; }
+.attack-live__actions { align-items: center; justify-content: start; flex-wrap: wrap; }
+.attack-live__actions span { color: var(--tt-ink-mid); font-size: .8rem; }
+.attack-live__row label { flex: 1; min-width: 150px; margin: 0; }
+.attack-live__row small { width: 100%; }
+.attack-live__pending { list-style: none; padding: 0; }
+.attack-live__pending li { border-top: 1px solid var(--tt-rule-mid); padding: 14px 0; display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+.attack-live code { display: block; font: .72rem var(--tt-mono); overflow-wrap: anywhere; margin: 6px 0; }
+.attack-live__replies { max-height: 580px; overflow: auto; }
+.attack-live__reply { border-top: 1px solid var(--tt-rule-mid); padding: 12px 0; }
+.attack-live pre { white-space: pre-wrap; overflow-wrap: anywhere; font: .8rem/1.55 var(--tt-mono); }
+.attack-live__error { display: block; color: var(--tt-accent-text); font-size: .8rem; margin-top: 8px; }
+.attack-live__terminal-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.attack-live__terminal-heading span { color: var(--tt-ink-mid); font-size: .8rem; }
+.attack-live__terminal-output { max-height: 220px; overflow: auto; background: var(--tt-void); padding: 12px 16px; margin: 12px 0; }
+.attack-live__terminal-output pre { margin: 4px 0; }
+.attack-live__terminal-error { color: var(--tt-accent-text); }
+.attack-live__topology { min-width: 0; }
+.attack-live__topology-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.attack-live__layout-notice { max-width: 320px; font-size: .78rem; color: var(--tt-ink-mid); }
+.attack-live__topology-toolbar, .attack-live__topology-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
+.attack-live__topology-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; }
+.attack-live__topology-legend i { display: inline-grid; place-items: center; width: 16px; height: 16px; border: 2px solid var(--tt-rule-strong); border-radius: 50%; font-style: normal; }
+.attack-live__topology-legend .is-available { background: #378a5a; }
+.attack-live__topology-legend .is-unusable { color: #a62828; border-color: #a62828; border-radius: 2px; font-weight: 800; }
+.attack-live__topology-legend .is-active { border: 4px double #c49a19; background: #e8c84f; }
+.attack-live__topology-legend .is-other { outline: 2px dashed #6e66b4; }
+.attack-live__graph-scroll { overflow: auto; border: 1px solid var(--tt-rule-mid); background: var(--tt-void); }
+.attack-live__graph { display: block; width: 100%; min-width: 760px; height: auto; }
+.attack-live__edge { stroke: var(--tt-rule-mid); stroke-width: 2; }
+.attack-live__node { cursor: pointer; outline: none; }
+.attack-live__node circle:not(.attack-live__tenant-ring) { fill: #378a5a; stroke: #1d5e37; stroke-width: 2; }
+.attack-live__node.is-active circle:not(.attack-live__tenant-ring) { fill: #e8c84f; stroke: #70580b; stroke-width: 5; }
+.attack-live__node.is-other circle:not(.attack-live__tenant-ring) { fill: #a8a1e1; stroke: #514a94; stroke-width: 4; }
+.attack-live__node.is-unusable circle:not(.attack-live__tenant-ring) { fill: #e6b1b1; stroke: #a62828; stroke-width: 2; }
+.attack-live__node:focus circle:not(.attack-live__tenant-ring), .attack-live__node.is-selected circle:not(.attack-live__tenant-ring) { stroke: #111; stroke-width: 5; }
+.attack-live__node text { fill: #111; text-anchor: middle; font: 11px var(--tt-mono); pointer-events: none; }
+.attack-live__cross { stroke: #a00000; stroke-width: 4; pointer-events: none; }
+.attack-live__tenant-ring { fill: none; stroke: #514a94; stroke-width: 3; stroke-dasharray: 4 3; }
+.attack-live__region-swap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 1px solid var(--tt-rule-mid); }
+.attack-live__region-preview { max-width: 100%; overflow-wrap: anywhere; color: var(--tt-ink-mid); }
+.attack-live__noise-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.attack-live__noise-values div { border: 1px solid var(--tt-rule-mid); padding: 8px; }
+.attack-live__noise-values dt { color: var(--tt-ink-mid); font-size: .72rem; }
+.attack-live__noise-values dd { margin: 4px 0 0; font-family: var(--tt-mono); }
+.attack-live__modal { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.7); display: grid; place-items: center; padding: 24px; }
+.attack-live__modal .attack-live__panel { max-width: 480px; }
+@media (max-width: 760px) {
+  .attack-live { padding: 24px 12px 48px; }
+  .attack-live__fields, .attack-live__modes { grid-template-columns: 1fr; }
+  .attack-live__topology-heading { flex-direction: column; }
+  .attack-live__noise-values { grid-template-columns: 1fr; }
+  .attack-live__setup-categories button { flex-basis: 138px; }
+  .attack-live__pending li { flex-direction: column; align-items: start; }
+}
+
+/* ==========================================================================
+   攻撃シミュレーター固有のIDE調整。枠・ペイン・タブ・ステータスバーは
+   components/IdeLayout.css が持つ。
+   ========================================================================== */
+
+.ide .attack-live__muted { font-size: .75rem; }
+.ide .attack-live__panel { padding: 10px 12px; margin: 8px 0; }
+.ide .attack-live__field { margin: 10px 0; }
+.ide .attack-live__row { gap: 6px; }
+.ide__editor .attack-live__panel,
+.ide__editor > .ide__pane-body > section { margin: 0; padding: 10px 12px; border: 0; }
+
+/* navigator: setup categories become a tree-like list */
+.ide .attack-live__setup-categories { display: grid; gap: 0; margin: -8px -10px 8px; padding: 0; overflow: visible; }
+.ide .attack-live__setup-categories button {
+  display: grid;
+  gap: 1px;
+  padding: 5px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--tt-rule);
+  border-left: 2px solid transparent;
+  background: transparent;
+  text-align: left;
+}
+.ide .attack-live__setup-categories button[aria-pressed=true] { border-left-color: var(--tt-interact); background: var(--tt-interact-wash); box-shadow: none; }
+.ide .attack-live__setup-categories small { font-size: .68rem; }
+
+.ide .attack-live__credential-note,
+.ide .attack-live__mode-note { font-size: .72rem; margin: 6px 0; }
+.ide .attack-live__source { margin: 0; padding: 0; border: 0; }
+
+/* messages: terminal-like log */
+.ide__messages .attack-live__terminal-output { max-height: none; margin: 0; padding: 6px 10px; background: transparent; }
+.ide__messages .attack-live__terminal > small { padding: 0 10px 6px; }
+.ide__messages .attack-live__replies { max-height: none; padding: 0 10px; }
+.ide__messages .attack-live__pending { margin: 0; padding: 0 10px; }
+.ide__messages .ide__pane-body > .attack-live__muted { padding: 6px 10px; }
+
+/* --- attacker terminal: command log and prompt ---------------------------- */
+
+.ide__messages .attack-live__terminal { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ide__messages .attack-live__terminal > .attack-live__terminal-output { flex: none; max-height: 40%; overflow: auto; border-bottom: 1px solid var(--tt-rule); }
+.ide__terminal-log { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 4px 10px; background: var(--tt-void); }
+.ide__terminal-log pre[data-kind=input] { color: var(--tt-ink-max); }
+.ide__terminal-log pre[data-kind=output] { color: var(--tt-ink-mid); }
+.ide__terminal-log pre[data-kind=error] { color: var(--tt-accent-text); }
+.ide__terminal-hint { color: var(--tt-ink-dim); }
+.ide__prompt { display: flex; align-items: center; gap: 6px; flex: none; padding: 3px 10px; border-top: 1px solid var(--tt-rule); background: var(--tt-void); }
+.ide__prompt label { flex: none; margin: 0; color: var(--tt-signal); font: .75rem var(--tt-mono); white-space: nowrap; text-transform: none; }
+.ide__prompt input { flex: 1; min-width: 0; padding: 2px 0; border: 0; background: transparent; font: .75rem var(--tt-mono); letter-spacing: 0; }
+.ide__prompt input::placeholder { text-transform: none; letter-spacing: 0; }
+.ide__messages:has(.attack-live__terminal) .ide__pane-body { overflow: hidden; }
+
+.attack-live__snippet { margin: 6px 0; padding: 8px; overflow-x: auto; font-size: 12px; line-height: 1.5; white-space: pre; border: 1px solid var(--border, #8884); border-radius: 6px; }
+
+/* --- script editor: files, text, run ------------------------------------- */
+.attack-script { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.attack-script__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--tt-rule); }
+.attack-script__files { display: flex; flex-wrap: wrap; gap: 0; }
+.attack-script__files button { border-radius: 0; font: .72rem var(--tt-mono); text-transform: none; letter-spacing: 0; }
+.attack-script__files button[aria-selected=true] { background: var(--tt-panel); box-shadow: inset 0 -2px var(--tt-interact); }
+.attack-script__new { display: flex; gap: 4px; }
+.attack-script__new input { width: 12em; font: .72rem var(--tt-mono); text-transform: none; letter-spacing: 0; }
+.attack-script__spacer { flex: 1; }
+.attack-script__note { margin: 0; padding: 4px 10px; color: var(--tt-accent-text); font-size: .75rem; }
+.attack-script__text { flex: 1 1 auto; min-height: 12rem; margin: 0; padding: 8px 10px; border: 0; resize: none; background: var(--tt-void); color: var(--tt-ink-max); font: .8rem/1.5 var(--tt-mono); letter-spacing: 0; text-transform: none; tab-size: 4; white-space: pre; overflow: auto; }
+.attack-script__footer { padding: 4px 10px; color: var(--tt-ink-dim); }

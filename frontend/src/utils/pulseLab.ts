@@ -75,6 +75,14 @@ export const initialPulseLabForm: PulseLabForm = {
   networkQuasiStaticSigmaRadPerUs: 0,
   networkQuasiStaticAdjacentCorrelation: 0,
   networkQuasiStaticQuadratureOrder: 3,
+  networkPerQubitCalibrationEnabled: false,
+  networkT1MaxUs: [100, 100, 100, 100],
+  networkTphiMaxUs: [100, 100, 100, 100],
+  networkReadoutP10: [0.005, 0.005, 0.005, 0.005],
+  networkReadoutP01: [0.013, 0.013, 0.013, 0.013],
+  readoutErrorEnabled: false,
+  readoutP10: 0.005,
+  readoutP01: 0.013,
   snapshotCount: 101,
 }
 
@@ -98,7 +106,7 @@ export function deriveModelId(
   return localLevels === 2 ? TWO_LEVEL_PULSE_MODEL : QUTRIT_PULSE_MODEL
 }
 
-export function validatePulseLabForm(form: PulseLabForm): PulseLabErrors {
+export function validatePulseLabForm(form: PulseLabForm, transmonCount = 4): PulseLabErrors {
   const errors: PulseLabErrors = {}
   const positive = (key: keyof PulseLabForm, value: number, label: string) => {
     if (!Number.isFinite(value) || value <= 0) {
@@ -156,6 +164,17 @@ export function validatePulseLabForm(form: PulseLabForm): PulseLabErrors {
   ) {
     errors.snapshotCount = 'スナップショット数は2から1001までの整数である必要があります。'
   }
+  if (form.readoutErrorEnabled) {
+    if (!Number.isFinite(form.readoutP10) || form.readoutP10 < 0 || form.readoutP10 > 1) {
+      errors.readoutP10 = 'p10は0以上1以下の有限値にしてください。'
+    }
+    if (!Number.isFinite(form.readoutP01) || form.readoutP01 < 0 || form.readoutP01 > 1) {
+      errors.readoutP01 = 'p01は0以上1以下の有限値にしてください。'
+    }
+    if (!errors.readoutP10 && !errors.readoutP01 && form.readoutP10 + form.readoutP01 >= 1) {
+      errors.readoutP01 = 'p10 + p01は1未満にしてください。'
+    }
+  }
 
   if (form.modelId !== TWO_LEVEL_PULSE_MODEL) {
     if (!Number.isFinite(form.anharmonicityMhz) || form.anharmonicityMhz >= 0) {
@@ -175,6 +194,26 @@ export function validatePulseLabForm(form: PulseLabForm): PulseLabErrors {
     }
   }
   if (form.modelId === COUPLED_TRANSMON_NETWORK_PULSE_MODEL) {
+    if (form.networkPerQubitCalibrationEnabled) {
+      for (let index = 0; index < transmonCount; index += 1) {
+        const t1 = form.networkT1MaxUs[index]
+        const tphi = form.networkTphiMaxUs[index]
+        const p10 = form.networkReadoutP10[index]
+        const p01 = form.networkReadoutP01[index]
+        if (!Number.isFinite(t1) || t1 <= 0) {
+          errors.networkT1MaxUs = `q${index}の最大T1は0より大きい値にしてください。`
+        }
+        if (!Number.isFinite(tphi) || tphi <= 0) {
+          errors.networkTphiMaxUs = `q${index}の最大Tφは0より大きい値にしてください。`
+        }
+        if (form.readoutErrorEnabled && (
+          !Number.isFinite(p10) || !Number.isFinite(p01)
+          || p10 < 0 || p10 > 1 || p01 < 0 || p01 > 1 || p10 + p01 >= 1
+        )) {
+          errors.networkReadoutP01 = `q${index}の読み出し誤差が有効範囲外です。`
+        }
+      }
+    }
     if (!Number.isFinite(form.networkDetuningQ0RadPerUs)) {
       errors.networkDetuningQ0RadPerUs = 'q0の基準離調は有限値にしてください。'
     }
@@ -312,6 +351,9 @@ export function buildPulsePayload(
     evolution_method: form.evolutionMethod,
     backend: form.backend,
     environment,
+    ...(form.readoutErrorEnabled ? {
+      readout_error: { p10: form.readoutP10, p01: form.readoutP01 },
+    } : {}),
     snapshot_options: {
       uniform_count: form.snapshotCount,
       custom_times_us: [pulseDurationUs(form)],
@@ -372,6 +414,12 @@ export function buildTransmonNetworkPayload(
         qubit_frequency_ghz: form.qubitFrequencyGhz,
         t1_max_us: form.t1MaxUs,
         tphi_max_us: form.tphiMaxUs,
+        ...(form.networkPerQubitCalibrationEnabled ? {
+          per_qubit: Array.from({ length: transmonCount }, (_, index) => ({
+            t1_max_us: form.networkT1MaxUs[index] ?? form.t1MaxUs,
+            tphi_max_us: form.networkTphiMaxUs[index] ?? form.tphiMaxUs,
+          })),
+        } : {}),
       }
     : {
         input_mode: 'direct_rates',
@@ -422,6 +470,18 @@ export function buildTransmonNetworkPayload(
       : 'fixed_step_rk4',
     backend: form.backend,
     environment,
+    ...(form.readoutErrorEnabled ? {
+      readout_error: {
+        p10: form.readoutP10,
+        p01: form.readoutP01,
+        ...(form.networkPerQubitCalibrationEnabled ? {
+          per_qubit: Array.from({ length: transmonCount }, (_, index) => ({
+            p10: form.networkReadoutP10[index] ?? form.readoutP10,
+            p01: form.networkReadoutP01[index] ?? form.readoutP01,
+          })),
+        } : {}),
+      },
+    } : {}),
     snapshot_options: {
       uniform_count: Math.min(form.snapshotCount, snapshotLimit),
       custom_times_us: [...boundaryTimes].filter(

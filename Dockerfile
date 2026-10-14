@@ -10,6 +10,8 @@ RUN pip install --no-cache-dir -r requirements-runtime.txt
 
 COPY api ./api
 COPY core ./core
+# Verified historical device calibration used by the attack simulator profiles.
+COPY data/device_snapshots ./data/device_snapshots
 
 ENV PYTHONUNBUFFERED=1
 

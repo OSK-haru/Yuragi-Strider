@@ -61,7 +61,7 @@
 }
 
 .metric-timeline__legend-item--ideal {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
 }
 
 .metric-timeline__chart {

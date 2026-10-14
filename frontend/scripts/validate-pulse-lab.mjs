@@ -25,9 +25,10 @@ assert(
   !pulseLabPageSource.includes('onOpenStateExplorer'),
   'Pulse Lab must not link to the gate-aware State Explorer',
 )
+/* Pulse IDE: the work area switches to the Pulse-level State Explorer in place. */
 assert(
-  pulseLabPageSource.includes('onOpenPulseStateExplorer'),
-  'Pulse Lab must link to the Pulse-level State Explorer',
+  pulseLabPageSource.includes("setIdeView('explorer')") && pulseLabPageSource.includes('ide.renderExplorer('),
+  'Pulse IDE must open the Pulse-level State Explorer',
 )
 assert(
   pulseLabPageSource.includes('複数レーン同時実行。'),
@@ -116,6 +117,25 @@ assert(
 assert(qutritPayload.anharmonicity_mhz === -100, 'qutrit anharmonicity missing')
 assert(qutritPayload.pulse.drag_beta_us === 0.001, 'qutrit DRAG missing')
 assert(!('gamma_down_per_us' in qutritPayload.environment), 'inactive two-level rate leaked')
+assert(!('readout_error' in qutritPayload), 'disabled readout error leaked into payload')
+
+const readoutPayload = buildPulsePayload({
+  ...initialPulseLabForm,
+  readoutErrorEnabled: true,
+  readoutP10: 0.005,
+  readoutP01: 0.013,
+})
+assert(readoutPayload.readout_error.p10 === 0.005, 'readout p10 missing')
+assert(readoutPayload.readout_error.p01 === 0.013, 'readout p01 missing')
+assert(
+  Object.keys(validatePulseLabForm({
+    ...initialPulseLabForm,
+    readoutErrorEnabled: true,
+    readoutP10: 0.6,
+    readoutP01: 0.4,
+  })).length > 0,
+  'non-positive readout assignment span was not rejected',
+)
 
 const twoLevelForm = {
   ...initialPulseLabForm,
@@ -256,6 +276,28 @@ assert(networkPayload.transmon_count === 3, 'network transmon count missing')
 assert(networkPayload.drives.length === 2, 'network lane schedule missing')
 assert(networkPayload.couplings.length === 2, 'network nearest-neighbor couplings missing')
 assert(networkPayload.evolution_method === 'fixed_step_rk4', 'network must use RK4')
+const networkReadoutPayload = buildTransmonNetworkPayload(
+  { ...networkForm, readoutErrorEnabled: true, readoutP10: 0.01, readoutP01: 0.02 },
+  networkCircuit,
+)
+assert(networkReadoutPayload.readout_error.p10 === 0.01, 'network readout p10 missing')
+assert(networkReadoutPayload.readout_error.p01 === 0.02, 'network readout p01 missing')
+const calibratedNetworkPayload = buildTransmonNetworkPayload(
+  {
+    ...networkForm,
+    readoutErrorEnabled: true,
+    networkPerQubitCalibrationEnabled: true,
+    networkT1MaxUs: [50, 75, 125, 100],
+    networkTphiMaxUs: [60, 90, 140, 100],
+    networkReadoutP10: [0.01, 0.02, 0.03, 0.04],
+    networkReadoutP01: [0.04, 0.03, 0.02, 0.01],
+  },
+  networkCircuit,
+)
+assert(calibratedNetworkPayload.environment.per_qubit.length === 3, 'network coherence calibration count mismatch')
+assert(calibratedNetworkPayload.environment.per_qubit[1].t1_max_us === 75, 'network q1 T1 calibration missing')
+assert(calibratedNetworkPayload.readout_error.per_qubit.length === 3, 'network readout calibration count mismatch')
+assert(calibratedNetworkPayload.readout_error.per_qubit[2].p10 === 0.03, 'network q2 readout calibration missing')
 
 const cptpPayload = buildPulsePayload({
   ...initialPulseLabForm,
@@ -344,6 +386,31 @@ assert(qutritView.hasPerPointDensityMatrix, 'qutrit trajectory carries density m
 assert(
   nearestPulsePointIndex(qutritView.points, 0.019) === 1,
   'cursor did not snap to the nearest trajectory sample',
+)
+
+const qutritReadoutView = buildPulseExplorerView(
+  {
+    ...qutritExplorerResponse(),
+    readout: {
+      enabled: true,
+      model_id: 'independent_affine_binary_readout_v1',
+      assignment_errors: [{ p10: 0.1, p01: 0.1 }],
+      true_probabilities: { '0': 0.5, '1': 0.25, '2': 0.25 },
+      observed_probabilities: { '0': 0.5, '1': 0.25, '2': 0.25 },
+      preserves_state_metrics: true,
+      noncomputational_level_policy: 'preserve',
+    },
+  },
+  initialPulseLabForm,
+)
+assert(qutritReadoutView.readoutEnabled, 'Pulse explorer did not enable readout display')
+assert(
+  qutritReadoutView.points[1].observedPopulations['2'] === 0.25,
+  'qutrit leakage must be preserved by binary readout error',
+)
+assert(
+  Math.abs(qutritReadoutView.points[1].observedPopulations['0'] - 0.475) < 1e-12,
+  'Pulse explorer did not apply binary readout error to the selected point',
 )
 
 const baseSignature = pulseSetupSignature(initialPulseLabForm, networkCircuit)

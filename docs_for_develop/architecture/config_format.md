@@ -68,6 +68,8 @@ Physical input contains:
 - `qubit_frequency_ghz`
 - `t1_max_us`
 - `tphi_max_us`
+- `per_qubit` (optional physical-mode list; one entry per logical qubit, each
+  containing `t1_max_us` and `tphi_max_us`)
 - `ideal_reference`
 
 Older `1.0` configs with `environment_model` values such as

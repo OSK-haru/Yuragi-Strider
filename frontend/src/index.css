@@ -21,7 +21,7 @@
   --tt-ink: #eaeaea;
   --tt-ink-max: #ffffff;
   --tt-ink-mid: #a3a3a3;
-  --tt-ink-dim: #6e6e6e;
+  --tt-ink-dim: #8a8a8a;
   --tt-ink-faint: #4a4a4a;
 
   /* -- Accent (aviation / hazard red) — the ONLY accent ------------------ */
@@ -29,6 +29,23 @@
   --tt-accent-hot: #ff2a2a;
   --tt-accent-deep: #7a0f0f;
   --tt-accent-wash: #24090a;
+  /*
+   * 文字に使う赤。--tt-accent のままだと暗地で 4.3:1 前後しかなく、小さい
+   * 文字では WCAG 1.4.3 の 4.5:1 に届かない。塗り（白文字を載せる側）は
+   * --tt-accent のまま据え置く。
+   */
+  --tt-accent-text: #f23c3c;
+
+  /*
+   * 操作状態（ホバー・押下・選択中・現在地）の色。赤は警告・エラー・
+   * 破壊的操作に取っておくので、操作状態はインクの反転で示す。
+   * インク系トークンを参照するだけなので、ライトテーマでも自動で追従する。
+   */
+  --tt-interact: var(--tt-ink-max);
+  --tt-interact-rgb: var(--tt-ink-rgb);
+  --tt-interact-wash: rgb(var(--tt-ink-rgb) / 0.08);
+  --tt-interact-fill: var(--tt-ink);
+  --tt-on-interact: var(--tt-void);
   --tt-on-accent: #ffffff;
 
   /* -- Signal (terminal green) — reserved for live-run status ONLY ------- */
@@ -115,13 +132,14 @@ html[data-theme='light'] {
   --tt-ink: #252320;
   --tt-ink-max: #090909;
   --tt-ink-mid: #5c5850;
-  --tt-ink-dim: #777168;
+  --tt-ink-dim: #69635a;
   --tt-ink-faint: #a29c92;
 
   --tt-accent: #b71414;
   --tt-accent-hot: #d81919;
   --tt-accent-deep: #760f0f;
   --tt-accent-wash: #f5dddd;
+  --tt-accent-text: var(--tt-accent);
   --tt-on-accent: #ffffff;
   --tt-signal: #197a25;
 
@@ -239,7 +257,7 @@ hr {
 }
 
 :focus-visible {
-  outline: var(--tt-bar) solid var(--tt-accent);
+  outline: var(--tt-bar) solid var(--tt-interact);
   outline-offset: 1px;
 }
 
@@ -264,7 +282,8 @@ hr {
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--tt-accent);
+  background: var(--tt-interact-fill);
+  color: var(--tt-on-interact);
 }
 
 /* ============================================================================

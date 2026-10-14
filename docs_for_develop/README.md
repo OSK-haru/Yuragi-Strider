@@ -1,10 +1,12 @@
 # Yuragi-Strider Documentation Index
 
-## Current Implementation Status
+## Implementation Snapshot (2026-09-07)
 
-This page is the documentation entry point for the implementation state as of
-2026-08-14. Runtime code and tests take precedence if another document
-disagrees with this page.
+The application details below are a historical snapshot as of 2026-09-07,
+not a live status report. Runtime code and tests take precedence when they
+disagree with this snapshot. For attack-simulation status, use the dedicated
+[design and progress index](development/attack-simulation/README.md) and
+[implementation evidence](development/attack-simulation/progress.md).
 
 ### User-Facing Application
 
@@ -28,12 +30,45 @@ disagrees with this page.
   record). See "Divergent export formats" in `architecture/module_structure.md`
   for the `kind` discriminators this format uses.
 - Physical-unit environment inputs in the React simulation flow.
+- Optional per-qubit T1/Tphi maxima and independent p10/p01 readout calibration
+  in both Gate-aware multi-qubit runs and the coupled transmon-network path.
+  The pre-tenant physical baseline is recorded as
+  `yuragi_strider_physical_baseline_v1`; see
+  [`docs/validation/physical-model-baseline-v1.md`](../docs/validation/physical-model-baseline-v1.md).
+  Shared values remain the backward-compatible default.
+- Gate-aware toolbox (2026-10-11): before a run, the user picks which state
+  explorer panels to show (the eight existing panels, on by default) and which
+  extra metrics to compute. Snapshot metrics (von Neumann entropy of a
+  multi-qubit subset, concurrence, negativity, mutual information, trace
+  distance to the ideal state, weight >= 2 Pauli expectations) come back in the
+  `toolbox` block of `/api/simulate`; process metrics and the T1/Ramsey sweeps
+  run as follow-up requests. Metrics that are functions of already displayed
+  values (linear entropy, Bures distance, one-qubit entropy, weight-1 Paulis,
+  process fidelity, correlation spectra of the zero-Hamiltonian idle) are
+  deliberately excluded. Production code is NumPy (`core/state_metrics.py`,
+  `core/toolbox_metrics.py`, `core/process_characterization.py`); QuTiP is
+  the test reference only. The standalone T1/Ramsey panels were removed from
+  the simulation page; their endpoints are now toolbox entries.
+- Dedicated one-qubit T1 sweep with a bounded, dependency-free fit to
+  `P1(t) = A exp(-t / T1) + B`; the UI reports fitted T1, observation floor,
+  amplitude, R-squared, RMSE, and the environment-derived effective T1.
+- Dedicated Ramsey sweep with explicit detuning, readout-aware observation,
+  exponential/Gaussian envelope fits, and AICc candidate ranking.
 - Result summary, metric timeline, output probabilities, diagnostics, model
   details, warnings, API debug details, and state snapshots.
 
 ### Gate-Aware Simulation
 
 - `POST /api/simulate`.
+- `POST /api/analysis/t1-sweep` for excited-state decay sampling and the
+  single-exponential-plus-observation-floor fit.
+- `POST /api/analysis/ramsey-sweep` for free-precession sampling and damped
+  cosine envelope comparison.
+- `POST /api/analysis/process-characterization` for the circuit's average gate
+  fidelity: exact product-state tomography (4^n runs, with the chi matrix) up
+  to 3 qubits, an unbiased Pauli-eigenstate Monte Carlo estimate with standard
+  error up to 6 qubits. Circuits with MEASURE or classical conditions are
+  rejected because their ideal process is not a single unitary.
 - Preset compatibility through `circuit_preset`: `bell`, `teleportation`, and
   `bit_flip_repetition`.
 - Arbitrary circuits through `circuit_config`.
@@ -124,12 +159,34 @@ gate_aware_hamiltonian_lindblad_v1
 - Calibrated real-hardware prediction.
 - Pulse execution through Rust. The Rust preview kernel covers only the
   gate-aware dense path.
-- Measurement post-selection and readout error.
+- Measurement post-selection.
 - Trajectory (stochastic) execution; the representation slot is reserved and
   reported as `trajectory_available: false`.
 - Godot production UI.
 
 ## Canonical Documents
+
+### Attack Simulation (status recorded 2026-10-02)
+
+The attack-simulation mode has an internal single-QPU Reset-leakage runtime,
+scenario compilation, state and job management, observation accounting, and
+hidden evaluation. A user-facing attack workspace, public service API, and
+untrusted-code sandbox are not implemented. Free and challenge sessions share
+one scenario foundation; the shared-QPU path is the first implemented profile,
+not a product-wide requirement. See the [design and progress index](development/attack-simulation/README.md)
+for agreed directions, proposals, implementation evidence, and open decisions.
+The [layered discussion summary](development/attack-simulation/layered-discussion.md)
+separates product goals, UX, threat assumptions, service behavior, state/time,
+physics, evaluation, and implementation concerns. These are discussion layers,
+not agreed component boundaries. The dated code evidence is in
+[progress.md](development/attack-simulation/progress.md).
+The [service and access model](development/attack-simulation/service-and-access-model.md)
+distinguishes device physics, service capabilities, and attacker access. The
+common workflow is not restricted to job submission; additional access paths
+remain candidates, not implementation commitments. See the
+[September 19 change summary](development/attack-simulation/changes-2026-09-19.md)
+for the updated objectives, workflow, evidence boundaries, and open decisions.
+The physical baseline remains `699a110` / `yuragi-strider-physical-baseline-v1`.
 
 | Topic | Document |
 |---|---|
@@ -146,6 +203,7 @@ gate_aware_hamiltonian_lindblad_v1
 | Qutrit contract | [`physics/pulse-extension-b-qutrit-contract.md`](physics/pulse-extension-b-qutrit-contract.md) |
 | Pulse API | [`architecture/pulse-api-contract.md`](architecture/pulse-api-contract.md) |
 | Pulse validation | [`validation/pulse-baseline-a-report.md`](validation/pulse-baseline-a-report.md) |
+| Pre-tenant physical baseline | [`docs/validation/physical-model-baseline-v1.md`](../docs/validation/physical-model-baseline-v1.md) |
 | Closed qutrit validation | [`validation/pulse-b-closed-qutrit.md`](validation/pulse-b-closed-qutrit.md) |
 | Qutrit dissipation validation | [`validation/pulse-b-qutrit-dissipation.md`](validation/pulse-b-qutrit-dissipation.md) |
 | Qutrit convergence validation | [`validation/pulse-b-qutrit-convergence.md`](validation/pulse-b-qutrit-convergence.md) |
@@ -163,8 +221,8 @@ gate_aware_hamiltonian_lindblad_v1
 ## Document Status Rules
 
 Paths below are relative to this `docs_for_develop/` directory. The separate
-top-level `docs/` directory holds only generated performance notes and the
-Windows desktop distribution guide.
+top-level `docs/` directory holds generated performance notes, the physical
+model baseline validation record, and the Windows desktop distribution guide.
 
 - `architecture/`, `physics/`, and final reports under `validation/` describe
   the current implementation unless explicitly marked otherwise.

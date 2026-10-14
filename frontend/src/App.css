@@ -18,15 +18,19 @@ button {
   transition: background 120ms linear, border-color 120ms linear, color 120ms linear;
 }
 
-button:hover:not(:disabled) {
-  border-color: var(--tt-accent);
-  background: var(--tt-accent-wash);
+/*
+ * 詳細度は (0,1,1) に揃える。部品の素のクラス (0,1,0) には勝って既定の
+ * ホバーを出しつつ、部品側の :hover や状態クラス (0,2,0) には必ず負ける。
+ */
+button:hover:where(:not(:disabled)) {
+  border-color: var(--tt-interact);
+  background: var(--tt-interact-wash);
   color: var(--tt-ink-max);
 }
 
-button:active:not(:disabled) {
-  background: var(--tt-accent);
-  color: var(--tt-ink-max);
+button:active:where(:not(:disabled)) {
+  background: var(--tt-interact-fill);
+  color: var(--tt-on-interact);
 }
 
 button:disabled {
@@ -52,13 +56,26 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-interact);
   outline: none;
+}
+
+/*
+ * キーボード操作時だけ出す共通のフォーカス枠（WCAG 2.4.7）。枠色を変える
+ * だけの 1px では、今どこにいるかを見失う。部品側で outline を消していても
+ * 必ず見えるよう、ここで上書きする。
+ */
+:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--tt-ink-max) !important;
+  outline-offset: 2px;
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: var(--tt-ink-faint);
+  color: var(--tt-ink-dim);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -149,7 +166,7 @@ th {
 
 .eyebrow {
   display: inline-block;
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
   font-size: 0.68rem;
   font-weight: 700;

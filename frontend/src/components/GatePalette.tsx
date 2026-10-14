@@ -14,6 +14,9 @@ import { GateInfoCard } from './GateInfoCard'
 import { gateReference } from '../utils/gateReference'
 
 type GatePaletteProps = {
+  minimumLogicalQubits?: 1 | 2
+  /** Upper bound for this editor, never above the editor's own support. */
+  maximumLogicalQubits?: number
   selectedGateType: GateType | null
   selectedControlValue: 0 | 1 | null
   logicalQubits: number
@@ -32,17 +35,19 @@ const draggableGateTypes = new Set<GateType>([
   'H', 'X', 'Y', 'Z', 'S', 'T', 'RX', 'RY', 'RZ', 'MEASURE',
   'CNOT', 'CZ', 'CP', 'CCX', 'SWAP', 'QFT', 'ORACLE', 'MESSAGE', 'RECEIVED',
 ])
-function clampLogicalQubits(value: number) {
+function clampLogicalQubits(value: number, minimumLogicalQubits: 1 | 2, maximumLogicalQubits: number) {
   if (!Number.isFinite(value)) {
-    return MIN_SUPPORTED_LOGICAL_QUBITS
+    return minimumLogicalQubits
   }
   return Math.min(
-    MAX_SUPPORTED_LOGICAL_QUBITS,
-    Math.max(MIN_SUPPORTED_LOGICAL_QUBITS, Math.round(value)),
+    maximumLogicalQubits,
+    Math.max(minimumLogicalQubits, Math.round(value)),
   )
 }
 
 export function GatePalette({
+  minimumLogicalQubits = MIN_SUPPORTED_LOGICAL_QUBITS,
+  maximumLogicalQubits: requestedMaximum,
   selectedGateType,
   selectedControlValue,
   logicalQubits,
@@ -53,6 +58,8 @@ export function GatePalette({
   onGateDragStart,
   onGateDragEnd,
 }: GatePaletteProps) {
+  const maximumLogicalQubits = Math.max(minimumLogicalQubits,
+    Math.min(MAX_SUPPORTED_LOGICAL_QUBITS, requestedMaximum ?? MAX_SUPPORTED_LOGICAL_QUBITS))
   // 入力途中の空欄や範囲外の値を一時的に持てるよう、表示用の文字列は別で管理する。
   const [qubitDraft, setQubitDraft] = useState(String(logicalQubits))
   /*
@@ -73,7 +80,7 @@ export function GatePalette({
       setQubitDraft(String(logicalQubits))
       return
     }
-    const next = clampLogicalQubits(parsed)
+    const next = clampLogicalQubits(parsed, minimumLogicalQubits, maximumLogicalQubits)
     setQubitDraft(String(next))
     if (next !== logicalQubits) {
       onSelectLogicalQubits(next)
@@ -152,8 +159,8 @@ export function GatePalette({
             className="gate-palette__qubit-input"
             type="number"
             inputMode="numeric"
-            min={MIN_SUPPORTED_LOGICAL_QUBITS}
-            max={MAX_SUPPORTED_LOGICAL_QUBITS}
+            min={minimumLogicalQubits}
+            max={maximumLogicalQubits}
             step={1}
             value={qubitDraft}
             onChange={(event) => setQubitDraft(event.target.value)}
@@ -165,7 +172,9 @@ export function GatePalette({
             }}
           />
           <span className="gate-palette__qubit-input-range">
-            {MIN_SUPPORTED_LOGICAL_QUBITS}〜{MAX_SUPPORTED_LOGICAL_QUBITS}
+            {minimumLogicalQubits === maximumLogicalQubits
+              ? `${maximumLogicalQubits}（この環境の上限）`
+              : `${minimumLogicalQubits}〜${maximumLogicalQubits}`}
           </span>
         </div>
         {logicalQubits > 5 ? (

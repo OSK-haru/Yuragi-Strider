@@ -45,6 +45,7 @@ class EnvironmentConfig:
     qubit_frequency_ghz: float = 5.0
     t1_max_us: float = 100.0
     tphi_max_us: float = 100.0
+    per_qubit: list[dict[str, float]] = field(default_factory=list)
     ideal_reference: bool = False
 
     def __init__(
@@ -66,6 +67,7 @@ class EnvironmentConfig:
         qubit_frequency_ghz: float = 5.0,
         t1_max_us: float = 100.0,
         tphi_max_us: float = 100.0,
+        per_qubit: list[dict[str, float]] | None = None,
         ideal_reference: bool = False,
     ) -> None:
         legacy_model = environment_model if environment_model is not None else model
@@ -94,6 +96,7 @@ class EnvironmentConfig:
         self.qubit_frequency_ghz = qubit_frequency_ghz
         self.t1_max_us = t1_max_us
         self.tphi_max_us = tphi_max_us
+        self.per_qubit = list(per_qubit or [])
         self.ideal_reference = ideal_reference
         self.__post_init__()
 
@@ -128,6 +131,24 @@ class EnvironmentConfig:
         )
         self.t1_max_us = _float(self.t1_max_us, "t1_max_us")
         self.tphi_max_us = _float(self.tphi_max_us, "tphi_max_us")
+        normalized_per_qubit: list[dict[str, float]] = []
+        for index, entry in enumerate(self.per_qubit):
+            entry = _require_mapping(entry, f"environment.per_qubit[{index}]")
+            t1_max_us = _float(
+                entry.get("t1_max_us", self.t1_max_us),
+                f"environment.per_qubit[{index}].t1_max_us",
+            )
+            tphi_max_us = _float(
+                entry.get("tphi_max_us", self.tphi_max_us),
+                f"environment.per_qubit[{index}].tphi_max_us",
+            )
+            if t1_max_us <= 0.0 or tphi_max_us <= 0.0:
+                raise ValueError("per-qubit T1 and Tphi maxima must be positive")
+            normalized_per_qubit.append({
+                "t1_max_us": t1_max_us,
+                "tphi_max_us": tphi_max_us,
+            })
+        self.per_qubit = normalized_per_qubit
         self.ideal_reference = bool(self.ideal_reference)
 
     @property
@@ -159,6 +180,7 @@ class EnvironmentConfig:
                 "qubit_frequency_ghz": self.qubit_frequency_ghz,
                 "t1_max_us": self.t1_max_us,
                 "tphi_max_us": self.tphi_max_us,
+                "per_qubit": [dict(entry) for entry in self.per_qubit],
                 "ideal_reference": self.ideal_reference,
             },
             "observation_strength": self.observation_strength,
@@ -172,6 +194,7 @@ class EnvironmentConfig:
             "qubit_frequency_ghz": self.qubit_frequency_ghz,
             "t1_max_us": self.t1_max_us,
             "tphi_max_us": self.tphi_max_us,
+            "per_qubit": [dict(entry) for entry in self.per_qubit],
             "ideal_reference": self.ideal_reference,
         }
 
@@ -239,6 +262,9 @@ class EnvironmentConfig:
             tphi_max_us=data.get(
                 "tphi_max_us",
                 physical.get("tphi_max_us", 100.0),
+            ),
+            per_qubit=list(
+                data.get("per_qubit", physical.get("per_qubit", [])) or []
             ),
             ideal_reference=data.get(
                 "ideal_reference",

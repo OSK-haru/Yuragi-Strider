@@ -12,22 +12,11 @@
   color: var(--tt-ink);
 }
 
-.pulse-circuit-studio__header,
 .pulse-circuit-studio__notice,
 .pulse-circuit-studio__environment,
 .pulse-circuit-studio__workspace {
   width: min(1260px, 100%);
   margin-inline: auto;
-}
-
-.pulse-circuit-studio__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: var(--tt-bar) solid var(--tt-accent);
 }
 
 .pulse-circuit-studio__palette span,
@@ -36,25 +25,6 @@
   font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.15em;
-}
-
-.pulse-circuit-studio__eyebrow {
-  display: inline-block;
-  margin-bottom: 10px;
-  color: var(--tt-accent);
-  font-family: var(--tt-mono);
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-}
-
-.pulse-circuit-studio__eyebrow::before {
-  content: '[ ';
-}
-
-.pulse-circuit-studio__eyebrow::after {
-  content: ' ]';
 }
 
 .pulse-circuit-studio h1 {
@@ -68,59 +38,12 @@
   text-transform: uppercase;
 }
 
-.pulse-circuit-studio__header p {
-  max-width: 720px;
-  margin: 0;
-  color: var(--pulse-muted);
-  line-height: 1.65;
-}
-
-.pulse-circuit-studio__summary,
 .pulse-circuit-studio__notice,
 .pulse-circuit-studio__environment,
 .pulse-circuit-studio__palette,
 .pulse-circuit-studio__sequence {
   border: 1px solid rgb(var(--tt-ink-mid-rgb) / 0.2);
   background: var(--tt-void);
-}
-
-/* --- ヘッダーのサマリー：回路長と制約違反を常設で出す ------------------ */
-
-.pulse-circuit-studio__summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(84px, auto));
-  gap: 1px;
-  margin: 0;
-  padding: 1px;
-  background: rgb(var(--tt-ink-mid-rgb) / 0.2);
-}
-
-.pulse-circuit-studio__summary > div {
-  display: grid;
-  gap: 3px;
-  padding: 10px 13px;
-  background: var(--tt-void);
-}
-
-.pulse-circuit-studio__summary dt {
-  color: var(--pulse-muted);
-  font-size: 0.64rem;
-  letter-spacing: 0.08em;
-}
-
-.pulse-circuit-studio__summary dd {
-  margin: 0;
-  font-family: var(--tt-mono);
-  font-size: 0.95rem;
-  font-weight: 700;
-}
-
-.pulse-circuit-studio__summary > div[data-tone='alert'] dd {
-  color: var(--tt-accent-hot);
-}
-
-.pulse-circuit-studio__summary > div[data-tone='ok'] dd {
-  color: var(--tt-signal);
 }
 
 .pulse-circuit-studio__notice {
@@ -322,12 +245,12 @@
 
 .pulse-circuit-studio__track[data-active='true'] {
   border-color: rgb(var(--tt-ink-mid-rgb) / 0.28);
-  border-left-color: var(--tt-accent);
+  border-left-color: var(--tt-interact);
   background: rgb(var(--tt-panel-rgb) / 0.55);
 }
 
 .pulse-circuit-studio__track[data-drop='true'] {
-  border-color: rgb(var(--tt-accent-rgb) / 0.5);
+  border-color: rgb(var(--tt-interact-rgb) / 0.5);
 }
 
 .pulse-circuit-studio__line-label {
@@ -351,11 +274,11 @@
 }
 
 .pulse-circuit-studio__track[data-active='true'] .pulse-circuit-studio__line-label strong {
-  color: var(--tt-accent-hot);
+  color: var(--tt-ink-max);
 }
 
 .pulse-circuit-studio__line-label small {
-  font-size: 0.63rem;
+  font-size: 0.68rem;
 }
 
 .pulse-circuit-studio__line-total {
@@ -382,8 +305,8 @@
 
 .pulse-circuit-studio__lane-empty[data-drop='true'] button,
 .pulse-circuit-studio__lane-empty button:hover {
-  border-color: var(--tt-accent);
-  color: var(--tt-accent-hot);
+  border-color: var(--tt-interact);
+  color: var(--tt-ink-max);
 }
 
 /* --- ブロック --------------------------------------------------------- */
@@ -413,8 +336,8 @@
 
 .pulse-circuit-studio__drop-marker[data-active='true'] {
   flex-basis: 30px;
-  border-left-color: var(--tt-accent);
-  background: rgb(var(--tt-accent-rgb) / 0.14);
+  border-left-color: var(--tt-interact);
+  background: rgb(var(--tt-interact-rgb) / 0.14);
 }
 
 .pulse-circuit-studio__step {
@@ -436,7 +359,7 @@
 
 .pulse-circuit-studio__step[data-selected='true'] {
   border-color: var(--pulse-orange);
-  box-shadow: inset 0 0 0 1px rgb(var(--tt-accent-rgb) / 0.55);
+  box-shadow: inset 0 0 0 1px rgb(var(--tt-interact-rgb) / 0.55);
 }
 
 .pulse-circuit-studio__step[data-invalid='true'] {
@@ -469,7 +392,7 @@
   gap: 5px;
   color: var(--pulse-teal);
   font-family: var(--tt-mono);
-  font-size: 0.66rem;
+  font-size: 0.68rem;
 }
 
 .pulse-circuit-studio__step-flag {
@@ -479,7 +402,7 @@
   height: 15px;
   background: var(--tt-accent);
   color: var(--tt-ink-max);
-  font-size: 0.66rem;
+  font-size: 0.68rem;
   font-style: normal;
   font-weight: 900;
 }
@@ -493,12 +416,12 @@
 .pulse-circuit-studio__step-main small {
   color: var(--pulse-muted);
   font-family: var(--tt-mono);
-  font-size: 0.66rem;
+  font-size: 0.68rem;
 }
 
 .pulse-circuit-studio__step-main .pulse-circuit-studio__step-time {
   color: var(--tt-ink-dim);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
 }
 
 .pulse-circuit-studio__step[data-dirty='true'] .pulse-circuit-studio__step-index::after {
@@ -506,7 +429,7 @@
   padding: 1px 4px;
   background: var(--tt-accent-deep);
   color: var(--tt-ink-max);
-  font-size: 0.58rem;
+  font-size: 0.68rem;
 }
 
 /*
@@ -530,8 +453,8 @@
 }
 
 .pulse-circuit-studio__step-actions button:hover:not(:disabled) {
-  border-color: var(--tt-accent);
-  color: var(--tt-accent-hot);
+  border-color: var(--tt-interact);
+  color: var(--tt-ink-max);
 }
 
 /* --- 制約違反の一覧 --------------------------------------------------- */
@@ -650,7 +573,6 @@
 }
 
 @media (max-width: 760px) {
-  .pulse-circuit-studio__header,
   .pulse-circuit-studio__environment,
   .pulse-circuit-studio__sequence-heading {
     align-items: stretch;

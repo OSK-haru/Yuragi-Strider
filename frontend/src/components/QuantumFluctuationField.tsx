@@ -110,6 +110,7 @@ type FieldRegime = {
  *   通常モード … 基準。落ち着いているが死んではいない。
  *   PULSE     … k と時間スケールを上げる。細かい粒が速く震え、赤が濃い。
  *                対も倍の速さで生成消滅する。
+ *   攻撃      … PULSE ほどは速くないが谷を浅く拾い、赤が多めに出る。
  *   ドキュメント … k も時間も落とす。大きな塊が凪いで、赤はほとんど出ない。
  */
 const REGIMES: Record<ModeId, FieldRegime> = {
@@ -128,6 +129,14 @@ const REGIMES: Record<ModeId, FieldRegime> = {
     pairRate: 2.2,
     troughThreshold: 0.38,
     intensity: 1.18,
+  },
+  attack: {
+    mass: 1.7,
+    wavenumberScale: 1.3,
+    timeScale: 0.17,
+    pairRate: 1.6,
+    troughThreshold: 0.3,
+    intensity: 1.1,
   },
   docs: {
     mass: 0.3,

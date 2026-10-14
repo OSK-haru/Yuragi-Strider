@@ -15,6 +15,7 @@ type HomePageProps = {
   onModeTurnChange: Dispatch<SetStateAction<number>>
   onStartSimulation: () => void
   onOpenPulseLab: () => void
+  onOpenAttackSimulator: () => void
 }
 
 export function HomePage({
@@ -22,6 +23,7 @@ export function HomePage({
   onModeTurnChange,
   onStartSimulation,
   onOpenPulseLab,
+  onOpenAttackSimulator,
 }: HomePageProps) {
   const tutorial = useTutorial()
 
@@ -35,18 +37,6 @@ export function HomePage({
           <span>YURAGI</span>
           <span>STRIDER</span>
         </h1>
-
-        <div className="home-page__hero-body">
-          <div className="home-page__hero-copy">
-            <p className="home-page__subtitle">
-              量子ビットの&ldquo;ゆらぎ&rdquo;を、その場で見て確かめる
-            </p>
-            <p className="home-page__lede">
-              理想的なゲート操作でも、現実の量子ビットは温度や磁束ノイズの影響で少しずつ状態がずれていきます。
-              回路を組んでノイズの強さを変えるだけで、その&ldquo;ズレ&rdquo;がどれだけ・なぜ起きるのかをその場で確認できます。
-            </p>
-          </div>
-        </div>
       </section>
 
       {/*
@@ -60,6 +50,7 @@ export function HomePage({
           onTurnChange={onModeTurnChange}
           onStartSimulation={onStartSimulation}
           onOpenPulseLab={onOpenPulseLab}
+          onOpenAttackSimulator={onOpenAttackSimulator}
         />
       </div>
 

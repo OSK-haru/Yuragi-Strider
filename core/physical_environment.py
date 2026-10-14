@@ -179,6 +179,45 @@ def compute_environment_rates(
     """Compute unified Lindblad rates for normalized or physical input modes."""
 
     profile = _profile_from_environment(environment, profile)
+    return _compute_environment_rates_with_profile(environment, profile)
+
+
+def compute_environment_rates_per_qubit(
+    environment: Any,
+    n_qubits: int,
+    profile: GenericTransmonProfile | None = None,
+) -> tuple[EnvironmentRates, ...]:
+    """Resolve one local rate set per qubit, using shared values as defaults."""
+
+    if n_qubits < 1:
+        raise ValueError("n_qubits must be positive")
+    overrides = list(getattr(environment, "per_qubit", []) or [])
+    if not overrides:
+        shared = compute_environment_rates(environment, profile)
+        return (shared,) * n_qubits
+    if len(overrides) != n_qubits:
+        raise ValueError(
+            "environment.per_qubit must provide one entry per qubit "
+            f"({n_qubits}), got {len(overrides)}"
+        )
+    base_profile = _profile_from_environment(environment, profile)
+    return tuple(
+        _compute_environment_rates_with_profile(
+            environment,
+            replace(
+                base_profile,
+                t1_max_us=float(entry.get("t1_max_us", base_profile.t1_max_us)),
+                tphi_max_us=float(entry.get("tphi_max_us", base_profile.tphi_max_us)),
+            ),
+        )
+        for entry in overrides
+    )
+
+
+def _compute_environment_rates_with_profile(
+    environment: Any,
+    profile: GenericTransmonProfile,
+) -> EnvironmentRates:
     input_mode = str(getattr(environment, "input_mode", INPUT_MODE_NORMALIZED))
     if input_mode == INPUT_MODE_NORMALIZED:
         inputs = map_normalized_to_physical(environment, profile)
@@ -205,6 +244,17 @@ def compute_environment_rates(
         input_mode=input_mode,
         **rates,
     )
+
+
+def per_qubit_rates_to_derived_parameters(
+    rates: tuple[EnvironmentRates, ...],
+) -> list[dict[str, Any]]:
+    """Serialize local rates without changing the legacy shared-rate fields."""
+
+    return [
+        {"qubit": index, **environment_rates_to_derived_parameters(local_rates)}
+        for index, local_rates in enumerate(rates)
+    ]
 
 
 def compute_physical_rates(

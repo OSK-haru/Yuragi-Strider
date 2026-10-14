@@ -395,7 +395,7 @@ def qft_duration_us(target_count: int) -> float:
 
 
 def initial_density_matrix(initial_states: list[str]) -> Matrix:
-    """Build a tensor-product density matrix for 0, 1, +, and - states."""
+    """Build a tensor-product density matrix for 0, 1, +, -, +i, and -i states."""
 
     ket: Ket = (1.0 + 0.0j,)
     for state in initial_states:
@@ -894,6 +894,67 @@ def apply_readout_error(
     }
 
 
+def apply_local_readout_error(
+    probabilities: Mapping[str, float],
+    n_subsystems: int,
+    local_levels: int,
+    assignment_errors: Sequence[tuple[float, float]],
+) -> dict[str, float]:
+    """Apply independent binary assignment errors to qubit or qutrit labels.
+
+    Levels ``0`` and ``1`` are mixed by the same affine two-point model used by
+    :func:`apply_readout_error`.  Any higher local level is preserved.  This
+    makes the approximation usable for pulse qutrit outputs without pretending
+    that a two-point calibration can describe ``|2>`` discrimination.
+    """
+
+    if n_subsystems < 1:
+        raise ValueError("n_subsystems must be positive")
+    if local_levels not in (2, 3):
+        raise ValueError("local_levels must be 2 or 3")
+    if len(assignment_errors) != n_subsystems:
+        raise ValueError(
+            "assignment_errors must provide "
+            f"{n_subsystems} entries, got {len(assignment_errors)}"
+        )
+
+    expected_labels = {
+        _local_basis_label(index, n_subsystems, local_levels)
+        for index in range(local_levels ** n_subsystems)
+    }
+    if set(probabilities) != expected_labels:
+        raise ValueError("probabilities must contain every local basis label exactly once")
+
+    observed = {label: float(probabilities[label]) for label in expected_labels}
+    for subsystem, (p10, p01) in enumerate(assignment_errors):
+        _require_assignment_error(p10, p01, subsystem)
+        updated = {label: 0.0 for label in expected_labels}
+        for label, value in observed.items():
+            level = label[subsystem]
+            if level == "0":
+                updated[label] += (1.0 - p10) * value
+                flipped = f"{label[:subsystem]}1{label[subsystem + 1:]}"
+                updated[flipped] += p10 * value
+            elif level == "1":
+                updated[label] += (1.0 - p01) * value
+                flipped = f"{label[:subsystem]}0{label[subsystem + 1:]}"
+                updated[flipped] += p01 * value
+            else:
+                updated[label] += value
+        observed = updated
+
+    return {label: _as_probability(observed[label]) for label in sorted(expected_labels)}
+
+
+def _local_basis_label(index: int, width: int, base: int) -> str:
+    digits = ["0"] * width
+    remainder = index
+    for position in range(width - 1, -1, -1):
+        digits[position] = str(remainder % base)
+        remainder //= base
+    return "".join(digits)
+
+
 def _require_assignment_error(p10: float, p01: float, qubit: int) -> None:
     if not 0.0 <= p10 <= 1.0 or not 0.0 <= p01 <= 1.0:
         raise ValueError(
@@ -963,6 +1024,33 @@ def multi_qubit_environment_collapse_operators(
     rates,
 ) -> list[Matrix]:
     """Create unified environment collapse operators from EnvironmentRates."""
+
+    if isinstance(rates, Sequence):
+        if len(rates) != n_qubits:
+            raise ValueError(
+                f"local environment rates must match n_qubits ({n_qubits})"
+            )
+        collapse_ops: list[Matrix] = []
+        for qubit, local_rates in enumerate(rates):
+            down = float(getattr(local_rates, "gamma_down_per_us"))
+            up = float(getattr(local_rates, "gamma_up_per_us"))
+            dephasing = float(getattr(local_rates, "gamma_phi_per_us"))
+            if down > 0.0:
+                collapse_ops.append(scale(
+                    sqrt(down),
+                    expand_single_qubit_gate(SIGMA_MINUS, qubit, n_qubits),
+                ))
+            if up > 0.0:
+                collapse_ops.append(scale(
+                    sqrt(up),
+                    expand_single_qubit_gate(SIGMA_PLUS, qubit, n_qubits),
+                ))
+            if dephasing > 0.0:
+                collapse_ops.append(scale(
+                    sqrt(dephasing / 2.0),
+                    expand_single_qubit_gate(Z, qubit, n_qubits),
+                ))
+        return collapse_ops
 
     return multi_qubit_physical_collapse_operators(
         n_qubits,
@@ -1279,6 +1367,12 @@ def _single_qubit_ket(state: str) -> Ket:
         return (1.0 / sqrt(2.0), 1.0 / sqrt(2.0))
     if normalized == "-":
         return (1.0 / sqrt(2.0), -1.0 / sqrt(2.0))
+    # Y eigenstates. The API does not accept them; process characterization
+    # needs them internally because {0, 1, +} alone cannot reach the Y axis.
+    if normalized == "+i":
+        return (1.0 / sqrt(2.0), 1.0j / sqrt(2.0))
+    if normalized == "-i":
+        return (1.0 / sqrt(2.0), -1.0j / sqrt(2.0))
     raise ValueError(f"unsupported initial state: {state}")
 
 

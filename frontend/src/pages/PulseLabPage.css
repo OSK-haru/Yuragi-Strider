@@ -10,44 +10,12 @@
   color: var(--pulse-ink);
 }
 
-.pulse-lab__header {
-  display: flex;
-  width: min(1260px, 100%);
-  margin: 0 auto 22px;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.pulse-lab__eyebrow,
-.pulse-lab__identity span,
 .pulse-lab__run > div > span,
-.pulse-lab__result-banner span,
-.pulse-lab__summary span,
 .pulse-lab__empty > span {
   color: var(--pulse-teal);
   font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.15em;
-}
-
-.pulse-lab__header h1 {
-  margin: 4px 0;
-  font-family: var(--tt-mono);
-  font-size: clamp(2.7rem, 7vw, 5.2rem);
-  font-weight: 500;
-  letter-spacing: -0.045em;
-  line-height: 0.95;
-}
-
-.pulse-lab__header p {
-  max-width: 68ch;
-  margin: 13px 0 0;
-  color: var(--tt-ink-mid);
-}
-
-.pulse-lab__header p strong {
-  color: var(--tt-accent);
 }
 
 .pulse-lab__run button {
@@ -56,63 +24,6 @@
   background: var(--tt-void);
   color: var(--tt-ink);
   cursor: pointer;
-}
-
-.pulse-lab__scope-note {
-  display: flex;
-  width: min(1260px, 100%);
-  box-sizing: border-box;
-  margin: 0 auto 14px;
-  padding: 11px 14px;
-  align-items: baseline;
-  gap: 8px;
-  border: 1px solid rgb(var(--tt-accent-rgb) / 0.24);
-  background: rgb(var(--tt-panel-rgb) / 0.46);
-  color: var(--tt-ink-mid);
-  font-size: 0.82rem;
-  line-height: 1.5;
-}
-
-.pulse-lab__scope-note strong {
-  flex: 0 0 auto;
-  color: var(--tt-accent);
-}
-
-.pulse-lab__identity,
-.pulse-lab__result-banner,
-.pulse-lab__summary {
-  display: grid;
-  width: min(1260px, 100%);
-  margin: 0 auto;
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid rgb(var(--tt-rule-strong-rgb) / 0.18);
-  background: rgb(var(--tt-rule-strong-rgb) / 0.18);
-}
-
-.pulse-lab__identity {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 18px;
-}
-
-.pulse-lab__identity > div,
-.pulse-lab__result-banner > div {
-  display: grid;
-  gap: 5px;
-  padding: 13px 16px;
-  background: var(--tt-void);
-}
-
-.pulse-lab__identity strong,
-.pulse-lab__result-banner strong {
-  font-size: 0.87rem;
-}
-
-.pulse-lab__workspace {
-  display: grid;
-  width: min(1260px, 100%);
-  margin: 0 auto;
-  gap: 18px;
 }
 
 .pulse-lab__run {
@@ -136,12 +47,12 @@
 }
 
 .pulse-lab__run p[data-level='elevated'] {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
 }
 
 .pulse-lab__run p[data-level='blocked'],
 .pulse-lab__run-error {
-  color: var(--tt-accent) !important;
+  color: var(--tt-accent-text) !important;
 }
 
 .pulse-lab__run button {
@@ -184,65 +95,6 @@
   word-break: break-all;
 }
 
-.pulse-lab__result-banner {
-  grid-template-columns: 2fr 1fr 1fr;
-}
-
-.pulse-lab__summary {
-  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
-}
-
-.pulse-lab__summary article {
-  display: grid;
-  min-height: 106px;
-  padding: 17px;
-  background: var(--tt-void);
-  align-content: space-between;
-}
-
-.pulse-lab__summary strong {
-  color: var(--tt-ink-max);
-  font-family: var(--tt-mono);
-  font-size: 1.35rem;
-}
-
-.pulse-lab__summary small {
-  color: var(--tt-ink-dim);
-}
-
-.pulse-lab__summary--leakage span,
-.pulse-lab__summary--leakage strong {
-  color: var(--tt-accent);
-}
-
-.pulse-lab__drawers {
-  display: grid;
-  gap: 11px;
-}
-
-.pulse-lab__json {
-  max-height: 420px;
-  padding: 15px;
-  overflow: auto;
-  background: var(--tt-void);
-  color: var(--tt-ink);
-  font-family: var(--tt-mono);
-  font-size: 0.76rem;
-  line-height: 1.55;
-}
-
-.pulse-lab__scope {
-  color: var(--tt-ink-mid);
-}
-
-.pulse-lab__scope p {
-  color: var(--tt-accent-hot);
-}
-
-.pulse-lab__scope li + li {
-  margin-top: 7px;
-}
-
 .pulse-lab__empty {
   padding: 38px;
   border: 1px dashed rgb(var(--tt-rule-strong-rgb) / 0.26);
@@ -255,31 +107,11 @@
   color: var(--pulse-muted);
 }
 
-@media (max-width: 800px) {
-  .pulse-lab__header {
-    display: grid;
-  }
-
-  .pulse-lab__scope-note {
-    display: grid;
-    gap: 3px;
-  }
-
-  .pulse-lab__identity {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .pulse-lab__result-banner {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 560px) {
   .pulse-lab {
     padding: 24px 13px 44px;
   }
 
-  .pulse-lab__identity,
   .pulse-lab__run {
     grid-template-columns: 1fr;
   }
@@ -296,103 +128,6 @@
     repeating-linear-gradient(90deg, var(--tt-blueprint) 0 1px, transparent 1px 80px),
     var(--tt-void);
   color: var(--tt-ink);
-}
-
-.pulse-lab__header {
-  padding-bottom: 16px;
-  border-bottom: var(--tt-bar) solid var(--tt-accent);
-}
-
-.pulse-lab__eyebrow {
-  display: inline-block;
-  padding: 0;
-  margin-bottom: 10px;
-  border: 0;
-  background: none;
-  color: var(--tt-accent);
-  font-family: var(--tt-mono);
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-}
-
-.pulse-lab__eyebrow::before {
-  content: '[ ';
-}
-
-.pulse-lab__eyebrow::after {
-  content: ' ]';
-}
-
-.pulse-lab__header h1 {
-  color: var(--tt-ink);
-  font-family: var(--tt-macro);
-  font-size: clamp(1.9rem, 4.5vw, 3.2rem);
-  font-weight: 900;
-  line-height: 0.88;
-  letter-spacing: -0.045em;
-  text-transform: uppercase;
-}
-
-/* --- 実行対象の明示（どのレーンが走り、何次元になるか） ------------------ */
-
-.pulse-lab__run-scope {
-  display: grid;
-  gap: 10px;
-  margin: 4px 0 12px;
-  padding: 12px 14px;
-  border: 1px solid rgb(var(--tt-ink-mid-rgb) / 0.24);
-  background: rgb(var(--tt-panel-rgb) / 0.5);
-}
-
-.pulse-lab__run-scope[data-tone='warn'] {
-  border-color: rgb(var(--tt-accent-rgb) / 0.55);
-  background: var(--tt-accent-wash);
-}
-
-.pulse-lab__run-scope dl {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 26px;
-  margin: 0;
-}
-
-.pulse-lab__run-scope dl div {
-  display: grid;
-  gap: 3px;
-}
-
-.pulse-lab__run-scope dt {
-  color: var(--tt-ink-mid);
-  font-size: 0.66rem;
-  letter-spacing: 0.1em;
-}
-
-.pulse-lab__run-scope dd {
-  margin: 0;
-  font-family: var(--tt-mono);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.pulse-lab__run-scope[data-tone='warn'] dd {
-  color: var(--tt-accent-hot);
-}
-
-.pulse-lab__run-scope p {
-  margin: 0;
-  color: var(--tt-ink);
-  font-size: 0.8rem;
-  line-height: 1.6;
-}
-
-.pulse-lab__run-scope button {
-  justify-self: start;
-  border-color: var(--tt-accent);
-  background: var(--tt-accent-deep);
-  color: var(--tt-ink-max);
-  font-weight: 700;
 }
 
 /* 結果からPulse状態エクスプローラーへの導線。 */
@@ -414,9 +149,9 @@
 
 .pulse-lab__explorer-link span {
   display: block;
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -447,5 +182,31 @@
 }
 
 .pulse-lab__explorer-link button:hover {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-interact);
 }
+
+/* --- IDE layout (/pulse-ide) ------------------------------------------------
+   枠は components/IdeLayout.css。ここは Pulse 固有の詰め方だけを書く。 */
+
+.pulse-ide.pulse-lab { min-height: 0; padding: 0; }
+
+/* 作業領域に入れた回路スタジオと状態エクスプローラー: 見出しはタブが兼ねる */
+.pulse-ide .pulse-circuit-studio,
+.pulse-ide .pulse-explorer-page { min-height: 0; padding: 8px 10px; gap: 10px; background: transparent; }
+
+.pulse-ide .ide__toolbar-note { flex: 1 1 320px; min-width: 0; text-align: right; }
+.pulse-ide .ide__facts dd { text-align: right; }
+.pulse-ide__messages-body { display: grid; align-content: start; gap: 8px; padding: 8px 10px !important; }
+.pulse-ide__messages-body > * { margin: 0; }
+.pulse-ide .pulse-lab__run { grid-template-columns: 1fr; padding: 10px 12px; }
+.pulse-ide .pulse-lab__run h2 { font-size: .85rem; }
+.pulse-ide .pulse-lab__explorer-link,
+.pulse-ide .pulse-lab__empty { padding: 10px 12px; }
+
+/* プロパティ欄: 環境パネルを一列に積んで詰める */
+.pulse-ide .ide__inspector .pulse-parameters { padding: 0; border: 0; background: transparent; }
+.pulse-ide .ide__inspector .pulse-parameters__heading,
+.pulse-ide .ide__inspector .pulse-parameters__selectors,
+.pulse-ide .ide__inspector .pulse-parameters__grid,
+.pulse-ide .ide__inspector .pulse-parameters__device-profile { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.pulse-ide .ide__inspector .pulse-parameters__calibration-table { overflow-x: auto; }

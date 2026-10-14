@@ -260,7 +260,12 @@ Bell状態は $\lvert00\rangle$ と $\lvert11\rangle$ に確率が集中しま�
 ```powershell
 .\.venv\Scripts\python.exe scripts\validate_readout_error.py
 .\.venv\Scripts\python.exe -m unittest tests.test_readout_error
+.\.venv\Scripts\python.exe -m unittest tests.test_pulse_readout_error
 ```
+
+最後のテスト群はPulse APIとの統合も検査します。2準位・qutrit・結合ネットワークで
+観測確率だけが変化すること、確率和が保存されること、qutritの $\lvert2\rangle$ 確率と
+状態指標が変化しないことを確認します。
 
 アーティファクト:
 

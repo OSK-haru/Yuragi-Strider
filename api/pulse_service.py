@@ -14,6 +14,7 @@ from api.pulse_models import (
 )
 from api.pulse_backend_logging import log_pulse_backend_selection
 from api.pulse_qutrit_service import run_qutrit_pulse_request
+from api.pulse_readout import pulse_readout_response
 from api.pulse_transmon_network_service import run_coupled_transmon_network_request
 from core.capabilities import DRIVEN_TWO_LEVEL_RWA_EXPERIMENTAL_MODEL
 from core.cptp_evolution import EXPLICIT_CPTP_EVOLUTION_ID
@@ -280,6 +281,15 @@ def run_pulse_request(request: PulseSimulateRequest) -> dict[str, object]:
         "trajectory": trajectory,
         "pulse_end": pulse_end,
         "final": final,
+        "readout": pulse_readout_response(
+            request.readout_error,
+            {
+                "0": float(final["open_population_0"]),
+                "1": float(final["open_population_1"]),
+            },
+            1,
+            2,
+        ),
         "diagnostics": {
             "api_runtime_ms": (perf_counter() - started) * 1000.0,
             "backend": {

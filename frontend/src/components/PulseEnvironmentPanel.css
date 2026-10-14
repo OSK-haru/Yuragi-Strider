@@ -108,6 +108,31 @@
   margin-top: 15px;
 }
 
+.pulse-parameters__calibration-toggle {
+  max-width: 280px;
+  margin-top: 12px;
+}
+
+.pulse-parameters__calibration-table {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.pulse-parameters__calibration-row {
+  display: grid;
+  grid-template-columns: 42px repeat(4, minmax(105px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid rgb(var(--tt-rule-strong-rgb) / 0.18);
+}
+
+.pulse-parameters__calibration-row > strong {
+  align-self: center;
+  color: var(--tt-ink-max);
+}
+
 .pulse-parameters__device-profile {
   display: grid;
   grid-template-columns: minmax(210px, 0.8fr) minmax(0, 2fr);
@@ -124,7 +149,7 @@
 }
 
 .pulse-parameters__device-profile strong {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
 }
 
 @media (max-width: 900px) {
@@ -144,5 +169,9 @@
   .pulse-parameters__grid,
   .pulse-parameters__device-profile {
     grid-template-columns: 1fr;
+  }
+
+  .pulse-parameters__calibration-row {
+    grid-template-columns: 1fr 1fr;
   }
 }

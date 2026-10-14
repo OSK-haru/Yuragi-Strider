@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState, type CSSProperties } from 'react'
 import './DensityMatrixViewer.css'
 import type { StateSnapshot } from '../types/simulation'
 import { DensityMatrixCanvas } from './DensityMatrixCanvas'
+import { phaseBand } from '../utils/phaseColor'
 import {
   densityCellAt,
   formatDensityValue,
@@ -303,24 +304,14 @@ export function DensityMatrixViewer({
                   {validation.matrix.cells
                     .filter((cell) => cell.row === rowIndex)
                     .map((cell) => {
-                      const renderedSign = mode === 'magnitude' ? 'positive' : cell.sign
-                      const alpha = 0.08 + cell.intensity * 0.82
-                      const cellStyle: DensityCellStyle = {
-                        '--density-cell-alpha': `${alpha}`,
-                        /*
-                         * 明るいセルほど白文字が沈むので、塗りが濃くなったら
-                         * 文字側を反転させる。赤側は輝度が低いままなので白で通す。
-                         */
-                        '--density-cell-ink':
-                          renderedSign === 'positive' && alpha > 0.45
-                            ? 'var(--tt-void)'
-                            : 'var(--tt-ink-max)',
-                      }
+                      const { fill, band } = densityCellFill(cell, mode)
+                      const cellStyle = densityCellStyle(cell, mode)
 
                       return (
                         <div
                           className="density-matrix-viewer__cell"
-                          data-sign={renderedSign}
+                          data-sign={fill}
+                          data-phase-band={band ?? undefined}
                           data-selected={
                             searchedCoordinate?.row === cell.row
                             && searchedCoordinate.column === cell.column
@@ -335,7 +326,7 @@ export function DensityMatrixViewer({
                           onMouseEnter={() => setActiveCellSelection({ key: activeCellKey, cell })}
                         >
                           <span className="density-matrix-viewer__cell-value">
-                            {formatCellValue(cell.value)}
+                            {mode === 'phase' ? formatPhaseCellValue(cell) : formatCellValue(cell.value)}
                           </span>
                         </div>
                       )
@@ -452,14 +443,15 @@ function DensityMatrixNeighborhood({
               </div>
               {columnIndices.map((column) => {
                 const cell = densityCellAt(matrix, row, column)!
-                const renderedSign = mode === 'magnitude' ? 'positive' : cell.sign
+                const { fill, band } = densityCellFill(cell, mode)
                 const cellStyle = densityCellStyle(cell, mode)
                 const isSelected = row === selected.row && column === selected.column
 
                 return (
                   <button
                     className="density-matrix-viewer__cell density-matrix-viewer__cell--neighborhood"
-                    data-sign={renderedSign}
+                    data-sign={fill}
+                    data-phase-band={band ?? undefined}
                     data-selected={isSelected}
                     type="button"
                     role="gridcell"
@@ -482,7 +474,7 @@ function DensityMatrixNeighborhood({
         </div>
       </div>
       <p className="density-matrix-viewer__neighborhood-note">
-        赤枠が検索した要素です。周辺のセルを選ぶと、その位置を中心に表示し直します。
+        白い二重枠が検索した要素です。周辺のセルを選ぶと、その位置を中心に表示し直します。
       </p>
     </section>
   )
@@ -506,17 +498,59 @@ function cellTitle(cell: DensityMatrixCell): string {
   ].join('\n')
 }
 
+/*
+ * セルの塗り分け。絶対値はインク一色、実部・虚部は全画面共通の
+ * 正=赤 / 負=青、位相は循環ランプの帯（utils/phaseColor.ts）。
+ */
+function densityCellFill(
+  cell: DensityMatrixCell,
+  mode: DensityMatrixMode,
+): { fill: 'magnitude' | 'phase' | DensityMatrixCell['sign']; band: number | null } {
+  if (mode === 'magnitude') {
+    return { fill: 'magnitude', band: null }
+  }
+  if (mode === 'phase') {
+    /*
+     * 位相モードの value は位相そのものなので、その符号で「ゼロ」を判定すると
+     * 位相 0 の要素（対角成分など）が空セルに見えてしまう。絶対値で判定する。
+     */
+    return cell.magnitude < 1e-12
+      ? { fill: 'zero', band: null }
+      : { fill: 'phase', band: phaseBand(cell.phase) }
+  }
+  return { fill: cell.sign, band: null }
+}
+
 function densityCellStyle(cell: DensityMatrixCell, mode: DensityMatrixMode): DensityCellStyle {
-  const renderedSign = mode === 'magnitude' ? 'positive' : cell.sign
+  const { fill, band } = densityCellFill(cell, mode)
   const alpha = 0.08 + cell.intensity * 0.82
   return {
     '--density-cell-alpha': `${alpha}`,
-    '--density-cell-ink':
-      renderedSign === 'positive' && alpha > 0.45
-        ? 'var(--tt-void)'
-        : 'var(--tt-ink-max)',
+    /* 塗りが薄いうちは地の上の文字と同じ。濃くなったら塗りに合わせて選ぶ。 */
+    '--density-cell-ink': alpha > 0.45 ? strongFillText(fill, band) : 'var(--tt-ink-max)',
   }
 }
+
+/*
+ * 濃い塗りの上の文字色。赤と赤寄りの帯は両テーマで暗いので白、青と橙は
+ * 両テーマで明るいので黒。インク色はテーマで明暗が入れ替わるので、
+ * その反対の地色（--tt-void）を使う。
+ */
+function strongFillText(fill: ReturnType<typeof densityCellFill>['fill'], band: number | null): string {
+  if (band !== null) {
+    return PHASE_BAND_TEXT[band] ?? 'var(--tt-ink-max)'
+  }
+  if (fill === 'positive') return '#ffffff'
+  if (fill === 'negative') return '#0a0a0a'
+  if (fill === 'magnitude') return 'var(--tt-void)'
+  return 'var(--tt-ink-max)'
+}
+
+/* 帯 0..7: インク, インク/橙, 橙, 橙/赤, 赤, 赤/青, 青, 青/インク。 */
+const PHASE_BAND_TEXT = [
+  'var(--tt-void)', 'var(--tt-void)', '#0a0a0a', '#ffffff',
+  '#ffffff', '#ffffff', '#0a0a0a', 'var(--tt-void)',
+]
 
 function parseBasisIndex(query: string, dimension: number, qubitCount: number): number | null {
   const normalized = query.trim().replace(/^\|/, '').replace(/[>⟩]$/, '').trim()
@@ -545,6 +579,14 @@ function formatPhase(value: number): string {
     return '0 rad'
   }
   return `${value.toFixed(4)} rad`
+}
+
+/* 位相 0 は「値が無い」ではないので空欄にしない。空欄は絶対値がゼロの要素だけ。 */
+function formatPhaseCellValue(cell: DensityMatrixCell): string {
+  if (cell.magnitude < 1e-12) {
+    return ''
+  }
+  return Math.abs(cell.phase) < 0.005 ? '0' : formatCellValue(cell.phase)
 }
 
 function formatCellValue(value: number): string {

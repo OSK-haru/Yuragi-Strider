@@ -292,6 +292,10 @@ def _rates_response(result: SimulationResult) -> dict[str, Any]:
         "gamma1_per_us_deprecation": (
             "Legacy alias for gamma_down_per_us; it is not the population relaxation rate."
         ),
+        "per_qubit": list(derived.get("per_qubit") or []),
+        "per_qubit_environment_enabled": bool(
+            derived.get("per_qubit_environment_enabled", False)
+        ),
     }
 
 

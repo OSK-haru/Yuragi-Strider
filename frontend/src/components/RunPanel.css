@@ -242,9 +242,9 @@
 }
 
 .run-panel__button:hover:not(:disabled) {
-  border-color: var(--tt-accent-hot);
-  background: var(--tt-accent-hot);
-  color: var(--tt-ink-max);
+  border-color: var(--tt-ink-max);
+  background: var(--tt-interact-fill);
+  color: var(--tt-on-interact);
 }
 
 .run-panel__button:disabled {
@@ -261,8 +261,8 @@
 }
 
 .run-panel__button--secondary:hover:not(:disabled) {
-  border-color: var(--tt-accent);
-  background: var(--tt-accent-wash);
+  border-color: var(--tt-interact);
+  background: var(--tt-interact-wash);
   color: var(--tt-ink-max);
 }
 

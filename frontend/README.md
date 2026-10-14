@@ -9,6 +9,7 @@ tree.
 Start the FastAPI service from the repository root:
 
 ```powershell
+$env:ATTACK_SIMULATOR_PROFILE = 'development'
 .\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
@@ -20,7 +21,10 @@ npm ci
 npm run dev
 ```
 
-Vite proxies `/api` requests to `http://127.0.0.1:8001`.
+Vite proxies `/api` HTTP and WebSocket requests to `http://127.0.0.1:8001`.
+The attack-simulator routes are mounted only for the explicit `development`
+profile (or by the desktop launcher); the generic/public API profile leaves
+them disabled.
 
 ## Routes
 
@@ -94,6 +98,7 @@ cd frontend
 npm.cmd run lint
 npm.cmd run build
 npm.cmd run validate:pulse-lab
+npm.cmd run validate:attack-live
 ```
 
 No external drag-and-drop, routing, or charting library is used.

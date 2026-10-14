@@ -219,7 +219,7 @@ function validateGateShape(gate: Record<string, unknown>, logicalQubits: number,
   validateGateParams(gate.params, `gate at step ${step}, index ${index}`)
 }
 
-function normalizeCircuitConfigShape(value: unknown): CircuitConfig {
+function normalizeCircuitConfigShape(value: unknown, minimumLogicalQubits: 1 | 2): CircuitConfig {
   if (!isRecord(value)) {
     throw new Error('Import failed: invalid JSON file.')
   }
@@ -244,11 +244,11 @@ function normalizeCircuitConfigShape(value: unknown): CircuitConfig {
   const logicalQubits = candidate.logical_qubits
   if (
     !isFiniteInteger(logicalQubits) ||
-    logicalQubits < MIN_SUPPORTED_LOGICAL_QUBITS ||
+    logicalQubits < minimumLogicalQubits ||
     logicalQubits > MAX_SUPPORTED_LOGICAL_QUBITS
   ) {
     throw new Error(
-      `Import failed: logical_qubits must be an integer from ${MIN_SUPPORTED_LOGICAL_QUBITS} to ${MAX_SUPPORTED_LOGICAL_QUBITS}.`,
+      `Import failed: logical_qubits must be an integer from ${minimumLogicalQubits} to ${MAX_SUPPORTED_LOGICAL_QUBITS}.`,
     )
   }
 
@@ -427,7 +427,7 @@ export function circuitConfigToEditorState(config: CircuitConfig): CircuitEditor
   return editorState
 }
 
-export function parseCircuitConfigJson(text: string): CircuitEditorState {
+export function parseCircuitConfigJson(text: string, minimumLogicalQubits: 1 | 2 = MIN_SUPPORTED_LOGICAL_QUBITS): CircuitEditorState {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -435,7 +435,7 @@ export function parseCircuitConfigJson(text: string): CircuitEditorState {
     throw new Error('Import failed: invalid JSON file.')
   }
 
-  const config = normalizeCircuitConfigShape(parsed)
+  const config = normalizeCircuitConfigShape(parsed, minimumLogicalQubits)
   return circuitConfigToEditorState(config)
 }
 

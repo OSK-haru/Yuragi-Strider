@@ -1,0 +1,193 @@
+{
+  "validation": "PHYSICAL-MODEL-BASELINE-V1",
+  "freeze_schema_version": 1,
+  "generated_at_utc": "2026-10-13T15:51:32.545111+00:00",
+  "decision": "PASS WITH RESTRICTIONS",
+  "overall_pass": true,
+  "frozen_contract": {
+    "freeze_id": "yuragi_strider_physical_baseline_v1",
+    "gate_aware_model_id": "gate_aware_hamiltonian_lindblad_v1",
+    "pulse_network_model_id": "driven_coupled_transmon_network_rwa_experimental_v1",
+    "physical_input_extension": "per_qubit_t1_tphi_and_independent_affine_readout_v1",
+    "per_qubit_rules": {
+      "input_mode": "physical_only",
+      "coherence_entry_count": "exactly one per logical qubit or transmon",
+      "readout_entry_count": "exactly one per logical qubit or transmon",
+      "shared_values_when_omitted": true,
+      "readout_assignment_span": "p10 + p01 < 1"
+    }
+  },
+  "guarantee_boundary": {
+    "guaranteed": [
+      "Each local T1/Tphi pair generates its own local Lindblad rates.",
+      "Each local rate set creates collapse operators on its own subsystem.",
+      "Independent p10/p01 pairs affect observed probabilities only.",
+      "Omitting per_qubit preserves the legacy shared-parameter path."
+    ],
+    "not_claimed": [
+      "calibrated real-hardware prediction",
+      "tenant isolation or a shared-QPU scheduler",
+      "state retention across jobs or imperfect reset",
+      "unintended-drive crosstalk or residual ZZ coupling",
+      "correlated readout or IQ-level measurement simulation",
+      "job-to-job drift or non-Markovian dynamics"
+    ]
+  },
+  "smoke_cases": {
+    "gate_aware_per_qubit": {
+      "passed": true,
+      "local_t1_effective_us": [
+        20.0,
+        200.0
+      ],
+      "readout_assignment_errors": [
+        [
+          0.01,
+          0.02
+        ],
+        [
+          0.03,
+          0.04
+        ]
+      ]
+    },
+    "pulse_network_per_transmon": {
+      "passed": true,
+      "gamma_10_down_per_us": [
+        0.04,
+        0.004
+      ],
+      "readout_assignment_errors": [
+        [
+          0.01,
+          0.02
+        ],
+        [
+          0.03,
+          0.04
+        ]
+      ]
+    }
+  },
+  "source_revision": {
+    "git_head": "b101cbfd4c8975174302cee29a350c6c9d12a1e0",
+    "critical_source_tree_sha256": "4338d7e7671133e8255b4423c6bb6eb65d5209e4dfca466c507cca9250ac0d61",
+    "files": [
+      {
+        "file": "core/capabilities.py",
+        "exists": true,
+        "sha256": "7a7104dbc873162db06f40b4f28e6b1247a0d844efff64009732f3e400d2e631"
+      },
+      {
+        "file": "core/classical_branching.py",
+        "exists": true,
+        "sha256": "06da641e384e556878f4271397121dccad55f1fe5ce90c518aafe318a5a326b5"
+      },
+      {
+        "file": "core/gates.py",
+        "exists": true,
+        "sha256": "46263cbc80a7e123ad637c740d6b54be84a4c5b5391135b45b2f1eb237955819"
+      },
+      {
+        "file": "core/physical_environment.py",
+        "exists": true,
+        "sha256": "9f6a5cd7fcc32ab6e7db5530c389f2bfb31b1119d18b6bc83f40227ea31b8df3"
+      },
+      {
+        "file": "core/results.py",
+        "exists": true,
+        "sha256": "4ac8aa523061cd58e7bb042a31049f1d6aa9b9fbcc242d2256cfa66ae521970d"
+      },
+      {
+        "file": "core/simulator.py",
+        "exists": true,
+        "sha256": "d5ab6ec79422de1ff1e3f81e1196abd6193c400ed4b991fd7b1a97535e7f223b"
+      },
+      {
+        "file": "core/ui_response.py",
+        "exists": true,
+        "sha256": "c53c52e38a3209e5ea679dedda65476877334d61916b33a563fb56ab92af2aac"
+      },
+      {
+        "file": "core/validation.py",
+        "exists": true,
+        "sha256": "f77fea7eced41afbd6b477b3b014ecca2523eda207b3dc5f3c46f01d5f6d888d"
+      },
+      {
+        "file": "api/main.py",
+        "exists": true,
+        "sha256": "72847c9e86da1a0000317fd75fb86689407c3bc0394168a53bdd3c74d3e8c85e"
+      },
+      {
+        "file": "api/pulse_models.py",
+        "exists": true,
+        "sha256": "4785b2782af7c7f261d59ff5992d231865f72bf8948f7fe992f42d2d8c6881d0"
+      },
+      {
+        "file": "api/pulse_qutrit_service.py",
+        "exists": true,
+        "sha256": "4aa950e307947ebea4170ac89cbbbc350c89fa3a3476e2bcb4b8b588c7baf8fe"
+      },
+      {
+        "file": "api/pulse_transmon_network_service.py",
+        "exists": true,
+        "sha256": "061e4ce215c1a01eaef3e448558345602fbaeb11816ea42d035549c6f44e5a5f"
+      },
+      {
+        "file": "tests/test_per_qubit_calibration.py",
+        "exists": true,
+        "sha256": "d0647f43753b3ef7f40dba65664eb1b878c52783cd1d7716ffe3d10b8d413418"
+      },
+      {
+        "file": "tests/test_physical_model_baseline.py",
+        "exists": true,
+        "sha256": "de5dab17aa7cbadd5cb0a09decd83efacdfa3b6aeee2395e5e996ba0e451ea45"
+      },
+      {
+        "file": "tests/test_pulse_api_transmon_network.py",
+        "exists": true,
+        "sha256": "d36a7f5698c64b9ac8b96b3493417eee6f02581668b3b326bce906de0da881fc"
+      },
+      {
+        "file": "validation_physics/model_baseline.py",
+        "exists": true,
+        "sha256": "0a5e85fd06c38027647766924b0d27982cc8f9622bcd46f44adfe6ce3381f0a0"
+      },
+      {
+        "file": "scripts/freeze_physical_model_baseline.py",
+        "exists": true,
+        "sha256": "28c7d8b978f16a11c3e3daa3d16c88d906f8efe1fbd68822a6a9968bbbfd831d"
+      }
+    ]
+  },
+  "evidence_files": [
+    {
+      "file": "docs_for_develop/physics/model_identity.md",
+      "exists": true,
+      "sha256": "be2fc12d2f013ae64a3b8d5f86c3a3a65dc41fbce4740a9f37c3c50edfa954d0"
+    },
+    {
+      "file": "docs/validation/physical-model-baseline-v1.md",
+      "exists": true,
+      "sha256": "658c67de844f1283cbfaa51f6edc5162df2acf703d17a72c59848130e6fb3ad6"
+    },
+    {
+      "file": "validation_results/cptp_model_freeze.json",
+      "exists": true,
+      "sha256": "d06b07eb2ae4508df198f7baab37cc6d3f11e5cc062c6e7a8a79298a614cb966"
+    },
+    {
+      "file": "validation_results/pulse_transmon_network_qutip_audit.json",
+      "exists": true,
+      "sha256": "953a14189c058d4f0a0c59cb82dbf03e21cdfb3e359b2aac1fb4caf45d7858aa"
+    }
+  ],
+  "environment": {
+    "python": "3.14.4",
+    "packages": {
+      "numpy": "2.4.4",
+      "fastapi": "0.138.1",
+      "pydantic": "2.13.4"
+    }
+  }
+}

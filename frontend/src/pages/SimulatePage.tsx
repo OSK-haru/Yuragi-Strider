@@ -1,20 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import './SimulatePage.css'
-import { CircuitSummaryCard } from '../components/CircuitSummaryCard'
+import '../components/IdeLayout.css'
+import { IdeViewToggles, IdeWorkbench } from '../components/IdeWorkbench'
+import { useIdeLayout } from '../hooks/useIdeLayout'
 import { DensityMatrixSummaryCard } from '../components/DensityMatrixSummaryCard'
 import { DiagnosticsCard, type SimulationDiagnostics } from '../components/DiagnosticsCard'
 import { ParameterPanel } from '../components/ParameterPanel'
-import { QuantumPet, type QuantumPetPhase } from '../components/QuantumPet'
 import { RunPanel } from '../components/RunPanel'
-import { ResultDrawer } from '../components/ResultDrawer'
-import { SectionHeader } from '../components/SectionHeader'
 import { SimulationCompletionPopup } from '../components/SimulationCompletionPopup'
+import { ToolboxPanel } from '../components/ToolboxPanel'
 import { uiResponseExample } from '../mock/uiResponseExample'
+import { algorithmPresets } from '../utils/algorithmPresets'
 import { apiUrl } from '../utils/apiBase'
 import type { SimulateSettings } from '../utils/simulateSettings'
 import { circuitEditorStateToConfig, type CircuitConfig } from '../utils/circuitConfig'
 import { validateCircuitConfigForRun } from '../utils/circuitValidation'
-import { simulateTips } from '../utils/quantumPetTips'
+import {
+  checkToolbox,
+  resolvedSweepDelays,
+  toolboxErrorMessage,
+  toolboxJobRequests,
+  toolboxRequestBlock,
+  type ToolboxJobRequest,
+  type ToolboxSettings,
+} from '../utils/toolbox'
 import { estimateSimulationCost } from '../utils/simulationCost'
 import { useCircuitContext } from '../context/useCircuitContext'
 import { useTutorial } from '../context/useTutorial'
@@ -27,6 +36,9 @@ import type {
   GateAwareEvolutionMethod,
   GateCompilationMode,
   MeasurementOptions,
+  PerQubitCalibrationSettings,
+  ReadoutErrorSettings,
+  ReadoutErrorSettingsErrors,
   SimulationBackend,
   SimulateRequestParameterErrors,
   SimulateRequestParameters,
@@ -41,13 +53,29 @@ type SimulatePageProps = {
   result: SimulationSummaryData
   gateDurationDefaults: GateDurationDefaults
   onGateDurationDefaultsChange: (gateDurationDefaults: GateDurationDefaults) => void
-  onOpenCircuitStudio: () => void
-  onOpenStateExplorer: () => void
   previousResponse: SimulationResponse | null
-  onSuccessfulResponse: (response: SimulationResponse, circuitConfig: CircuitConfig) => void
+  /* toolboxJobs は通常実行に続けて App が走らせる追加の実行。 */
+  onSuccessfulResponse: (
+    response: SimulationResponse,
+    circuitConfig: CircuitConfig,
+    toolboxJobs: ToolboxJobRequest[],
+  ) => void
   settings: SimulateSettings
   onSettingsChange: (settings: SimulateSettings) => void
+  /*
+   * IDE の作業領域に置く回路エディターと状態エクスプローラー。App が用意する。
+   * 通常モードはこの IDE 画面に一本化している。
+   */
+  ide: {
+    renderEditor: () => ReactNode
+    renderExplorer: (showCircuit: () => void) => ReactNode
+  }
+  /* 最初に開く表示。旧 /state-explorer から来たときは 'explorer'。 */
+  initialIdeView?: IdeView
 }
+
+type IdeView = 'circuit' | 'explorer'
+type IdeMessagesTab = 'run' | 'alerts' | 'diagnostics'
 
 type SimulateRequestPayload = {
   simulation_backend: SimulationBackend
@@ -57,8 +85,16 @@ type SimulateRequestPayload = {
   circuit_config: ReturnType<typeof circuitEditorStateToConfig>
   gate_duration_defaults: GateDurationDefaults
   measurement_options: MeasurementOptions
+  readout_error?: {
+    p10: number
+    p01: number
+    per_qubit?: Array<{ p10: number; p01: number }>
+  }
   snapshot_options: SnapshotOptions
-  parameters: SimulateRequestParameters
+  parameters: SimulateRequestParameters & {
+    per_qubit?: Array<{ t1_max_us: number; tphi_max_us: number }>
+  }
+  toolbox?: Record<string, unknown>
 }
 
 type RequestErrorKind = 'none' | 'api' | 'validation'
@@ -71,7 +107,6 @@ type CompletionNotice = {
   title: string
   detail: string
 }
-const PET_CELEBRATION_MS = 7000
 const RUN_REQUEST_MIN_TIMEOUT_MS = 15000
 const RUN_REQUEST_TIMEOUT_PER_STEP_MS = 25
 /* ドラッグ中の1操作ごとにリクエストが飛ばない程度の、体感では気づかない待ち。 */
@@ -194,6 +229,67 @@ function validateSimulationParameters(parameters: SimulateRequestParameters): {
 
   const firstMessage = Object.values(errors)[0] ?? null
   return { errors, firstMessage }
+}
+
+function validateReadoutError(settings: ReadoutErrorSettings): {
+  errors: ReadoutErrorSettingsErrors
+  firstMessage: string | null
+} {
+  const errors: ReadoutErrorSettingsErrors = {}
+  if (!settings.enabled) {
+    return { errors, firstMessage: null }
+  }
+  if (!Number.isFinite(settings.p10) || settings.p10 < 0 || settings.p10 > 1) {
+    errors.p10 = 'p10は0以上1以下の有限値にしてください。'
+  }
+  if (!Number.isFinite(settings.p01) || settings.p01 < 0 || settings.p01 > 1) {
+    errors.p01 = 'p01は0以上1以下の有限値にしてください。'
+  }
+  if (!errors.p10 && !errors.p01 && settings.p10 + settings.p01 >= 1) {
+    errors.span = 'p10 + p01は1未満にしてください。'
+  }
+  return { errors, firstMessage: errors.p10 ?? errors.p01 ?? errors.span ?? null }
+}
+
+function normalizePerQubitCalibration(
+  settings: PerQubitCalibrationSettings,
+  qubitCount: number,
+  parameters: SimulateRequestParameters,
+  readoutError: ReadoutErrorSettings,
+): PerQubitCalibrationSettings {
+  return {
+    ...settings,
+    values: Array.from({ length: qubitCount }, (_, index) => settings.values[index] ?? ({
+      t1_max_us: parameters.t1_max_us,
+      tphi_max_us: parameters.tphi_max_us,
+      p10: readoutError.p10,
+      p01: readoutError.p01,
+    })),
+  }
+}
+
+function validatePerQubitCalibration(
+  settings: PerQubitCalibrationSettings,
+  readoutEnabled: boolean,
+): string | null {
+  if (!settings.enabled) return null
+  for (let index = 0; index < settings.values.length; index += 1) {
+    const entry = settings.values[index]
+    if (!Number.isFinite(entry.t1_max_us) || entry.t1_max_us <= 0) {
+      return `q${index} の T1 max は0より大きい有限値にしてください。`
+    }
+    if (!Number.isFinite(entry.tphi_max_us) || entry.tphi_max_us <= 0) {
+      return `q${index} の Tφ max は0より大きい有限値にしてください。`
+    }
+    if (readoutEnabled && (
+      !Number.isFinite(entry.p10) || !Number.isFinite(entry.p01)
+      || entry.p10 < 0 || entry.p10 > 1 || entry.p01 < 0 || entry.p01 > 1
+      || entry.p10 + entry.p01 >= 1
+    )) {
+      return `q${index} の読み出し誤差は0以上1以下で、p10 + p01 < 1にしてください。`
+    }
+  }
+  return null
 }
 
 function validateGateDurationDefaults(gateDurations: GateDurationDefaults): {
@@ -389,20 +485,34 @@ function normalizeApiDetail(detail: unknown): string | null {
 export function SimulatePage({
   gateDurationDefaults,
   onGateDurationDefaultsChange,
-  onOpenCircuitStudio,
-  onOpenStateExplorer,
   previousResponse,
   onSuccessfulResponse,
   settings,
   onSettingsChange,
+  ide,
+  initialIdeView = 'circuit',
 }: SimulatePageProps) {
-  const { circuitState } = useCircuitContext()
+  const { circuitState, handleLoadCircuitPreset } = useCircuitContext()
+  const [ideView, setIdeView] = useState<IdeView>(initialIdeView)
+  const [ideMessagesTab, setIdeMessagesTab] = useState<IdeMessagesTab>('run')
+  const ideLayout = useIdeLayout('gate-aware', { inspectorWidth: 340 }, { navigator: 'プリセット' })
   const internalInfoVisible = useInternalInfoVisible()
   /* チュートリアルは、回路・設定・実行完了の3つをここから受け取る。 */
   const tutorial = useTutorial()
+  /*
+   * チュートリアル中は、台本が指す表示を優先する。利用者が選んだ表示や
+   * 保存したペイン配置は書き換えず、案内のあいだだけ上から被せる。
+   */
+  const tutorialBeat = tutorial.beat
+  const tutorialIdeView = tutorialBeat?.route === 'gate-aware-ide' ? tutorialBeat.ideView : undefined
+  const activeIdeView: IdeView = tutorialIdeView ?? ideView
+  const tutorialAnchors = tutorialBeat?.anchors ?? []
+  const tutorialPanes = {
+    navigator: tutorialAnchors.includes('circuit-summary'),
+    inspector: tutorialBeat?.opensPanel === 'advanced-settings'
+      || tutorialAnchors.some((anchor) => anchor === 'parameter-panel' || anchor.startsWith('param-')),
+  }
   const { reportCondition, recordRun } = tutorial
-  const tutorialOpensAdvanced = tutorial.beat?.opensPanel === 'advanced-settings'
-  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [response, setResponse] = useState<SimulationResponse>(
     () => previousResponse ?? uiResponseExample,
   )
@@ -434,7 +544,10 @@ export function SimulatePage({
     compilationMode,
     simulationBackend,
     snapshotOptions,
+    readoutError,
+    perQubitCalibration,
     customSnapshotTimesInput,
+    toolbox: toolboxSettings,
   } = settings
   const updateSettings = useCallback(
     <Key extends keyof SimulateSettings>(key: Key, value: SimulateSettings[Key]) => {
@@ -472,6 +585,18 @@ export function SimulatePage({
     useState<SimulateRequestParameterErrors>({})
   const [gateDurationErrors, setGateDurationErrors] =
     useState<GateDurationDefaultErrors>({})
+  const [readoutErrorErrors, setReadoutErrorErrors] =
+    useState<ReadoutErrorSettingsErrors>({})
+  const [perQubitCalibrationError, setPerQubitCalibrationError] = useState<string | null>(null)
+  const resolvedPerQubitCalibration = useMemo(
+    () => normalizePerQubitCalibration(
+      perQubitCalibration,
+      circuitState.logical_qubits,
+      simulationParameters,
+      readoutError,
+    ),
+    [perQubitCalibration, circuitState.logical_qubits, simulationParameters, readoutError],
+  )
   const setSnapshotOptions = useCallback(
     (update: SnapshotOptions | ((current: SnapshotOptions) => SnapshotOptions)) => {
       onSettingsChange({
@@ -485,10 +610,21 @@ export function SimulatePage({
     (value: string) => updateSettings('customSnapshotTimesInput', value),
     [updateSettings],
   )
+  const setToolboxSettings = useCallback(
+    (value: ToolboxSettings) => updateSettings('toolbox', value),
+    [updateSettings],
+  )
+  const toolboxSweepDelays = useMemo(
+    () => resolvedSweepDelays(toolboxSettings, simulationParameters.t1_max_us, simulationParameters.tphi_max_us),
+    [toolboxSettings, simulationParameters.t1_max_us, simulationParameters.tphi_max_us],
+  )
+  const toolboxCheck = useMemo(
+    () => checkToolbox(toolboxSettings, circuitEditorStateToConfig(circuitState), toolboxSweepDelays),
+    [toolboxSettings, circuitState, toolboxSweepDelays],
+  )
   const [snapshotOptionsError, setSnapshotOptionsError] = useState<string | null>(null)
   const [requestErrorKind, setRequestErrorKind] = useState<RequestErrorKind>('none')
   const [completionNotice, setCompletionNotice] = useState<CompletionNotice | null>(null)
-  const [petCelebrating, setPetCelebrating] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const requestIdRef = useRef(0)
   const mountedRef = useRef(true)
@@ -589,7 +725,8 @@ export function SimulatePage({
     if (
       requestErrorKind === 'validation' &&
       validation.firstMessage === null &&
-      gateDurationValidation.firstMessage === null
+      gateDurationValidation.firstMessage === null &&
+      validateReadoutError(readoutError).firstMessage === null
     ) {
       setRequestErrorKind('none')
       setErrorMessage(null)
@@ -614,6 +751,35 @@ export function SimulatePage({
     }
   }
 
+  function handleReadoutErrorChange(nextReadoutError: ReadoutErrorSettings) {
+    const validation = validateReadoutError(nextReadoutError)
+    updateSettings('readoutError', nextReadoutError)
+    setReadoutErrorErrors(validation.errors)
+    if (
+      requestErrorKind === 'validation' &&
+      validation.firstMessage === null &&
+      validateSimulationParameters(simulationParameters).firstMessage === null &&
+      validateGateDurationDefaults(gateDurationDefaults).firstMessage === null
+    ) {
+      setRequestErrorKind('none')
+      setErrorMessage(null)
+      setErrorDetail(null)
+    }
+  }
+
+  function handlePerQubitCalibrationChange(next: PerQubitCalibrationSettings) {
+    const normalized = normalizePerQubitCalibration(
+      next,
+      circuitState.logical_qubits,
+      simulationParameters,
+      readoutError,
+    )
+    updateSettings('perQubitCalibration', normalized)
+    setPerQubitCalibrationError(
+      validatePerQubitCalibration(normalized, readoutError.enabled),
+    )
+  }
+
   async function runSimulationFromApi() {
     const frontendStartedAtMs = performance.now()
     const frontendStartedAtIso = new Date().toISOString()
@@ -629,6 +795,11 @@ export function SimulatePage({
 
     const validation = validateSimulationParameters(simulationParameters)
     const gateDurationValidation = validateGateDurationDefaults(gateDurationDefaults)
+    const readoutErrorValidation = validateReadoutError(readoutError)
+    const perQubitValidationMessage = validatePerQubitCalibration(
+      resolvedPerQubitCalibration,
+      readoutError.enabled,
+    )
     const parsedSnapshotTimes = parseCustomSnapshotTimes(customSnapshotTimesInput)
     const requestedSnapshotOptions = {
       ...snapshotOptions,
@@ -640,10 +811,15 @@ export function SimulatePage({
     setSnapshotOptionsError(snapshotValidationMessage)
     setParameterErrors(validation.errors)
     setGateDurationErrors(gateDurationValidation.errors)
+    setReadoutErrorErrors(readoutErrorValidation.errors)
+    setPerQubitCalibrationError(perQubitValidationMessage)
     const firstValidationMessage =
       validation.firstMessage ??
       gateDurationValidation.firstMessage ??
-      snapshotValidationMessage
+      readoutErrorValidation.firstMessage ??
+      perQubitValidationMessage ??
+      snapshotValidationMessage ??
+      toolboxErrorMessage(toolboxCheck)
     if (firstValidationMessage !== null) {
       setLoadStatus('error')
       setActiveRequestLabel(SOURCE_LABEL_SERVER_RUN)
@@ -694,6 +870,7 @@ export function SimulatePage({
     setErrorDetail(null)
     setRequestErrorKind('none')
 
+    const toolboxBlock = toolboxRequestBlock(toolboxSettings, circuitConfig.logical_qubits, toolboxCheck)
     try {
       const payload: SimulateRequestPayload = {
         simulation_backend: simulationBackend,
@@ -703,9 +880,33 @@ export function SimulatePage({
         circuit_config: circuitConfig,
         gate_duration_defaults: gateDurationDefaults,
         measurement_options: defaultMeasurementOptions,
+        ...(readoutError.enabled ? {
+          readout_error: {
+            p10: readoutError.p10,
+            p01: readoutError.p01,
+            ...(resolvedPerQubitCalibration.enabled ? {
+              per_qubit: resolvedPerQubitCalibration.values.map(({ p10, p01 }) => ({ p10, p01 })),
+            } : {}),
+          },
+        } : {}),
         snapshot_options: requestedSnapshotOptions,
-        parameters: simulationParameters,
+        parameters: {
+          ...simulationParameters,
+          ...(resolvedPerQubitCalibration.enabled ? {
+            per_qubit: resolvedPerQubitCalibration.values.map(({ t1_max_us, tphi_max_us }) => ({
+              t1_max_us,
+              tphi_max_us,
+            })),
+          } : {}),
+        },
+        ...(toolboxBlock === null ? {} : { toolbox: toolboxBlock }),
       }
+      /* 追加の実行は、この実行と同じ設定で固めておく。 */
+      const toolboxJobs = toolboxJobRequests(toolboxSettings, toolboxCheck, payload, {
+        parameters: simulationParameters,
+        readoutError: readoutError.enabled ? { p10: readoutError.p10, p01: readoutError.p01 } : null,
+        delays: toolboxSweepDelays,
+      })
       const apiResponse = await fetch(url, {
         method: 'POST',
         headers: {
@@ -745,7 +946,7 @@ export function SimulatePage({
       }
 
       setResponse(parsed as SimulationResponse)
-      onSuccessfulResponse(parsed as SimulationResponse, circuitConfig)
+      onSuccessfulResponse(parsed as SimulationResponse, circuitConfig, toolboxJobs)
       setLoadStatus('api')
       setLatestSourceLabel(SOURCE_LABEL_SERVER_RUN)
       setLastFetchResult('success')
@@ -761,7 +962,6 @@ export function SimulatePage({
           ? `${parsed.run.selected_backend} / ${evolutionMethod}`
           : `${evolutionMethodNoticeLabels[evolutionMethod]}で計算しました`,
       })
-      setPetCelebrating(true)
 
       /*
        * チュートリアルへの報告。判定は「この実行に使った設定」で行う。
@@ -792,7 +992,6 @@ export function SimulatePage({
       setErrorMessage(failure.summary)
       setErrorDetail(failure.detail)
       setRequestErrorKind('api')
-      setPetCelebrating(false)
       setFrontendRunFinishedAt(new Date().toISOString())
       setFrontendRunElapsedMs(Number((performance.now() - frontendStartedAtMs).toFixed(1)))
     } finally {
@@ -811,18 +1010,6 @@ export function SimulatePage({
       abortControllerRef.current?.abort()
     }
   }, [])
-
-  /*
-   * ペットは完了色（菫）をしばらく保ってから、基本色（緑）へ戻る。
-   */
-  useEffect(() => {
-    if (!petCelebrating) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => setPetCelebrating(false), PET_CELEBRATION_MS)
-    return () => window.clearTimeout(timeoutId)
-  }, [petCelebrating])
 
   const connectionLabel =
     loadStatus === 'loading'
@@ -847,23 +1034,6 @@ export function SimulatePage({
             ? SOURCE_LABEL_FIXTURE_FALLBACK
             : `前回の結果を保持中（${latestSourceLabel}）`
           : SOURCE_LABEL_FIXTURE
-  const hasAlerts = response.warnings.length > 0 || response.issues.length > 0
-
-  const petPhase: QuantumPetPhase =
-    loadStatus === 'loading' ? 'running' : petCelebrating ? 'done' : 'idle'
-
-  const petMessage =
-    petPhase === 'running'
-      ? null
-      : petPhase === 'done'
-        ? response.summary.final_fidelity !== null
-          ? `完了！最終忠実度は ${(response.summary.final_fidelity * 100).toFixed(2)}% だったよ。`
-          : 'シミュレーションが完了したよ。結果を見てみよう。'
-        : loadStatus === 'error' && errorMessage !== null
-          ? requestErrorKind === 'validation'
-            ? `送信できなかったよ：${errorMessage}`
-            : `つまずいたみたい：${errorMessage}`
-          : null
   const circuitGateCount = circuitState.columns.reduce(
     (count, column) => count + column.gates.length,
     0,
@@ -877,54 +1047,22 @@ export function SimulatePage({
     circuitColumnCount,
     evolutionMethod,
   })
-  return (
-    <main className="simulate-page">
-      <header className="simulate-page__header">
-        <div>
-          <div className="simulate-page__eyebrow">Yuragi-Strider</div>
-          <h1>シミュレーションワークスペース</h1>
-          <p className="simulate-page__lede">
-            現在のバックエンドとシミュレーション結果を確認できます。
-          </p>
-        </div>
-      </header>
-
-      <div className="simulate-page__core-stack">
-        <CircuitSummaryCard
-          circuit={circuitState}
-          actionLabel="回路スタジオで編集"
-          onAction={onOpenCircuitStudio}
-        />
-        {/*
-          チュートリアルがパラメーターの話をしている間は開いたままにする。
-          利用者が閉じても、その章のあいだは開き直す。
-        */}
-        <details
-          className="simulate-page__advanced"
-          data-tutorial-anchor="advanced-settings"
-          open={advancedOpen || tutorialOpensAdvanced}
-          onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
-        >
-          <summary className="simulate-page__advanced-summary">
-            <SectionHeader
-              className="simulate-page__advanced-header"
-              icon="wrench"
-              eyebrow="詳細設定"
-              title="計算パラメーター・スナップショット"
-              description="通常は既定値のままで実行できます。上級者向けの調整はここから行えます。"
-              headingLevel="h2"
-            />
-            <span className="simulate-page__advanced-toggle" aria-hidden="true" />
-          </summary>
-
-          <div className="simulate-page__advanced-body">
+  const parameterControls = (
+    <>
             <ParameterPanel
               editableParameters={simulationParameters}
               gateDurationDefaults={gateDurationDefaults}
               validationMessages={parameterErrors}
               gateDurationValidationMessages={gateDurationErrors}
+              readoutError={readoutError}
+              readoutErrorValidationMessages={readoutErrorErrors}
+              logicalQubits={circuitState.logical_qubits}
+              perQubitCalibration={resolvedPerQubitCalibration}
+              perQubitCalibrationError={perQubitCalibrationError}
               onEditableParametersChange={handleSimulationParametersChange}
               onGateDurationDefaultsChange={handleGateDurationDefaultsChange}
+              onReadoutErrorChange={handleReadoutErrorChange}
+              onPerQubitCalibrationChange={handlePerQubitCalibrationChange}
             />
             <section className="simulate-page__snapshot-controls" aria-labelledby="snapshot-controls-title">
               <div className="simulate-page__snapshot-heading">
@@ -1004,8 +1142,10 @@ export function SimulatePage({
                 </p>
               ) : null}
             </section>
-          </div>
-        </details>
+    </>
+  )
+
+  const renderRunPanel = (showRunButton: boolean) => (
         <RunPanel
           run={response.run}
           compilationPreview={compilationPreview}
@@ -1032,23 +1172,12 @@ export function SimulatePage({
           onRunSimulation={() => {
             void runSimulationFromApi()
           }}
+          showRunButton={showRunButton}
         />
-        {/*
-          「シミュレーション結果のスナップショット」はここから外した。
-          最終忠実度は実行完了ポップアップとペットが伝えており、
-          時間変化そのものは状態エクスプローラーのタイムラインで読める。
-        */}
-      </div>
+  )
 
-      <div className="simulate-page__drawer-stack">
-        {hasAlerts ? (
-          <ResultDrawer
-            eyebrow="アラート"
-            title="警告と問題"
-            icon="warning"
-            description="最新の応答で検出された注意事項です。"
-            defaultOpen
-          >
+  const alertsContent = (
+    <>
             {response.warnings.length > 0 ? (
               <div className="simulate-page__alert-block">
                 <div className="simulate-page__alert-heading">警告</div>
@@ -1086,23 +1215,134 @@ export function SimulatePage({
                 </div>
               </div>
             ) : null}
-          </ResultDrawer>
-        ) : null}
-        <DensityMatrixSummaryCard
-          response={response}
-          onOpenStateExplorer={onOpenStateExplorer}
-        />
-        <DiagnosticsCard diagnostics={response.diagnostics} rates={response.rates} />
-      </div>
-      {completionNotice ? (
+    </>
+  )
+
+  const completionPopup = completionNotice ? (
         <SimulationCompletionPopup
           mode="gate-aware"
           title={completionNotice.title}
           detail={completionNotice.detail}
           onDismiss={() => setCompletionNotice(null)}
         />
-      ) : null}
-      <QuantumPet phase={petPhase} message={petMessage} tips={simulateTips} />
+  ) : null
+
+  const canRun = response.run.can_run ?? true
+  const alertCount = response.warnings.length + response.issues.length
+  const fidelity = response.summary.final_fidelity
+  const messageTabs: Array<[IdeMessagesTab, string, number | null]> = [
+    ['run', '実行', null],
+    ['alerts', '警告と問題', alertCount],
+    ['diagnostics', '診断', null],
+  ]
+  return (
+    <main className="simulate-page simulate-ide ide">
+      <header className="ide__titlebar">
+        <h1>IDEワークスペース</h1>
+        <nav className="ide__tabs" aria-label="作業領域の表示">
+          <button type="button" aria-pressed={activeIdeView === 'circuit'} onClick={() => setIdeView('circuit')}>回路</button>
+          <button type="button" aria-pressed={activeIdeView === 'explorer'} onClick={() => setIdeView('explorer')}>状態エクスプローラー</button>
+        </nav>
+        <IdeViewToggles controls={ideLayout} />
+        <span className="ide__badge" role="status">{connectionLabel}</span>
+      </header>
+      <div className="ide__toolbar" role="toolbar" aria-label="操作">
+        <button type="button" data-tutorial-anchor="run-button" onClick={() => { void runSimulationFromApi() }} disabled={!canRun || loadStatus === 'loading'}>
+          {loadStatus === 'loading' ? '実行中…' : 'シミュレーションを実行'}
+        </button>
+        <span className="ide__toolbar-note">{dataSourceLabel}</span>
+      </div>
+      {errorMessage ? <p className="ide__notice" role="status">{errorMessage}</p> : null}
+      <IdeWorkbench
+        controls={ideLayout}
+        forceVisible={tutorialPanes}
+        navigator={(
+          <aside className="ide__pane ide__navigator" aria-label="プリセット">
+            <h2 className="ide__pane-title">プリセット</h2>
+            <div className="ide__pane-body">
+              <dl className="ide__facts" data-tutorial-anchor="circuit-summary">
+                <div><dt>量子ビット</dt><dd>{circuitState.logical_qubits}</dd></div>
+                <div><dt>列</dt><dd>{circuitState.columns.length}</dd></div>
+                <div><dt>ゲート</dt><dd>{circuitGateCount}</dd></div>
+              </dl>
+              <h3>アルゴリズム</h3>
+              <ul className="ide__tree" aria-label="アルゴリズムのプリセット">
+                {algorithmPresets.map((preset) => (
+                  <li key={preset.key}>
+                    <button type="button" onClick={() => { handleLoadCircuitPreset(preset.key); setIdeView('circuit') }}>
+                      <span>{preset.title}</span>
+                      <small>{preset.qubits} 量子ビット · {preset.category}</small>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <small>読み込むと、編集中の回路を置き換えます。</small>
+            </div>
+          </aside>
+        )}
+        editor={(
+          <section className="ide__pane ide__editor" aria-label="作業領域">
+            <div className="ide__doc-tabs">
+              <span className="ide__doc-tab">{activeIdeView === 'circuit' ? '回路エディター' : '状態エクスプローラー'}</span>
+            </div>
+            <div className="ide__pane-body">
+              {activeIdeView === 'circuit' ? ide.renderEditor() : ide.renderExplorer(() => setIdeView('circuit'))}
+            </div>
+          </section>
+        )}
+        toolbox={(
+          <aside className="ide__pane ide__toolbox" aria-label="分析ツール箱">
+            <h2 className="ide__pane-title">分析ツール箱</h2>
+            <div className="ide__pane-body">
+              <ToolboxPanel
+                settings={toolboxSettings}
+                check={toolboxCheck}
+                qubitCount={circuitState.logical_qubits}
+                sweepDelays={toolboxSweepDelays}
+                onChange={setToolboxSettings}
+              />
+            </div>
+          </aside>
+        )}
+        inspector={(
+          <aside className="ide__pane ide__inspector" aria-label="プロパティ" data-tutorial-anchor="advanced-settings">
+            <h2 className="ide__pane-title">計算パラメーター</h2>
+            <div className="ide__pane-body">
+              {parameterControls}
+            </div>
+          </aside>
+        )}
+        messages={(
+          <section className="ide__pane ide__messages" aria-label="メッセージ">
+            <div className="ide__doc-tabs" role="group" aria-label="メッセージの種類">
+              {messageTabs.map(([key, label, count]) => (
+                <button key={key} type="button" aria-pressed={ideMessagesTab === key} onClick={() => setIdeMessagesTab(key)}>
+                  {label}{count === null ? null : <span>{count}</span>}
+                </button>
+              ))}
+            </div>
+            <div className="ide__pane-body simulate-ide__messages-body">
+              {ideMessagesTab === 'run' ? renderRunPanel(false) : null}
+              {ideMessagesTab === 'alerts'
+                ? alertCount > 0 ? alertsContent : <p className="simulate-ide__empty">警告と問題はありません。</p>
+                : null}
+              {ideMessagesTab === 'diagnostics' ? (
+                <>
+                  <DensityMatrixSummaryCard response={response} onOpenStateExplorer={() => setIdeView('explorer')} />
+                  <DiagnosticsCard diagnostics={response.diagnostics} rates={response.rates} />
+                </>
+              ) : null}
+            </div>
+          </section>
+        )}
+      />
+      <footer className="ide__statusbar">
+        <span>{loadStatus === 'loading' ? '実行中…' : '準備完了'}</span>
+        <span>接続: {connectionLabel}</span>
+        <span>最終忠実度 {fidelity === null ? '—' : `${(fidelity * 100).toFixed(2)}%`}</span>
+        {frontendRunElapsedMs === null ? null : <span>前回の実行 {frontendRunElapsedMs} ms</span>}
+      </footer>
+      {completionPopup}
     </main>
   )
 }

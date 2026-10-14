@@ -31,6 +31,9 @@ FIDELITY_RANGE_TOL = 1e-10
 PURITY_RANGE_TOL = 1e-10
 PROBABILITY_SUM_TOL = 1e-8
 PROBABILITY_NEGATIVE_TOL = 1e-8
+# The API still restricts users to the first four; +i/-i exist for internal
+# process characterization (see core.process_characterization).
+SUPPORTED_INITIAL_STATES = frozenset({"0", "1", "+", "-", "+i", "-i"})
 
 
 def validate_simulation_config(config: SimulationConfig) -> list[ValidationIssue]:
@@ -324,12 +327,12 @@ def validate_simulation_config(config: SimulationConfig) -> list[ValidationIssue
                 ))
 
     for index, initial_state in enumerate(circuit.initial_states):
-        if initial_state not in {"0", "1", "+", "-"}:
+        if initial_state not in SUPPORTED_INITIAL_STATES:
             issues.append(_error(
                 "UNSUPPORTED_INITIAL_STATE",
                 "Initial state is not supported.",
                 f"Received initial_states[{index}]={initial_state!r}.",
-                "Use one of '0', '1', '+', or '-'.",
+                "Use one of '0', '1', '+', '-', '+i', or '-i'.",
             ))
 
     if environment.model not in SUPPORTED_ENVIRONMENT_MODELS:
@@ -347,6 +350,13 @@ def validate_simulation_config(config: SimulationConfig) -> list[ValidationIssue
             "Use 'normalized' or 'physical'.",
         ))
     elif environment.input_mode == INPUT_MODE_NORMALIZED:
+        if environment.per_qubit:
+            issues.append(_error(
+                "PER_QUBIT_ENVIRONMENT_REQUIRES_PHYSICAL_MODE",
+                "Per-qubit T1/Tphi settings require physical input mode.",
+                "Normalized mode does not expose calibrated coherence times.",
+                "Use physical input mode or remove environment.per_qubit.",
+            ))
         issues.extend(_range_issue(
             environment.temperature,
             "temperature",
@@ -410,6 +420,16 @@ def validate_simulation_config(config: SimulationConfig) -> list[ValidationIssue
                 "tphi_max_us must be greater than 0.",
                 f"Received tphi_max_us={environment.tphi_max_us!r}",
                 "Set tphi_max_us to a positive dephasing-time maximum.",
+            ))
+        if environment.per_qubit and len(environment.per_qubit) != circuit.logical_qubits:
+            issues.append(_error(
+                "PER_QUBIT_ENVIRONMENT_COUNT_MISMATCH",
+                "Per-qubit coherence settings must match logical_qubits.",
+                (
+                    f"Received {len(environment.per_qubit)} entries for "
+                    f"{circuit.logical_qubits} logical qubits."
+                ),
+                "Provide one T1/Tphi pair per logical qubit or use the shared values.",
             ))
     if environment.observation_strength is not None:
         issues.extend(_range_issue(

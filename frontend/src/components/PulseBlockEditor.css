@@ -17,7 +17,7 @@
 
 .pulse-block-editor__heading span,
 .pulse-block-editor__preview span {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.15em;

@@ -54,7 +54,7 @@
 
   color: var(--tt-accent-hot);
   font-family: var(--tt-mono);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   white-space: nowrap;
@@ -87,7 +87,7 @@
 .tutorial-overlay__samples-title {
   color: var(--tt-ink-mid);
   font-family: var(--tt-mono);
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -99,7 +99,7 @@
   border-collapse: collapse;
 
   font-family: var(--tt-mono);
-  font-size: 0.66rem;
+  font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -143,7 +143,7 @@
 
   color: var(--tt-accent-hot);
   font-family: var(--tt-mono);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   letter-spacing: 0.08em;
 }
 
@@ -178,9 +178,9 @@
 }
 
 .tutorial-overlay__hud-eyebrow {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-family: var(--tt-mono);
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.2em;
 }
@@ -225,7 +225,7 @@
 
   color: var(--tt-ink-mid);
   font-family: var(--tt-mono);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   letter-spacing: 0.14em;
 
   cursor: pointer;
@@ -234,13 +234,13 @@
 }
 
 .tutorial-overlay__quit:hover {
-  border-color: var(--tt-accent);
+  border-color: var(--tt-interact);
 
-  color: var(--tt-accent-hot);
+  color: var(--tt-ink-max);
 }
 
 .tutorial-overlay__quit:focus-visible {
-  outline: var(--tt-bar) solid var(--tt-accent);
+  outline: var(--tt-bar) solid var(--tt-interact);
   outline-offset: 2px;
 }
 

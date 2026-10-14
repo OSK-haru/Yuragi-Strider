@@ -192,8 +192,14 @@ export function useCircuitViewport({
       }
     }
 
-    window.addEventListener('keydown', handleWindowKeyDown)
-    return () => window.removeEventListener('keydown', handleWindowKeyDown)
+    // A mounted editor may belong to a hidden workspace; its hotkeys must not
+    // consume keyboard events intended for the currently visible editor.
+    function handleVisibleWindowKeyDown(event: KeyboardEvent) {
+      if (!viewportRef.current || viewportRef.current.closest('[hidden]')) return
+      handleWindowKeyDown(event)
+    }
+    window.addEventListener('keydown', handleVisibleWindowKeyDown)
+    return () => window.removeEventListener('keydown', handleVisibleWindowKeyDown)
   }, [fitCircuit, goFirst, goLast, resetZoom, zoomIn, zoomOut])
 
   useEffect(() => {

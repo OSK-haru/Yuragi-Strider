@@ -151,7 +151,7 @@
 
 /* 制御点が仮置きのまま（＝まだゲートになっていない）ことを見逃させない。 */
 .circuit-workspace__status--warning {
-  color: var(--tt-accent);
+  color: var(--tt-accent-text);
   font-weight: 700;
 }
 

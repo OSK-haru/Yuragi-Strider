@@ -13,7 +13,10 @@ import { PulseOutputProbabilities } from '../components/PulseOutputProbabilities
 import { PulsePopulationTimeline } from '../components/PulsePopulationTimeline'
 import { PulseStateProbabilityComparison } from '../components/PulseStateProbabilityComparison'
 import { PulseTimelinePlayback } from '../components/PulseTimelinePlayback'
-import { QuantumPet, type QuantumPetPhase } from '../components/QuantumPet'
+import {
+  PulseToolboxResultView,
+  type PulseToolboxViewState,
+} from '../components/PulseToolboxResultView'
 import { RunComparisonBar } from '../components/RunComparisonBar'
 import { useInternalInfoVisible } from '../context/useAdminMode'
 import type { PulseRunRecord } from '../types/pulse'
@@ -24,7 +27,22 @@ import {
   pulseComparabilitySignature,
   type PulseComparisonState,
 } from '../utils/pulseStateExplorer'
-import { pulseStateExplorerTips } from '../utils/quantumPetTips'
+import {
+  PULSE_PANEL_KEYS,
+  PULSE_PANEL_LABELS,
+  PULSE_TOOLBOX_METRIC_KEYS,
+  PULSE_TOOLBOX_METRIC_LABELS,
+  cachedPulseToolbox,
+  checkPulseToolbox,
+  pulseToolboxSelection,
+  runPulseToolbox,
+  storePulseToolbox,
+  type PulsePanelKey,
+  type PulseToolboxGeometry,
+  type PulseToolboxMetricKey,
+  type PulseToolboxSettings,
+  type PulseToolboxState,
+} from '../utils/pulseToolbox'
 import {
   buildPulseResultBundle,
   downloadJson,
@@ -49,6 +67,12 @@ type PulseStateExplorerPageProps = {
    */
   comparison: PulseComparisonState
   onComparisonChange: (comparison: PulseComparisonState) => void
+  /*
+   * 表示項目の on/off と追加指標の選択。Pulseラボのツール箱と同じ1つを共有する。
+   * ここで別に持つと、2か所の on/off が食い違う。
+   */
+  toolbox: PulseToolboxSettings
+  onToolboxChange: (toolbox: PulseToolboxSettings) => void
   onOpenPulseLab: () => void
   /*
    * 読み込んだ結果を受け取る。回路と設定もファイルのものへ戻す必要があるので、
@@ -57,21 +81,11 @@ type PulseStateExplorerPageProps = {
   onImportedRun: (record: PulseRunRecord, circuit: PulseCircuitState) => void
 }
 
-type PulseExplorerPanelKey =
-  | 'physical'
-  | 'metrics'
-  | 'populations'
-  | 'probabilities'
-  | 'output'
-  | 'density'
+type PulseExplorerPanelKey = PulsePanelKey | PulseToolboxMetricKey
 
 const PULSE_EXPLORER_PANEL_LABELS: Record<PulseExplorerPanelKey, string> = {
-  physical: '物理時間',
-  metrics: '指標タイムライン',
-  populations: '占有数タイムライン',
-  probabilities: '確率比較',
-  output: '占有確率',
-  density: '密度行列',
+  ...PULSE_PANEL_LABELS,
+  ...PULSE_TOOLBOX_METRIC_LABELS,
 }
 
 function CollapsiblePanel({
@@ -206,6 +220,8 @@ export function PulseStateExplorerPage({
   currentCircuit,
   comparison,
   onComparisonChange,
+  toolbox,
+  onToolboxChange,
   onOpenPulseLab,
   onImportedRun,
 }: PulseStateExplorerPageProps) {
@@ -226,26 +242,32 @@ export function PulseStateExplorerPage({
    * あいだだけ、2本の差を環境の寄与として読める。
    */
   const { heldRun, comparing } = comparison
-  const [openPanels, setOpenPanels] = useState<Record<PulseExplorerPanelKey, boolean>>({
-    physical: false,
-    metrics: true,
-    populations: false,
-    probabilities: true,
-    output: false,
-    density: false,
-  })
+  const openPanels = useMemo(
+    () => ({ ...toolbox.panels, ...toolbox.metrics }) as Record<PulseExplorerPanelKey, boolean>,
+    [toolbox],
+  )
+  const setPanelVisibility = useCallback(
+    (changes: Partial<Record<PulseExplorerPanelKey, boolean>>) => {
+      const panels = { ...toolbox.panels }
+      const metrics = { ...toolbox.metrics }
+      for (const [key, visible] of Object.entries(changes) as Array<[PulseExplorerPanelKey, boolean]>) {
+        if ((PULSE_PANEL_KEYS as readonly string[]).includes(key)) panels[key as PulsePanelKey] = visible
+        else metrics[key as PulseToolboxMetricKey] = visible
+      }
+      onToolboxChange({ ...toolbox, panels, metrics })
+    },
+    [toolbox, onToolboxChange],
+  )
   /*
    * 比較線を描くのは指標タイムラインと確率比較の2枚だけ。どちらも既定では
    * 開いているが、利用者が閉じたまま比較を入れると線がどこにも見えない。
    * 比較を入れたときは、線が出るパネルを開いておく。
    */
   const openComparisonPanels = useCallback(() => {
-    setOpenPanels((current) => (
-      current.metrics && current.probabilities
-        ? current
-        : { ...current, metrics: true, probabilities: true }
-    ))
-  }, [])
+    if (!toolbox.panels.metrics || !toolbox.panels.probabilities) {
+      setPanelVisibility({ metrics: true, probabilities: true })
+    }
+  }, [toolbox.panels.metrics, toolbox.panels.probabilities, setPanelVisibility])
   const setComparing = useCallback(
     (nextComparing: boolean) => {
       if (nextComparing) {
@@ -292,20 +314,10 @@ export function PulseStateExplorerPage({
     setCursorTimeUs(view?.pulseEndTimeUs ?? 0)
   }
 
-  const togglePanel = useCallback((panelKey: PulseExplorerPanelKey) => {
-    setOpenPanels((current) => ({ ...current, [panelKey]: !current[panelKey] }))
-  }, [])
-  const setAllPanels = useCallback((visible: boolean) => {
-    setOpenPanels((current) => {
-      const next = { ...current }
-      for (const panelKey of Object.keys(PULSE_EXPLORER_PANEL_LABELS) as PulseExplorerPanelKey[]) {
-        next[panelKey] = visible
-      }
-      return next
-    })
-  }, [])
-  const showAllPanels = useCallback(() => setAllPanels(true), [setAllPanels])
-  const hideAllPanels = useCallback(() => setAllPanels(false), [setAllPanels])
+  const togglePanel = useCallback(
+    (panelKey: PulseExplorerPanelKey) => setPanelVisibility({ [panelKey]: !openPanels[panelKey] }),
+    [openPanels, setPanelVisibility],
+  )
   const holdCurrentRun = useCallback(() => {
     if (run === null) {
       return
@@ -385,6 +397,60 @@ export function PulseStateExplorerPage({
     })()
   }, [internalInfoVisible, onComparisonChange, onImportedRun])
 
+  /* 追加指標は、保存した軌跡の形（準位数・台数・密度行列の有無）で使えるかが決まる。 */
+  const toolboxGeometry = useMemo<PulseToolboxGeometry | null>(
+    () => (view === null
+      ? null
+      : {
+          levels: view.levelCount,
+          count: view.transmonCount,
+          hasDensityMatrices: view.hasPerPointDensityMatrix,
+          pointCount: view.points.length,
+        }),
+    [view],
+  )
+  const toolboxCheck = useMemo(
+    () => (toolboxGeometry === null ? null : checkPulseToolbox(toolbox, toolboxGeometry)),
+    [toolbox, toolboxGeometry],
+  )
+  const toolboxSelection = useMemo(
+    () => (toolboxGeometry === null || toolboxCheck === null
+      ? null
+      : pulseToolboxSelection(toolbox, toolboxGeometry, toolboxCheck)),
+    [toolbox, toolboxGeometry, toolboxCheck],
+  )
+  const toolboxSelectionKey = toolboxSelection === null ? null : JSON.stringify(toolboxSelection)
+  /* 計算の結果は、どの軌跡・どの選択に対するものかを一緒に持つ。 */
+  const [toolboxFetch, setToolboxFetch] = useState<{
+    points: object
+    key: string
+    state: PulseToolboxState
+  } | null>(null)
+  useEffect(() => {
+    if (view === null || toolboxGeometry === null || toolboxSelection === null || toolboxSelectionKey === null) {
+      return
+    }
+    if (cachedPulseToolbox(view.points, toolboxSelectionKey) !== undefined) {
+      return
+    }
+    const controller = new AbortController()
+    const points = view.points
+    void runPulseToolbox(
+      toolboxSelection,
+      toolboxGeometry,
+      points.map((point) => ({ timeUs: point.timeUs, densityMatrix: point.densityMatrix })),
+      controller.signal,
+    ).then((state) => {
+      if (controller.signal.aborted) {
+        return
+      }
+      if (state.status === 'done') {
+        storePulseToolbox(points, toolboxSelectionKey, state.data)
+      }
+      setToolboxFetch({ points, key: toolboxSelectionKey, state })
+    })
+    return () => controller.abort()
+  }, [view, toolboxGeometry, toolboxSelection, toolboxSelectionKey])
   const availablePanelKeys = useMemo(
     () => (Object.keys(PULSE_EXPLORER_PANEL_LABELS) as PulseExplorerPanelKey[]).filter((panelKey) => {
       if (view === null) {
@@ -393,36 +459,67 @@ export function PulseStateExplorerPage({
       if (panelKey === 'density') {
         return view.finalDensityMatrix !== null
       }
+      if ((PULSE_TOOLBOX_METRIC_KEYS as readonly string[]).includes(panelKey)) {
+        /* 使えない指標も、選ばれているあいだは理由を見せるために残す。 */
+        const metric = panelKey as PulseToolboxMetricKey
+        return toolboxCheck?.unavailable[metric] === undefined || toolbox.metrics[metric]
+      }
       return view.points.length > 0
     }),
-    [view],
+    [view, toolboxCheck, toolbox.metrics],
   )
-
-  const petPhase: QuantumPetPhase = run === null ? 'idle' : 'done'
-  const petMessage = run === null
-    ? 'まだPulseの結果がないよ。先にPulseラボで実行してね。'
-    : staleResult
-      ? 'Pulseの設定が変わったみたい。いま見ているのは変更前の条件の結果だよ。'
-      : null
+  const showAllPanels = useCallback(
+    () => setPanelVisibility(Object.fromEntries(availablePanelKeys.map((key) => [key, true]))),
+    [availablePanelKeys, setPanelVisibility],
+  )
+  const hideAllPanels = useCallback(
+    () => setPanelVisibility(Object.fromEntries(availablePanelKeys.map((key) => [key, false]))),
+    [availablePanelKeys, setPanelVisibility],
+  )
 
   if (run === null || view === null) {
     return (
-      <main className="pulse-explorer-page">
-        <ExplorerHeader />
+      <div className="pulse-explorer-page">
         <section className="pulse-explorer-page__empty" aria-labelledby="pulse-explorer-empty-title">
           <span className="pulse-explorer-page__eyebrow">結果なし</span>
           <h2 id="pulse-explorer-empty-title">Pulseシミュレーション結果がありません。</h2>
-          <p>先にPulseラボでPulseシミュレーションを実行してください。</p>
-          <button type="button" onClick={onOpenPulseLab}>Pulseラボを開く</button>
+          <p>Pulse 回路を組んで、上のツールバーの実行ボタンを押してください。</p>
+          <button type="button" onClick={onOpenPulseLab}>Pulse 回路に戻る</button>
           {/*
             * 結果が無い状態でも読み込みは要る。人から受け取ったファイルを
             * 開くのは、たいてい自分ではまだ何も実行していないときだから。
             */}
           <ResultImportButton onImport={importResultFile} status={transferStatus} />
         </section>
-        <QuantumPet phase={petPhase} message={petMessage} tips={pulseStateExplorerTips} />
-      </main>
+      </div>
     )
+  }
+
+  const toolboxViewState = (metric: PulseToolboxMetricKey): PulseToolboxViewState => {
+    const unavailable = toolboxCheck?.unavailable[metric]
+    if (unavailable !== undefined) {
+      return { kind: 'idle', message: `この結果では使えません: ${unavailable}` }
+    }
+    const error = toolboxCheck?.errors[metric]
+    if (error !== undefined) {
+      return { kind: 'idle', message: `Pulseラボのツール箱で設定を直してください: ${error}` }
+    }
+    if (toolboxSelectionKey === null) {
+      return { kind: 'idle', message: 'この結果では計算していません。' }
+    }
+    const cached = cachedPulseToolbox(view.points, toolboxSelectionKey)
+    if (cached !== undefined) {
+      return { kind: 'done', data: cached }
+    }
+    if (
+      toolboxFetch !== null
+      && toolboxFetch.points === view.points
+      && toolboxFetch.key === toolboxSelectionKey
+      && toolboxFetch.state.status === 'error'
+    ) {
+      return { kind: 'error', message: toolboxFetch.state.message }
+    }
+    return { kind: 'pending' }
   }
 
   const cursorIndex = nearestPulsePointIndex(view.points, cursorTimeUs)
@@ -432,8 +529,7 @@ export function PulseStateExplorerPage({
     : view.finalDensityMatrix
 
   return (
-    <main className="pulse-explorer-page">
-      <ExplorerHeader />
+    <div className="pulse-explorer-page">
 
       {staleResult ? (
         <aside className="pulse-explorer-page__stale" role="status">
@@ -580,6 +676,22 @@ export function PulseStateExplorerPage({
             )}
           </CollapsiblePanel>
         )}
+
+        {PULSE_TOOLBOX_METRIC_KEYS.filter((key) => availablePanelKeys.includes(key)).map((key) => (
+          <CollapsiblePanel
+            key={key}
+            panelKey={key}
+            open={openPanels[key]}
+            onToggle={() => togglePanel(key)}
+          >
+            <PulseToolboxResultView
+              metric={key}
+              state={toolboxViewState(key)}
+              cursorTimeUs={cursorTimeUs}
+              levels={view.levelCount}
+            />
+          </CollapsiblePanel>
+        ))}
       </div>
 
       <section className="pulse-explorer-page__summary" aria-label="Pulse結果の概要">
@@ -594,23 +706,6 @@ export function PulseStateExplorerPage({
         ) : null}
       </section>
 
-      <QuantumPet phase={petPhase} message={petMessage} tips={pulseStateExplorerTips} />
-    </main>
-  )
-}
-
-function ExplorerHeader() {
-  return (
-    <header className="pulse-explorer-page__header">
-      <div>
-        <span className="pulse-explorer-page__eyebrow">Yuragi-Strider / Pulse-level results</span>
-        <h1>Pulse 状態エクスプローラー</h1>
-        <p className="pulse-explorer-page__scope">
-          Pulseラボで実行した軌跡専用です。Gate-awareの回路スナップショットは
-          Gate-awareの状態エクスプローラーで表示され、ここには読み込まれません。
-          縮約Bloch球は、リーケージのある3準位以上の状態を正しく表せないため置いていません。
-        </p>
-      </div>
-    </header>
+    </div>
   )
 }

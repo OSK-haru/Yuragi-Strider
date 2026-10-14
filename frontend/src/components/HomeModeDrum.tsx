@@ -20,12 +20,13 @@ import {
 } from '../utils/homeModes'
 
 /*
- * ホームの主動線。通常モード / PULSEモード / 公式ドキュメント の3つを、
- * 三角柱のドラムが回るように切り替える。
+ * ホームの主動線。通常モード / PULSEモード / 攻撃シミュレーター / 公式ドキュメント
+ * の4つを、四角柱のドラムが回るように切り替える。
  *
- * 面を3つにしたのは幾何の都合でもある。正三角柱なら面の間隔がちょうど
- * 120°、回転半径は面の高さ h に対して r = h / (2·tan 60°) = h·0.2887 で
- * 決まるので、高さだけ決めれば辻褄が合う。CSS 側でこの係数を持っている。
+ * 面の間隔は 360° / 面の数 = 90°。回転半径は面の高さ h に対して
+ * r = h / (2·tan 45°) = h·0.5 で決まるので、高さだけ決めれば辻褄が合う。
+ * CSS 側でこの係数を持っている。面の数を変えるときは、ここの角度と
+ * CSS の係数の両方を直す。
  *
  * 自動送りはするが、ホバー・フォーカス中は止める。読んでいる最中に
  * 面が回るのはただの妨害なので。
@@ -41,6 +42,19 @@ function ModeSignature({ kind }: { kind: ModeEntry['signature'] }) {
       <svg className="mode-drum__signature" viewBox="0 0 96 32" aria-hidden="true">
         <line x1="0" y1="16" x2="96" y2="16" className="mode-drum__signature-rule" />
         <path d={PULSE_SIGNATURE} className="mode-drum__signature-trace" />
+      </svg>
+    )
+  }
+
+  if (kind === 'attack') {
+    return (
+      <svg className="mode-drum__signature" viewBox="0 0 96 32" aria-hidden="true">
+        <line x1="0" y1="16" x2="96" y2="16" className="mode-drum__signature-rule" />
+        <line x1="48" y1="0" x2="48" y2="32" className="mode-drum__signature-rule" />
+        <circle cx="48" cy="16" r="11" className="mode-drum__signature-trace" />
+        <circle cx="48" cy="16" r="3" className="mode-drum__signature-node" />
+        <line x1="30" y1="16" x2="38" y2="16" className="mode-drum__signature-accent" />
+        <line x1="58" y1="16" x2="66" y2="16" className="mode-drum__signature-accent" />
       </svg>
     )
   }
@@ -83,13 +97,18 @@ type HomeModeDrumProps = {
   onTurnChange: Dispatch<SetStateAction<number>>
   onStartSimulation: () => void
   onOpenPulseLab: () => void
+  onOpenAttackSimulator: () => void
 }
+
+/* 1面ぶんの回転角。CSS の --drum-step と同じ値。 */
+const FACE_ANGLE_DEG = 360 / HOME_MODE_COUNT
 
 export function HomeModeDrum({
   turn,
   onTurnChange,
   onStartSimulation,
   onOpenPulseLab,
+  onOpenAttackSimulator,
 }: HomeModeDrumProps) {
   const [paused, setPaused] = useState(false)
   const [latched, setLatched] = useState<string | null>(null)
@@ -211,7 +230,7 @@ export function HomeModeDrum({
       <div className="mode-drum__frame">
         <div
           className="mode-drum__stage"
-          style={{ '--drum-angle': `${-120 * turn}deg` } as CSSProperties}
+          style={{ '--drum-angle': `${-FACE_ANGLE_DEG * turn}deg` } as CSSProperties}
         >
           <div className="mode-drum__barrel">
             {MODE_ENTRIES.map((entry, index) => {
@@ -263,7 +282,14 @@ export function HomeModeDrum({
                       }`}
                       type="button"
                       onClick={() =>
-                        activate(entry, entry.id === 'pulse' ? onOpenPulseLab : onStartSimulation)
+                        activate(
+                          entry,
+                          entry.id === 'pulse'
+                            ? onOpenPulseLab
+                            : entry.id === 'attack'
+                              ? onOpenAttackSimulator
+                              : onStartSimulation,
+                        )
                       }
                     >
                       <span className="mode-drum__cta-mark" aria-hidden="true">

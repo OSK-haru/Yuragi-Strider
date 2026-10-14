@@ -1,0 +1,3 @@
+# Third-party snapshot files are kept byte-for-byte (see each SOURCE.md).
+# Disable end-of-line conversion so a Windows checkout cannot alter them.
+data/device_snapshots/** -text

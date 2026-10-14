@@ -97,3 +97,62 @@ variables > Actions** に以下2つのRepository secretを一度だけ登録す�
 - [ ] 意図的に `PUBLIC_MAX_LOGICAL_QUBITS` を超えるqubit数を指定すると
       422エラーで拒否される
 - [ ] ドキュメントサイトのナビバー「アプリを試す」から実際にアプリへ遷移する
+
+## 6. 攻撃シミュレーターを公開デモに載せる（任意・既定は無効）
+
+攻撃シミュレーターは、既定ではどのプロファイルでもマウントされない。公開するには、
+**API側の環境変数を明示的に設定したときだけ**有効になる。設定しなければ、フロントに
+画面があっても `/api/attack/*` は存在せず、画面は「環境を作れない」状態になる。
+
+### 構成上の要点
+
+- 認証は `SameSite=Strict` の HttpOnly cookie なので、ブラウザから見て**同一オリジン**で
+  なければ動かない。フロントのWorkerが `/api/attack/*`（HTTPとWebSocket）だけをAPIへ
+  中継する（`frontend/src/worker.ts`）。他のパスは今までどおり静的アセット。
+- Workerはブラウザの `Origin` をそのまま転送し、クライアントが付けた `X-Forwarded-*` は
+  捨てる。APIの Origin／CSRF 検査はそのまま効く。
+- 状態は1プロセスのメモリ内にある。**ワーカーは1つだけ**にする（`WEB_CONCURRENCY` と
+  `UVICORN_WORKERS` が2以上なら、サーバーは攻撃シミュレーターを無効にして警告を出す）。
+  再起動やスリープで環境は消える。画面は「環境が見つからない」と表示する。
+
+### Renderに設定する環境変数（手動・Environment タブ）
+
+| Key | Value |
+| --- | --- |
+| `ATTACK_SIMULATOR_PROFILE` | `public` |
+| `ATTACK_SIMULATOR_ALLOWED_ORIGINS` | `https://yuragi-strider-app.23sam55781.workers.dev` |
+| `ATTACK_SIMULATOR_ALLOWED_HOSTS` | `quantsim-vjul.onrender.com,yuragi-strider-app.23sam55781.workers.dev` |
+
+`ALLOWED_HOSTS` には**API自身のホスト名とフロントのホスト名の両方**が要る（リクエストの
+`Host` はAPI、`Origin` はフロントになるため）。`ALLOWED_ORIGINS`（既存の一般API用）の有無から
+公開を推定することはない。
+
+公開プロファイルの固定値と上限（環境変数で下げることはできるが、上限を超えることはできない）:
+
+| 項目 | 値 |
+| --- | --- |
+| 原点の種類 | HTTPSのみ |
+| 同時の環境数 | サーバー全体で4（上限8）、ブラウザごとに1 |
+| 環境の寿命 | 無操作15分・最大1時間 |
+| 環境の作成 | サーバー全体で毎分6回まで（超過は429 `CREATE_RATE_LIMIT`） |
+| 隠しケースの採点 | 同時に1件（超過は503 `EVALUATION_BUSY`） |
+| 提出回数 | 1環境あたり3回 |
+
+作成の回数制限は**サーバー全体**に対するもの。Workerを経由するとクライアントのIPが
+信頼できないため、個別のIPではなく全体の負荷を抑える。
+
+### 反映と確認
+
+- `api/`・`core/`・`data/device_snapshots/` の変更は、`master` へのpushでRenderが再ビルドする
+  （`Dockerfile` が `data/device_snapshots` も取り込む）。
+- `frontend/` の変更は `master` へのpushでWorkerが再デプロイされる。`wrangler.jsonc` の
+  `vars` に `ATTACK_API_ORIGIN` を足すと、中継先のAPIを変えられる（既定は上記のRender）。
+- 確認:
+  - [ ] 環境変数を設定していない状態で `/api/attack/settings/catalog` が404になる
+  - [ ] 設定後、フロントのURLで攻撃シミュレーターのページから自由モードの環境を作成できる
+  - [ ] 課題モードで学習→`answer` の提出ができ、合否と集計だけが返る
+  - [ ] 同じブラウザで2つ目の環境を作ろうとすると429 `ENVIRONMENT_LIMIT` で止まる
+  - [ ] 15分放置した環境が消えている
+  - [ ] ブラウザの開発者ツールで、cookieが `HttpOnly; Secure; SameSite=Strict` になっている
+- 無料プランは数十秒のコールドスタートがあり、スリープ中は環境が消える。発表前に
+  `/api/health` を叩いて起こしておく。

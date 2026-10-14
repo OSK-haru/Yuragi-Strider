@@ -11,7 +11,11 @@ __pycache__/
 secrets/
 .DS_Store
 videomaking/
-/docs_for_develop/
+/docs_for_develop/*
+!/docs_for_develop/README.md
+!/docs_for_develop/development/
+/docs_for_develop/development/*
+!/docs_for_develop/development/attack-simulation/
 /docs/
 release/
 # Build outputs
@@ -19,6 +23,13 @@ build/
 validation_hardware/processed/
 validation_results/
 validation_results/*.csv
+
+# Personal study material, notes, generated notebooks, and PDF exports.
+learning/
+
+# Local persona and generated design images.
+/PROJECT_STYLE.md
+/docs_for_develop/development/attack-simulation/assets/
 
 # Windows desktop build output
 release/

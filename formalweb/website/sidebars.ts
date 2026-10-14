@@ -5,7 +5,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: '概要',
-      items: ['overview/introduction'],
+      items: ['overview/introduction', 'overview/ui-design'],
     },
     {
       type: 'category',
@@ -22,8 +22,8 @@ const sidebars: SidebarsConfig = {
           label: 'Gate-aware',
           items: [
             'tutorials/gate-aware/index',
-            'tutorials/gate-aware/simulate',
             'tutorials/gate-aware/circuit-studio',
+            'tutorials/gate-aware/simulate',
             'tutorials/gate-aware/algorithm-library',
             'tutorials/gate-aware/state-explorer',
             'tutorials/gate-aware/help',
@@ -124,7 +124,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: '制限事項',
-      items: ['limitations/current-limitations', 'limitations/roadmap'],
+      items: ['limitations/current-limitations', 'limitations/roadmap', 'limitations/attack-simulator'],
     },
   ],
 };

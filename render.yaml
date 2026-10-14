@@ -21,4 +21,13 @@ services:
         value: https://yuragi-strider-app.23sam55781.workers.dev
       - key: PUBLIC_MAX_LOGICAL_QUBITS
         value: "8"
+      # The attack simulator stays unmounted unless all three are set (see
+      # docs_for_develop/deployment/web-demo.md section 6). It keeps state in
+      # one process, so never raise WEB_CONCURRENCY above 1.
+      # - key: ATTACK_SIMULATOR_PROFILE
+      #   value: public
+      # - key: ATTACK_SIMULATOR_ALLOWED_ORIGINS
+      #   value: https://yuragi-strider-app.23sam55781.workers.dev
+      # - key: ATTACK_SIMULATOR_ALLOWED_HOSTS
+      #   value: quantsim-vjul.onrender.com,yuragi-strider-app.23sam55781.workers.dev
     healthCheckPath: /api/health

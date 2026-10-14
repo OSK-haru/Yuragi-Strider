@@ -11,6 +11,7 @@ from api.pulse_models import (
     QutritPulseSimulateResponse,
 )
 from api.pulse_backend_logging import log_pulse_backend_selection
+from api.pulse_readout import pulse_readout_response
 from core.capabilities import DRIVEN_TRANSMON_QUTRIT_RWA_EXPERIMENTAL_MODEL
 from core.cptp_evolution import EXPLICIT_CPTP_EVOLUTION_ID
 from core.gates import Matrix, matmul, trace
@@ -302,6 +303,16 @@ def _run_single_qutrit_pulse_request(
         },
         "pulse_end": pulse_end,
         "final": final,
+        "readout": pulse_readout_response(
+            request.readout_error,
+            {
+                "0": float(final["population_0"]),
+                "1": float(final["population_1"]),
+                "2": float(final["population_2"]),
+            },
+            1,
+            3,
+        ),
         "diagnostics": {
             "api_runtime_ms": (perf_counter() - started) * 1000.0,
             "backend": {
@@ -388,6 +399,16 @@ def _ensemble_average_response(
     trajectory = averaged["trajectory"]
     pulse_end = averaged["pulse_end"]
     final = averaged["final"]
+    averaged["readout"] = pulse_readout_response(
+        request.readout_error,
+        {
+            "0": float(final["population_0"]),
+            "1": float(final["population_1"]),
+            "2": float(final["population_2"]),
+        },
+        1,
+        3,
+    )
     averaged["leakage"] = {
         "maximum_recorded_leakage_probability": max(
             point["leakage_probability"] for point in trajectory
@@ -659,8 +680,14 @@ def _build_rates(
             temperature_mk=environment.temperature_mk,
             flux_noise_phi0=environment.flux_noise_phi0,
             qubit_frequency_ghz=environment.qubit_frequency_ghz,
-            t1_max_us=environment.t1_max_us,
-            tphi_max_us=environment.tphi_max_us,
+            t1_max_us=(
+                environment.per_qubit[0].t1_max_us
+                if environment.per_qubit else environment.t1_max_us
+            ),
+            tphi_max_us=(
+                environment.per_qubit[0].tphi_max_us
+                if environment.per_qubit else environment.tphi_max_us
+            ),
             ideal_reference=environment.ideal_reference,
         ),
         request.anharmonicity_mhz,

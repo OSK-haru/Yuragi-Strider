@@ -13,6 +13,7 @@ import {
   type DensityMatrixMode,
   type ValidatedDensityMatrix,
 } from '../utils/densityMatrix'
+import { phaseBand, phaseBandRgb, type Rgb } from '../utils/phaseColor'
 
 /*
  * 密度行列をGPUで1枚の画像として描く。
@@ -57,6 +58,8 @@ uniform float uLevels;
 uniform vec3 uVoid;
 uniform vec3 uInk;
 uniform vec3 uAccent;
+uniform vec3 uAmber;
+uniform vec3 uBlue;
 
 in vec2 vUv;
 out vec4 outColor;
@@ -74,6 +77,14 @@ float bayer4(vec2 p) {
   return m[y * 4 + x] / 16.0;
 }
 
+/* utils/phaseColor.ts と同じ循環ランプ: 0=インク, +π/2=橙, ±π=赤, -π/2=青。 */
+vec3 phaseAnchor(int i) {
+  if (i == 0) return uInk;
+  if (i == 1) return uAmber;
+  if (i == 2) return uAccent;
+  return uBlue;
+}
+
 void main() {
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
   vec2 cell = clamp(floor(uv * uDimension), vec2(0.0), vec2(uDimension - 1.0));
@@ -86,12 +97,17 @@ void main() {
   if (uMode == 0) {
     tint = uInk;
   } else if (uMode == 3) {
-    /* 位相は8段に量子化し、赤(-pi) から 白(+pi) の離散ランプへ。 */
-    float band = clamp(floor((signedValue * 0.5 + 0.5) * 8.0) / 7.0, 0.0, 1.0);
-    tint = mix(uAccent, uInk, band);
+    /*
+     * 位相は循環量なので一周で元の色に戻るランプを使う。8段に量子化し、
+     * ±pi が同じ帯に入るよう帯の中心を 0, pi/4, ... に置く。
+     */
+    float band = mod(floor(signedValue * 4.0 + 0.5), 8.0);
+    float segment = band * 0.5;
+    int lower = int(floor(segment));
+    tint = mix(phaseAnchor(lower), phaseAnchor((lower + 1) % 4), segment - floor(segment));
   } else {
-    /* 実部・虚部は符号で二色に分ける。負がハザードレッド。 */
-    tint = signedValue < 0.0 ? uAccent : uInk;
+    /* 実部・虚部は符号で二色に分ける。全画面共通で 正=赤, 負=青。 */
+    tint = signedValue < 0.0 ? uBlue : uAccent;
   }
 
   /*
@@ -113,21 +129,19 @@ void main() {
     }
   }
 
-  /* 注目セルの枠。 */
+  /* 注目セルの枠。正の値の赤と紛れないよう、インクの外枠＋地色の内枠にする。 */
   if (uHover.x >= 0.0
       && abs(cell.x - uHover.x) < 0.5
       && abs(cell.y - uHover.y) < 0.5) {
-    float edge = max(1.0 / uCellPx, 0.08);
-    if (withinCell.x < edge || withinCell.x > 1.0 - edge
-        || withinCell.y < edge || withinCell.y > 1.0 - edge) {
-      color = uAccent;
+    float edge = max(2.0 / uCellPx, 0.12);
+    float distanceToEdge = min(min(withinCell.x, 1.0 - withinCell.x), min(withinCell.y, 1.0 - withinCell.y));
+    if (distanceToEdge < edge) {
+      color = distanceToEdge < edge * 0.5 ? uInk : uVoid;
     }
   }
 
   outColor = vec4(color, 1.0);
 }`
-
-type Rgb = [number, number, number]
 
 function readToken(name: string, fallback: Rgb): Rgb {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -138,6 +152,19 @@ function readToken(name: string, fallback: Rgb): Rgb {
   const int = Number.parseInt(match[1], 16)
   return [((int >> 16) & 255) / 255, ((int >> 8) & 255) / 255, (int & 255) / 255]
 }
+
+/* `--gate-*-rgb` のような "R G B" 形式のトークンを読む。 */
+function readRgbToken(name: string, fallback: Rgb): Rgb {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  const parts = raw.split(/\s+/).map(Number)
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) {
+    return fallback
+  }
+  return [parts[0] / 255, parts[1] / 255, parts[2] / 255]
+}
+
+const AMBER_FALLBACK: Rgb = [245 / 255, 165 / 255, 36 / 255]
+const BLUE_FALLBACK: Rgb = [74 / 255, 168 / 255, 255 / 255]
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string) {
   const shader = gl.createShader(type)
@@ -211,6 +238,7 @@ function initGl(canvas: HTMLCanvasElement): GlRuntime | null {
   const uniformNames = [
     'uField', 'uDimension', 'uMode', 'uDenominator',
     'uHover', 'uCellPx', 'uLevels', 'uVoid', 'uInk', 'uAccent',
+    'uAmber', 'uBlue',
   ]
   const uniforms: Record<string, WebGLUniformLocation | null> = {}
   for (const name of uniformNames) {
@@ -289,6 +317,12 @@ export function DensityMatrixCanvas({
       const paint = readToken('--tt-void', [0.04, 0.04, 0.04])
       const ink = readToken('--tt-ink', [0.92, 0.92, 0.92])
       const accent = readToken('--tt-accent', [0.9, 0.1, 0.1])
+      const phaseAnchors: [Rgb, Rgb, Rgb, Rgb] = [
+        ink,
+        readRgbToken('--gate-phase-rgb', AMBER_FALLBACK),
+        accent,
+        readRgbToken('--gate-rotation-rgb', BLUE_FALLBACK),
+      ]
 
       for (let y = 0; y < height; y += 1) {
         const row = Math.min(Math.floor((y / height) * dimension), dimension - 1)
@@ -302,14 +336,9 @@ export function DensityMatrixCanvas({
 
           let tint = ink
           if (mode === 'phase') {
-            const band = Math.max(0, Math.min(Math.floor((signed * 0.5 + 0.5) * 8) / 7, 1))
-            tint = [
-              accent[0] + (ink[0] - accent[0]) * band,
-              accent[1] + (ink[1] - accent[1]) * band,
-              accent[2] + (ink[2] - accent[2]) * band,
-            ]
+            tint = phaseBandRgb(phaseBand(signed * Math.PI), phaseAnchors)
           } else if (mode !== 'magnitude') {
-            tint = signed < 0 ? accent : ink
+            tint = signed < 0 ? phaseAnchors[3] : accent
           }
 
           const dither = bayer[(y % 4) * 4 + (x % 4)] / 16
@@ -352,15 +381,23 @@ export function DensityMatrixCanvas({
       if (hover !== null) {
         const cellWidth = width / dimension
         const cellHeight = height / dimension
-        context.strokeStyle = `rgb(${readToken('--tt-accent', [0.9, 0.1, 0.1])
-          .map((channel) => Math.round(channel * 255))
-          .join(',')})`
-        context.lineWidth = Math.max(1, Math.min(cellWidth, cellHeight) * 0.12)
+        const toCss = (rgb: Rgb) => `rgb(${rgb.map((channel) => Math.round(channel * 255)).join(',')})`
+        const line = Math.max(1, Math.min(cellWidth, cellHeight) * 0.06)
+        /* GPU 版と同じく、インクの外枠＋地色の内枠。 */
+        context.lineWidth = line
+        context.strokeStyle = toCss(readToken('--tt-ink', [0.92, 0.92, 0.92]))
         context.strokeRect(
-          hover.column * cellWidth,
-          hover.row * cellHeight,
-          cellWidth,
-          cellHeight,
+          hover.column * cellWidth + line / 2,
+          hover.row * cellHeight + line / 2,
+          cellWidth - line,
+          cellHeight - line,
+        )
+        context.strokeStyle = toCss(readToken('--tt-void', [0.04, 0.04, 0.04]))
+        context.strokeRect(
+          hover.column * cellWidth + line * 1.5,
+          hover.row * cellHeight + line * 1.5,
+          cellWidth - line * 3,
+          cellHeight - line * 3,
         )
       }
     },
@@ -401,6 +438,8 @@ export function DensityMatrixCanvas({
       gl.uniform3fv(uniforms.uVoid, readToken('--tt-void', [0.04, 0.04, 0.04]))
       gl.uniform3fv(uniforms.uInk, readToken('--tt-ink', [0.92, 0.92, 0.92]))
       gl.uniform3fv(uniforms.uAccent, readToken('--tt-accent', [0.9, 0.1, 0.1]))
+      gl.uniform3fv(uniforms.uAmber, readRgbToken('--gate-phase-rgb', AMBER_FALLBACK))
+      gl.uniform3fv(uniforms.uBlue, readRgbToken('--gate-rotation-rgb', BLUE_FALLBACK))
 
       gl.drawArrays(gl.TRIANGLES, 0, 3)
     },
