@@ -20,7 +20,7 @@
 .attack-live__changes li small { margin-top: 3px; }
 .attack-live__challenge-list { margin-top: 24px; }
 .attack-live button[aria-pressed=true] { border-color: var(--tt-interact); background: var(--tt-interact-wash); }
-.attack-live__notice { border-left: 3px solid var(--tt-accent); padding: 14px 18px; background: var(--tt-panel); }
+.attack-live__notice { border-left: 3px solid var(--tt-rule-strong); padding: 14px 18px; background: var(--tt-panel); }
 .attack-live__panel { background: var(--tt-panel); border: 1px solid var(--tt-rule-mid); padding: 20px; margin: 16px 0; min-width: 0; }
 .attack-live__actions { display: flex; gap: 12px; }
 .attack-live__modes, .attack-live__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -39,7 +39,14 @@
 .attack-live summary { cursor: pointer; }
 .attack-live__source li { margin: 8px 0; }
 .attack-live__identity { font-size: .75rem; color: var(--tt-ink-mid); margin-bottom: 8px; }
-.attack-live__challenge p { color: var(--tt-ink-mid); font-size: .85rem; }
+.attack-live__challenge { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--tt-rule-mid); background: var(--tt-panel); }
+.attack-live__challenge.is-selected { border: 2px solid var(--tt-interact); padding: 9px 13px; }
+.attack-live__challenge h4 { margin: 0 0 6px; font-size: .85rem; }
+.attack-live__challenge p { margin: 3px 0; color: var(--tt-ink); font-size: .8rem; }
+.attack-live__challenge .attack-live__row { margin-top: 8px; gap: 8px; }
+/* 選んだモードのカードは、枠を太くして「選択中」と書く。色だけで伝えない。 */
+.attack-live__modes button[aria-pressed=true] { border-width: 2px; padding: 17px; }
+.attack-live__modes button[aria-pressed=true]::after { content: "✓ 選択中"; display: block; margin-top: 6px; font-size: .7rem; font-weight: 700; }
 .attack-live__actions { align-items: center; justify-content: start; flex-wrap: wrap; }
 .attack-live__actions span { color: var(--tt-ink-mid); font-size: .8rem; }
 .attack-live__row label { flex: 1; min-width: 150px; margin: 0; }
@@ -142,9 +149,11 @@
 .ide__terminal-log pre[data-kind=output] { color: var(--tt-ink-mid); }
 .ide__terminal-log pre[data-kind=error] { color: var(--tt-accent-text); }
 .ide__terminal-hint { color: var(--tt-ink-dim); }
+/* 開いた直後の自動検査は、まだ利用者の失敗ではないので赤にしない。 */
+.ide__terminal-issue { color: var(--tt-ink); }
 .ide__prompt { display: flex; align-items: center; gap: 6px; flex: none; padding: 3px 10px; border-top: 1px solid var(--tt-rule); background: var(--tt-void); }
 .ide__prompt label { flex: none; margin: 0; color: var(--tt-signal); font: .75rem var(--tt-mono); white-space: nowrap; text-transform: none; }
-.ide__prompt input { flex: 1; min-width: 0; padding: 2px 0; border: 0; background: transparent; font: .75rem var(--tt-mono); letter-spacing: 0; }
+.ide__prompt input { flex: 1; min-width: 0; min-height: 24px; padding: 2px 0; border: 0; background: transparent; font: .75rem var(--tt-mono); letter-spacing: 0; }
 .ide__prompt input::placeholder { text-transform: none; letter-spacing: 0; }
 .ide__messages:has(.attack-live__terminal) .ide__pane-body { overflow: hidden; }
 

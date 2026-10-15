@@ -326,6 +326,8 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
   const [selectedNoiseQubit, setSelectedNoiseQubit] = useState<number | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [localNotice, setLocalNotice] = useState('')
+  const [localWarning, setLocalWarning] = useState(false)
+  const showNotice = (text: string, warning = false) => { setLocalNotice(text); setLocalWarning(warning) }
   const [tab, setTab] = useState<'setup' | 'workspace'>('setup')
   const [messagesTab, setMessagesTab] = useState<'terminal' | 'pending'>('terminal')
   const ideLayout = useIdeLayout('attack')
@@ -487,7 +489,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
         setRegions({ shared: primary, victim: primary, attacker })
       } else setRegions(defaults)
     } else setRegions(defaults)
-    setErrors({}); setLocalNotice('')
+    setErrors({}); showNotice('')
     setRegionOwner('shared'); setSelectedNoiseQubit(null)
   }
   /* 課題の公開パラメーターを自由モードの設定値として読み込む。隠れた値は含まれない。 */
@@ -495,12 +497,12 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
     if (!catalog || locked) return
     choose({ mode: 'free', noiseMode: equivalent.idle_noise_mode })
     setValues((previous) => ({ ...previous, ...equivalent.settings }))
-    setLocalNotice(`課題の設定を自由モードに読み込みました。課題モード専用の${equivalent.not_reproduced.join('・')}は再現されません。`)
+    showNotice(`課題の設定を自由モードに読み込みました。課題モード専用の${equivalent.not_reproduced.join('・')}は再現されません。`)
   }
   async function establish() {
     if (!selection || !catalog) return
     const invalid = fieldErrors(visibleFields, values)
-    setErrors(invalid); setLocalNotice('')
+    setErrors(invalid); showNotice('')
     if (Object.keys(invalid).length) {
       setSetupCategory(firstErrorCategory(visibleFields, invalid) ?? 'review')
       return
@@ -513,7 +515,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
         setJobId(''); setTab('workspace')
       }
     } catch (error) {
-      setLocalNotice(error instanceof Error ? error.message : '設定を確認してください。')
+      showNotice(error instanceof Error ? error.message : '設定を確認してください。', true)
     }
   }
   function print(kind: TerminalLine['kind'], ...texts: string[]) {
@@ -626,26 +628,40 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
    * 各ペインは内部でスクロールし、画面全体は動かさない。
    */
   return <main className="attack-live ide" data-tab={currentTab}>
+    {currentTab === 'workspace' && state.environment && messagesView === 'terminal'
+      && <a href="#attack-terminal-input" className="ide__skip" onClick={(event) => {
+        event.preventDefault()
+        document.getElementById('attack-terminal-input')?.focus()
+      }}>ターミナルの入力欄へ移動</a>}
     <header className="ide__titlebar">
       <h1>攻撃シミュレーター</h1>
       <nav className="ide__tabs" aria-label="攻撃シミュレーター画面">
         <button type="button" aria-pressed={currentTab === 'setup'} onClick={() => setTab('setup')}>環境設定</button>
-        <button type="button" aria-pressed={currentTab === 'workspace'} disabled={!state.environment} onClick={() => setTab('workspace')}>攻撃者ワークスペース</button>
+        <button type="button" aria-pressed={currentTab === 'workspace'} disabled={!state.environment}
+          title={state.environment ? undefined : '環境を作成すると開けます'} onClick={() => setTab('workspace')}>攻撃者ワークスペース</button>
       </nav>
       <IdeViewToggles controls={ideLayout} omit={['inspector', 'toolbox']} />
       <span className="ide__badge" role="status">{CONNECTION_LABELS[state.connectionState]}</span>
     </header>
     <div className="ide__toolbar" role="toolbar" aria-label="操作">
       {currentTab === 'setup'
-        ? <button type="button" disabled={busy || !selection || !challengeAvailable} onClick={() => void establish()}>
+        ? <button type="button" disabled={busy || !selection || !challengeAvailable} aria-describedby="attack-next-step" onClick={() => void establish()}>
           {state.environment ? '今の設定で作り直す' : '環境を作成'}</button>
         : null}
       {state.environment && <button type="button" className="ide__danger" disabled={busy} onClick={() => void workspace.discard()}>環境を破棄</button>}
-      <span className="ide__toolbar-note">{state.environment ? '環境成立 · 前提設定は固定されています。' : 'モードを選び、条件を確かめて環境を作成します。'}</span>
+      <span id="attack-next-step" className={state.environment ? 'ide__toolbar-note' : 'ide__toolbar-note ide__toolbar-note--next'}>{
+        state.environment ? '環境成立 · 前提設定は固定されています。'
+          : !selection ? 'まず「モード」でモードを選んでください。選ぶと「環境を作成」が押せます。'
+            : !challengeAvailable ? '課題を1つ選んでください。選ぶと「環境を作成」が押せます。'
+              : '設定を確かめたら「環境を作成」で始められます。'}</span>
     </div>
-    {(localNotice || state.notice) && <p className="ide__notice" role="status">{localNotice || state.notice}</p>}
+    {(localNotice || state.notice) && (() => {
+      const warning = localNotice ? localWarning : state.noticeWarning
+      return <p className={warning ? 'ide__notice ide__notice--warning' : 'ide__notice'} role={warning ? 'alert' : 'status'}>{localNotice || state.notice}</p>
+    })()}
     <IdeWorkbench
       controls={ideLayout}
+      forceVisible={{ messages: currentTab === 'setup' && errorEntries.length > 0 }}
       navigator={(
         <aside className="ide__pane ide__navigator" aria-label="ナビゲーター">
           <h2 className="ide__pane-title">{currentTab === 'setup' ? '環境設定' : '環境'}</h2>
@@ -654,7 +670,11 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
               {catalog && <nav className="attack-live__setup-categories" aria-label="環境設定の分類">
                 {SETUP_CATEGORIES.map(({ id, label }) => <button key={id} type="button"
                   aria-pressed={setupCategory === id} onClick={() => setSetupCategory(id)}>
-                  <span>{label}</span><small>{errorCounts[id]}件のエラー · {changeCounts[id]}件の変更</small>
+                  <span>{label}</span>
+                  {(errorCounts[id] > 0 || changeCounts[id] > 0) && <small>{[
+                    errorCounts[id] > 0 ? `${errorCounts[id]}件のエラー` : '',
+                    changeCounts[id] > 0 ? `${changeCounts[id]}件の変更` : '',
+                  ].filter(Boolean).join(' · ')}</small>}
                 </button>)}
               </nav>}
               {!state.environment && state.ownedEnvironments.length > 0 && <section className="ide__group" aria-label="所有環境">
@@ -704,11 +724,24 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
         <section className="ide__pane ide__editor" aria-label={currentTab === 'setup' ? '設定の編集' : '回路の編集'}>
           {currentTab === 'setup'
             ? <div className="ide__doc-tabs"><span className="ide__doc-tab">{categoryLabel}</span></div>
-            : <div className="ide__doc-tabs" role="group" aria-label="編集する対象">
-              <button type="button" aria-pressed={editorView === 'circuit'} onClick={() => setEditorView('circuit')}>回路エディター</button>
-              <button type="button" aria-pressed={editorView === 'script'} onClick={() => setEditorView('script')}>スクリプト</button>
+            : <div className="ide__doc-tabs" role="tablist" aria-label="編集する対象" onKeyDown={(event) => {
+              const order = ['circuit', 'script'] as const
+              const index = order.indexOf(editorView)
+              const next = event.key === 'ArrowRight' ? order[(index + 1) % order.length]
+                : event.key === 'ArrowLeft' ? order[(index + order.length - 1) % order.length]
+                  : event.key === 'Home' ? order[0] : event.key === 'End' ? order[order.length - 1] : null
+              if (!next) return
+              event.preventDefault()
+              setEditorView(next)
+              requestAnimationFrame(() => document.getElementById(`attack-editor-tab-${next}`)?.focus())
+            }}>
+              {([['circuit', '回路エディター'], ['script', 'スクリプト']] as const).map(([view, label]) =>
+                <button key={view} type="button" role="tab" id={`attack-editor-tab-${view}`} aria-selected={editorView === view}
+                  aria-controls="attack-editor-panel" tabIndex={editorView === view ? 0 : -1}
+                  onClick={() => setEditorView(view)}>{label}</button>)}
             </div>}
-          <div className="ide__pane-body">
+          <div className="ide__pane-body" {...(currentTab === 'workspace'
+            ? { id: 'attack-editor-panel', role: 'tabpanel', 'aria-labelledby': `attack-editor-tab-${editorView}` } : {})}>
             {currentTab === 'setup' && <>
               {!catalog && <div className="attack-live__panel"><p>{busy ? '設定目録を取得しています…' : '設定目録を取得できません。'}</p>
                 <button type="button" disabled={busy} onClick={() => void workspace.loadCatalog()}>設定目録を取得</button></div>}
@@ -724,14 +757,21 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
                   <button disabled={locked} aria-pressed={selection?.mode === 'challenge'} onClick={() => choose({ mode: 'challenge', challengeId: '' })}>
                     課題モード<span>プリセットの条件で挑戦</span></button>
                 </div>
-                {selection?.mode === 'challenge' && <div className="attack-live__challenge-list"><h3>課題preset</h3>
-                  {catalog.challenges.map((challenge) => <div className="attack-live__challenge" key={challenge.id}>
-                    <button disabled={locked || !challenge.available} aria-pressed={selection.challengeId === challenge.id}
-                      onClick={() => choose({ mode: 'challenge', challengeId: challenge.id })}>{challenge.title}{!challenge.available && ' · 準備中'}</button>
-                    <p>{challenge.description}</p>
-                    {challenge.free_equivalent && <button type="button" disabled={locked}
-                      onClick={() => reproduceInFree(challenge.free_equivalent!)}>この課題を自由モードで再現</button>}
-                  </div>)}
+                {selection?.mode === 'challenge' && <div className="attack-live__challenge-list"><h3>課題を選ぶ</h3>
+                  {catalog.challenges.map((challenge) => <article key={challenge.id} aria-label={challenge.title}
+                    className={selection.challengeId === challenge.id ? 'attack-live__challenge is-selected' : 'attack-live__challenge'}>
+                    <h4>{challenge.title}{!challenge.available && ' · 準備中'}</h4>
+                    {/* 長い説明は、文ごとに分けて1行ずつ読めるようにする。 */}
+                    {challenge.description.split('。').map((sentence) => sentence.trim()).filter(Boolean)
+                      .map((sentence, index) => <p key={index}>{sentence}。</p>)}
+                    <div className="attack-live__row">
+                      <button type="button" disabled={locked || !challenge.available} aria-pressed={selection.challengeId === challenge.id}
+                        onClick={() => choose({ mode: 'challenge', challengeId: challenge.id })}>
+                        {selection.challengeId === challenge.id ? '選択中' : 'この課題を選ぶ'}</button>
+                      {challenge.free_equivalent && <button type="button" disabled={locked}
+                        onClick={() => reproduceInFree(challenge.free_equivalent!)}>自由モードで再現</button>}
+                    </div>
+                  </article>)}
                 </div>}
                 {showSnapshot && <AttackSnapshotInfo standard={catalog.free_mode.standard_initial_values} />}
               </section>}
@@ -743,7 +783,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
                       noiseMode={selection.noiseMode} regions={regions} setRegions={setRegions} owner={regionOwner}
                       setOwner={setRegionOwner} selectedQubit={selectedNoiseQubit} setSelectedQubit={setSelectedNoiseQubit}
                       onNoiseQubitSelect={(qid) => { setSelectedNoiseQubit(qid); setSetupCategory('noise') }}
-                      editable={!locked} onNotice={setLocalNotice} />
+                      editable={!locked} onNotice={showNotice} />
                   </>}
                   {selection.mode === 'challenge' && standardSnapshot && regionCatalog && challengeRegion && <>
                     {challengeRegion.primary_physical_qubit_ids
@@ -752,7 +792,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
                         noiseMode={challengeRegion.noise_mode ?? 'physical_parameters'} regions={regions} setRegions={setRegions}
                         owner={regionOwner} setOwner={setRegionOwner} selectedQubit={selectedNoiseQubit}
                         setSelectedQubit={setSelectedNoiseQubit} onNoiseQubitSelect={() => setSetupCategory('noise')}
-                        editable={false} onNotice={setLocalNotice} />
+                        editable={false} onNotice={showNotice} />
                       : <p className="attack-live__notice">このpresetは領域を固定しています。領域情報は目録で公開されていません。</p>}
                   </>}
                 </>}
@@ -824,7 +864,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
           </div>
         </section>
       )}
-      messages={(
+      messages={currentTab === 'setup' && errorEntries.length === 0 ? undefined : (
         <section className="ide__pane ide__messages" aria-label="メッセージ">
           <div className="ide__doc-tabs" role="group" aria-label="メッセージの種類">
             <button type="button" aria-pressed={messagesView === 'terminal'} onClick={() => setMessagesTab('terminal')}>
@@ -841,8 +881,8 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
             {currentTab === 'workspace' && messagesView === 'terminal' && <section className="attack-live__terminal" aria-label="攻撃者ターミナル">
               <div ref={terminalLogRef} className="ide__terminal-log" role="log" aria-label="コマンドの実行結果とreply" aria-live="polite">
                 {preflightIssues.length
-                  ? <>{preflightIssues.map((issue, index) => <pre key={`${issue.code}-${index}`} data-kind="error">ERROR: {issue.message}</pre>)}
-                    <pre className="ide__terminal-hint">回路の問題を直すとこの表示も更新されます。エラーが残っている間は送信されません。</pre></>
+                  ? <>{preflightIssues.map((issue, index) => <pre key={`${issue.code}-${index}`} className="ide__terminal-hint ide__terminal-issue">送信前の確認: {issue.message}</pre>)}
+                    <pre className="ide__terminal-hint">回路を直すとこの表示も更新されます。直るまで submit は送信されません。</pre></>
                   : <pre className="ide__terminal-hint">回路の測定位置と古典bit割当てを確認しました。</pre>}
                 {!terminal.length && <pre className="ide__terminal-hint">help でコマンド一覧を表示します。回路の送信は submit です。</pre>}
                 {terminal.map((line) => <pre key={line.id} data-kind={line.kind}>{line.text}</pre>)}

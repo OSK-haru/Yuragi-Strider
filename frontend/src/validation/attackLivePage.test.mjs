@@ -568,7 +568,7 @@ const html = renderToStaticMarkup(React.createElement(AdminModeContext.Provider,
   React.createElement(CircuitProvider, { gateDurationDefaults: {}, keyboardEnabled: false, minimumLogicalQubits: 1 },
     React.createElement(AttackLivePage, { gateDurationDefaults: {}, active: false }))))
 check('real React initial render: no fabricated environment, clock, counts, or credential input', () => {
-  assert.ok(html.includes('モードを選び'))
+  assert.ok(html.includes('モードを選んでください'))
   assert.ok(!html.includes('世界時刻'))
   assert.ok(!html.includes(SECRET))
   assert.ok(!html.includes('attacker_credential'))

@@ -1,5 +1,6 @@
 import './GatePalette.css'
 import { useState } from 'react'
+import { useRovingToolbars } from '../hooks/useRovingToolbars'
 import type { GateType } from '../types/circuit'
 import { setCircuitDragPreview } from '../utils/dragPreview'
 import {
@@ -60,6 +61,7 @@ export function GatePalette({
 }: GatePaletteProps) {
   const maximumLogicalQubits = Math.max(minimumLogicalQubits,
     Math.min(MAX_SUPPORTED_LOGICAL_QUBITS, requestedMaximum ?? MAX_SUPPORTED_LOGICAL_QUBITS))
+  const rootRef = useRovingToolbars<HTMLElement>()
   // 入力途中の空欄や範囲外の値を一時的に持てるよう、表示用の文字列は別で管理する。
   const [qubitDraft, setQubitDraft] = useState(String(logicalQubits))
   /*
@@ -148,7 +150,7 @@ export function GatePalette({
   }
 
   return (
-    <section className="gate-palette" aria-label="ゲートパレット" data-tutorial-anchor="gate-palette">
+    <section ref={rootRef} className="gate-palette" aria-label="ゲートパレット" data-tutorial-anchor="gate-palette">
       <div className="gate-palette__group" aria-label="論理量子ビット">
         <label className="gate-palette__label" htmlFor="gate-palette-qubit-input">
           量子ビット

@@ -21,6 +21,8 @@ export type LiveWorkspaceState = {
   replies: LiveReply[]
   busy: string | null
   notice: string
+  /** The notice reports a failure or a refused request (shown as a warning); false for guidance. */
+  noticeWarning: boolean
   replacement: CreateEnvironmentRequest | null
 }
 
@@ -40,7 +42,7 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
   let state: LiveWorkspaceState = {
     catalog: null, ownedEnvironments: [], environment: null, connectionState: 'idle',
     clockMode: null, pauseWhileCatchingUp: false, maxProgramQubits: null, worldTimeUs: 0,
-    pending: [], pendingUnknown: false, replies: [], busy: null, notice: '', replacement: null,
+    pending: [], pendingUnknown: false, replies: [], busy: null, notice: '', noticeWarning: false, replacement: null,
   }
   let connection: LiveAttackConnection | null = null
   let subscriptions: Array<() => void> = []
@@ -48,7 +50,9 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
   let generation = 0
   const listeners = new Set<() => void>()
   function update(values: Partial<LiveWorkspaceState>) {
-    state = { ...state, ...values }
+    // A new notice is guidance unless the caller marks it as a warning.
+    const reset = 'notice' in values && !('noticeWarning' in values) ? { noticeWarning: false } : {}
+    state = { ...state, ...reset, ...values }
     for (const listener of listeners) listener()
   }
   function detach() {
@@ -77,7 +81,7 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
         }),
       ])
     } catch {
-      if (revision === generation) update({ notice: '操作の完了を確認できませんでした。自動再送は行いません。' })
+      if (revision === generation) update({ noticeWarning: true, notice: '操作の完了を確認できませんでした。自動再送は行いません。' })
     } finally {
       clearTimeout(timer)
       if (revision === generation) { activeAbort = null; update({ busy: null }) }
@@ -119,14 +123,14 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
       if (current()) update({ pending, pendingUnknown: false,
         notice: pending.length ? '未完了の要求一覧を復元しました。' : '未完了の要求はありません。' })
     } catch {
-      if (current()) update({ notice: '未完了の要求一覧を取得できません。再接続して確認してください。' })
+      if (current()) update({ noticeWarning: true, notice: '未完了の要求一覧を取得できません。再接続して確認してください。' })
     }
   }
   async function create(request: CreateEnvironmentRequest, signal: AbortSignal, current: () => boolean) {
     const result = await client.createEnvironment(request, signal)
     if (!current()) return
     if (!result.ok) {
-      update({ notice: FAILURE_MESSAGES[result.reason],
+      update({ noticeWarning: true, notice: FAILURE_MESSAGES[result.reason],
         replacement: result.reason === 'browser_limit' ? request : null })
       return
     }
@@ -150,7 +154,7 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
   async function issue(label: string, action: (live: LiveAttackConnection) => Promise<LiveRequest>) {
     if (!connection || connection.state !== 'open') return
     if (state.pending.length >= MAX_PENDING) {
-      update({ notice: '未完了の要求が多すぎます。待機してreplyを受け取ってください。' }); return
+      update({ noticeWarning: true, notice: '未完了の要求が多すぎます。待機してreplyを受け取ってください。' }); return
     }
     const live = connection
     await perform(label, async (_signal, current) => {
@@ -182,7 +186,7 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
       if (!current()) return
       if (!available) {
         update({ ownedEnvironments: state.ownedEnvironments.filter((item) =>
-          item.environmentId !== environment.environmentId), notice: '環境は見つかりません。期限切れまたは破棄済みです。' })
+          item.environmentId !== environment.environmentId), noticeWarning: true, notice: '環境は見つかりません。期限切れまたは破棄済みです。' })
         return
       }
       update({ environment: { environmentId: environment.environmentId, mode: environment.mode },
@@ -221,12 +225,12 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
     submitAnswer: (submission: SolutionSubmission) => perform('answer', async (signal, current) => {
       const environment = state.environment
       if (!environment || environment.mode !== 'challenge') {
-        update({ notice: '提出できるのは課題モードの環境だけです。' }); return
+        update({ noticeWarning: true, notice: '提出できるのは課題モードの環境だけです。' }); return
       }
       const outcome = await client.submitSolution(environment.environmentId, submission, signal)
       if (!current()) return
       if (!outcome.ok) {
-        update({ notice: outcome.reason === 'invalid' ? ('message' in submission
+        update({ noticeWarning: true, notice: outcome.reason === 'invalid' ? ('message' in submission
           ? '提出内容が正しくありません。メッセージは ASCII 文字で 256 文字以内です。この課題の解答の形式と合っているかも確かめてください。提出回数は減りません。'
           : '提出内容が正しくありません。しきい値は0〜1、向きは ge か le です。この課題の解答の形式と合っているかも確かめてください。提出回数は減りません。')
           : outcome.reason === 'exhausted' ? '提出できる回数を使い切りました。'
@@ -262,6 +266,7 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
       const result = await connection.wait(target)
       if (current()) update({ worldTimeUs: result.worldTimeUs,
         pendingUnknown: result.outcome === 'nothing_pending' ? false : state.pendingUnknown,
+        noticeWarning: result.outcome === 'limited',
         notice: result.outcome === 'limited'
         ? '待機の上限に達しました。未完了の要求は残っています。'
         : result.outcome === 'nothing_pending' ? '待機するreplyはありません。' : '待機が完了しました。' })

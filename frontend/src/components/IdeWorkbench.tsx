@@ -93,7 +93,7 @@ function PaneSlot({ area, pane, controls, children }: {
   area: string; pane?: PaneKey; controls: IdeLayoutControls; children: ReactNode
 }) {
   return (
-    <div className="ide__slot" style={{ gridArea: area }}>
+    <div className="ide__slot" data-area={area} style={{ gridArea: area }}>
       {children}
       {pane ? (
         <button type="button" className="ide__pane-close" aria-label={`${controls.labels[pane]}を閉じる`}
@@ -114,7 +114,8 @@ export function IdeWorkbench({ controls, navigator, editor, toolbox, inspector, 
   /* 省略したページはその欄を持たない。 */
   toolbox?: ReactNode
   inspector?: ReactNode
-  messages: ReactNode
+  /* 省略すると、その時は下の欄を出さない（伝えることが無いのに面積を取らない）。 */
+  messages?: ReactNode
   /* チュートリアルが指しているペインは、閉じていても出す。保存した配置は変えない。 */
   forceVisible?: Partial<Record<PaneKey, boolean>>
 }) {
@@ -123,7 +124,7 @@ export function IdeWorkbench({ controls, navigator, editor, toolbox, inspector, 
     navigator: layout.visible.navigator || forceVisible.navigator === true,
     toolbox: toolbox !== undefined && (layout.visible.toolbox || forceVisible.toolbox === true),
     inspector: inspector !== undefined && (layout.visible.inspector || forceVisible.inspector === true),
-    messages: layout.visible.messages || forceVisible.messages === true,
+    messages: messages !== undefined && (layout.visible.messages || forceVisible.messages === true),
   }
 
   const columns = [
