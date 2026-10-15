@@ -22,6 +22,7 @@ from core.attack_simulation.observation_budget import (
 from core.attack_simulation.program_request import (
     CircuitProgram, ProgramRequestError, ProgramSubmitRequest, STATE_INHERIT_OPERATION_ID,
     interleave_operation_id,
+    VICTIM_ACTIVITY_OPERATION_ID,
 )
 from core.attack_simulation.scenario_policy import ObservationBudget
 from core.attack_simulation.request_receipts import RequestReceipt
@@ -114,6 +115,11 @@ class InterleaveVictimSpec:
             raise TypeError("interleaved victim sequence must be a tuple of CircuitPrograms")
         if self.sequence and self.program is not self.sequence[0]:
             raise ValueError("a sequenced victim's program is its first entry")
+
+
+# The participant view shows the first shots only; the pattern repeats and the full
+# trace of a long job would be thousands of steps.
+MAX_ACTIVITY_SHOTS = 16
 
 
 class JobNotFoundError(LookupError):
@@ -630,6 +636,67 @@ class JobApplicationService:
         if job.status is not status:
             raise JobResultNotReadyError("job changed after the timed observation proof")
         return JobResultView(job_id, status, _project_result(job), job.error_code)
+
+    def get_victim_activity(self, principal_id: str, job_id: str) -> dict[str, object]:
+        """Abstract command: the runs behind the principal's own finished job.
+
+        Free-mode scenarios enable it explicitly; challenge presets never do. Only
+        the job's recorded steps are returned (who ran when), never a state or a
+        measured value, and only once the job's result is available.
+        """
+        job = self._visible_job(principal_id, job_id, VICTIM_ACTIVITY_OPERATION_ID)
+        if job.status not in TERMINAL_JOB_STATUSES or not self._runtime.result_is_available(job_id):
+            raise JobResultNotReadyError("job activity is not ready")
+        return self._project_victim_activity(job)
+
+    def _get_victim_activity_at(self, principal_id: str, job_id: str, position) -> dict[str, object]:
+        status, ready = self._observe_declared_job(principal_id, job_id, VICTIM_ACTIVITY_OPERATION_ID, position)
+        if not ready:
+            raise JobResultNotReadyError("job activity is not ready at this position")
+        job = self._visible_job(principal_id, job_id, VICTIM_ACTIVITY_OPERATION_ID)
+        if job.status is not status:
+            raise JobResultNotReadyError("job changed after the timed observation proof")
+        return self._project_victim_activity(job)
+
+    def _project_victim_activity(self, job: JobRecord) -> dict[str, object]:
+        """Group the job's recorded events into per-shot steps for the participant."""
+        roles = self._runtime.job_authorization.tenant_roles
+        operation = job.command.operation
+        interleave = getattr(operation, "interleave", None)
+        reference = None if interleave is None else interleave.reference
+        prepared_bit = None
+        if reference is not None:
+            spec = self._interleave_victims.get(reference)
+            if spec is not None:
+                prepared_bit = int(spec.program.to_circuit_dict()["initial_states"][0])
+        shots: list[list[dict[str, object]]] = [[]]
+        total = 0
+        for event in self._runtime.state_store.events():
+            if event.job_id != job.job_id:
+                continue
+            if event.event_kind == "program_shot":
+                actor = roles.get(event.owner_after, "unknown")
+                step = {"actor": actor, "kind": "victim_run" if actor == "victim" else "attacker_measure"}
+            elif event.event_kind == "service_reset":
+                step = {"actor": "service", "kind": "service_reset", "after": roles.get(event.owner_before)}
+            elif event.event_kind == "declared_idle":
+                step = {"actor": "service", "kind": "idle"}
+            else:
+                step = {"actor": "service", "kind": str(event.event_kind)}
+            step["start_us"] = float(event.device_time_start_us)
+            step["end_us"] = float(event.device_time_end_us)
+            shots[-1].append(step)
+            if step["kind"] == "attacker_measure":
+                total += 1
+                shots.append([])
+        if not shots[-1]:
+            shots.pop()  # A job that ends right after an attacker shot leaves an empty tail.
+        shown = shots[:MAX_ACTIVITY_SHOTS]
+        return {
+            "job_id": job.job_id, "reference": reference, "victim_prepared_bit": prepared_bit,
+            "shots_total": total, "shots_shown": len(shown),
+            "shots": [{"index": index, "steps": steps} for index, steps in enumerate(shown)],
+        }
 
     def cancel(self, principal_id: str, job_id: str) -> JobStatusView:
         self._visible_job(principal_id, job_id, "job.cancel")

@@ -27,7 +27,7 @@ ATTACKER, VICTIM = "tenant-a", "tenant-v"
 LAYOUT = PhysicalQubitLayout("qpu-1", (3,))
 
 
-def build(reset_success, *, reset_count=1, grants=ALL):
+def build(reset_success, *, reset_count=1, grants=ALL, supported=ALL):
     model = PhenomenologicalResetModel(ImperfectResetSpec(reset_success))
     config = SharedQpuRuntimeConfig(
         reset_model_id=model.model_id, reset_model_configuration_id=model.configuration_id,
@@ -38,14 +38,14 @@ def build(reset_success, *, reset_count=1, grants=ALL):
             "interleave_test", "1", attacker_config={"operation_grants": list(grants)},
             victim_config={"operation_grants": list(ALL)},
             qpu_service_config={
-                "execution_regime": "nisq_physical", "supported_operations": list(ALL),
+                "execution_regime": "nisq_physical", "supported_operations": list(supported),
                 "runtime_execution": config.to_manifest_config(),
                 "circuit_execution": {
                     "compiler_id": "local_sampling_v1", "supported_gates": list(NATIVE_GATES),
                     "max_shots": 512, "max_instruction_executions": 65536, "max_program_qubits": 8,
                     "supported_initializations": ["prepare", "inherit"]},
             }),
-        policy=ScenarioPolicy(ScenarioMode.FREE, allowed_operations=ALL),
+        policy=ScenarioPolicy(ScenarioMode.FREE, allowed_operations=tuple(supported)),
     )).establish()
     store = QpuStateStore(local_zero_snapshot(qpu_id="qpu-1", physical_qubit_ids=(3,), device_config_version="t"))
     registry = ResetModelRegistry()

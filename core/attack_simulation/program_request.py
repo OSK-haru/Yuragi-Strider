@@ -30,6 +30,9 @@ PROGRAM_INITIALIZATIONS = ("prepare", "inherit")
 STATE_INHERIT_OPERATION_ID = "program.state.inherit"
 INTERLEAVE_VICTIM_OPERATION_ID = "program.interleave.victim"
 INTERLEAVE_TRAINING_OPERATION_ID = "program.interleave.training"
+# Abstract command: reading the sequence of runs (victim, service reset, attacker) behind
+# the principal's own job. No real service shows a tenant who else ran in between.
+VICTIM_ACTIVITY_OPERATION_ID = "job.victim_activity.read"
 _INTERLEAVE_REFERENCE = re.compile(r"(victim|training:[01])\Z")
 
 
