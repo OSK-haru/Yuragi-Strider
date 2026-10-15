@@ -562,7 +562,9 @@ def create_live_attack_websocket_router(
                                        "clock_mode": policy.mode,
                                        "pause_while_catching_up": policy.pause_while_catching_up,
                                        "max_program_qubits": await asyncio.to_thread(
-                                           entry.controller.max_program_qubits, principal)})
+                                           entry.controller.max_program_qubits, principal),
+                                       "victim_activity": await asyncio.to_thread(
+                                           entry.controller.can_read_victim_activity, principal)})
             push_task = asyncio.create_task(push_released_replies(
                 websocket, entry, credential, owner, principal))
             try:

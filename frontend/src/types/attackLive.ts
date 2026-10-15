@@ -183,7 +183,29 @@ export type ProgramSubmission = {
 
 export type InterleaveReference = 'victim' | 'training:0' | 'training:1'
 
-export type LiveRequestKind = 'submit' | 'cancel' | 'status' | 'result'
+export type LiveRequestKind = 'submit' | 'cancel' | 'status' | 'result' | 'victim_activity'
+
+/**
+ * Free-mode abstract command: the runs behind one's own job, per shot. Only recorded steps
+ * and world times; never a state, a measured value or a tenant identity.
+ */
+export type VictimActivityStep = {
+  actor: 'victim' | 'service' | 'attacker' | 'unknown'
+  kind: string
+  /** For a service reset: whose state it reset ('victim' or 'attacker'). */
+  after?: 'victim' | 'attacker' | null
+  start_us: number
+  end_us: number
+}
+export type VictimActivity = {
+  job_id: string
+  /** 'victim' (the real victim) or 'training:0' / 'training:1'; null for an ordinary job. */
+  reference: string | null
+  victim_prepared_bit: number | null
+  shots_total: number
+  shots_shown: number
+  shots: Array<{ index: number; steps: VictimActivityStep[] }>
+}
 
 /** An outstanding attacker request, as the UI lists it. */
 export type LiveRequest = {
@@ -220,6 +242,8 @@ export interface LiveAttackConnection {
   readonly pauseWhileCatchingUp: boolean
   /** Qubits a program may use, from the attacker's device information; null if not published. */
   readonly maxProgramQubits: number | null
+  /** The free-mode abstract command that reads the victim's runs is on for this environment. */
+  readonly victimActivityAvailable: boolean
   /** Attacker-visible world time in the frozen scenario clock domain. */
   readonly worldTimeUs: number
   /** Operations never advance world time. Each resolves once the server accepted it. */
@@ -227,6 +251,8 @@ export interface LiveAttackConnection {
   cancel(jobId: string): Promise<LiveRequest>
   status(jobId: string): Promise<LiveRequest>
   result(jobId: string): Promise<LiveRequest>
+  /** Abstract command (free mode, opt-in); the service refuses it otherwise. */
+  victimActivity(jobId: string): Promise<LiveRequest>
   /** Rebuild the server-retained, undelivered requests for this principal. */
   pendingRequests(): Promise<LiveRequest[]>
   /** Available only for internal explicit_wait scenarios; product UI hides it. */

@@ -27,6 +27,7 @@ print(job.result().counts)
 
 - `Circuit` は編集画面のJSONを組み立てる小さなビルダー。任意のゲート列を自作できる。結果のビット列は左端が c0（`"10"` は c0=1, c1=0）。
 - `session.run(...)` は送信してジョブを返す。送信の返事（ジョブID）は待たず、`job_id`・`result()`・`status()`・`cancel()` を最初に使ったときに待つ。だから続けて何本も送れる（サービスの待ち行列は8本まで、超えた送信は `HOST_CAPACITY_REACHED`）。送信の拒否もその時点で `AttackError` になる。`job.result()` は完了まで結果照会を繰り返す（公開前の照会に返る `RESULT_NOT_READY` は待つ合図として扱う）。ブリッジには、送るだけの `issue` と、その要求の返事を待つ `reply` がある。`reply` で待てるのは、そのスクリプトが出した要求だけ。複数ジョブを先に投げてから結果を集められる。
+- `job.victim_activity()` は、抽象コマンド「被害者の動き」（自由モードの設定で有効にした環境だけ）。ジョブの裏で動いた「被害者の実行 → サービスのReset → 攻撃者の測定」の順番と世界時刻を dict で返す。状態や被害者の測定値は含まない。無効な環境では `OPERATION_DENIED` の `AttackError`。
 - `session.answer(threshold, direction)` が判定規則の課題の提出、`session.answer(message=...)` がメッセージの課題の提出。通信部分の `answer` は提出本文の dict をそのまま送る。
 - サンプルは `examples/reset_leakage_attack.py`（収集 → 学習 → 観測 → 推定 → 提出）。
 

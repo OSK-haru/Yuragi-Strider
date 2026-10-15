@@ -44,6 +44,16 @@ class FakeBridge:
                                              "error_code": "INVALID_PROGRAM", "world_time_us": 9}})
             return json.dumps({"value": {"value": {"job_id": f"job-{payload.get('_n', self.count)}", "status": "queued"},
                                          "error_code": None, "world_time_us": 7}})
+        if operation == "job.victim_activity.read":
+            polls = self.results.setdefault(("activity", payload["job_id"]), 0)
+            self.results[("activity", payload["job_id"])] = polls + 1
+            if polls == 0:
+                return json.dumps({"value": {"value": None, "error_code": "RESULT_NOT_READY"}})
+            if payload["job_id"] == "job-off":
+                return json.dumps({"value": {"value": None, "error_code": "OPERATION_DENIED"}})
+            return json.dumps({"value": {"value": {"job_id": payload["job_id"], "reference": "victim",
+                                                   "victim_prepared_bit": 1, "shots_total": 1, "shots_shown": 1,
+                                                   "shots": [{"index": 0, "steps": []}]}, "error_code": None}})
         polls = self.results.setdefault(payload["job_id"], 0)
         self.results[payload["job_id"]] = polls + 1
         if polls == 0:
@@ -85,6 +95,17 @@ class BrowserOnlySdkTests(unittest.TestCase):
         self.assertEqual(outcome, {"attempt": 1, "attempts_remaining": 2, "passed": False})
         self.assertEqual(("answer", {"message": "guess"}), bridge.calls[-2])
         self.assertEqual(bridge.calls[-1][0], "close")
+
+    def test_victim_activity_waits_for_the_result_and_reports_a_denial(self):
+        platform, modules = browser(FakeBridge())
+        with platform, modules, AttackSession() as session:
+            job = session.run(Circuit(1).measure(0, 0), shots=4)
+            activity = job.victim_activity(timeout=5, poll=0)
+            self.assertEqual((activity["reference"], activity["victim_prepared_bit"]), ("victim", 1))
+            job._job_id = "job-off"  # The service answers OPERATION_DENIED when the command is off.
+            with self.assertRaises(AttackError) as raised:
+                job.victim_activity(timeout=5, poll=0)
+            self.assertEqual(raised.exception.code, "OPERATION_DENIED")
 
     def test_runs_are_sent_before_any_submit_reply_is_awaited(self):
         bridge = FakeBridge()

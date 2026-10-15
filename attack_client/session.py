@@ -82,6 +82,24 @@ class Job:
     def status(self) -> str:
         return str(self._session._query("job.status.read", self.job_id).get("status"))
 
+    def victim_activity(self, timeout: float = 120.0, poll: float = 0.4) -> dict[str, Any]:
+        """抽象コマンド（自由モードで有効にしたときだけ）。このジョブの裏で動いた順番を返す。
+
+        shot ごとの「被害者の実行 → サービスのReset → 攻撃者の測定」と世界時刻だけで、
+        状態や被害者の測定値は含まない。結果が公開されるまで待つ。
+        """
+        deadline = time.monotonic() + timeout
+        job_id = self.job_id
+        while True:
+            try:
+                return self._session._query("job.victim_activity.read", job_id)
+            except AttackError as error:
+                if error.code != "RESULT_NOT_READY":
+                    raise
+            if time.monotonic() >= deadline:
+                raise AttackError(f"job {job_id} activity was not ready within {timeout} seconds", "TIMEOUT")
+            self._session._transport.sleep(poll)
+
     def cancel(self) -> None:
         self._session._query("job.cancel", self.job_id)
 

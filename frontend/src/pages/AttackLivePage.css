@@ -170,3 +170,23 @@
 .attack-script__note { margin: 0; padding: 4px 10px; color: var(--tt-accent-text); font-size: .75rem; }
 .attack-script__text { flex: 1 1 auto; min-height: 12rem; margin: 0; padding: 8px 10px; border: 0; resize: none; background: var(--tt-void); color: var(--tt-ink-max); font: .8rem/1.5 var(--tt-mono); letter-spacing: 0; text-transform: none; tab-size: 4; white-space: pre; overflow: auto; }
 .attack-script__footer { padding: 4px 10px; color: var(--tt-ink-dim); }
+
+/* 被害者の動き（自由モードの抽象コマンド）: 3つの帯に、サービスが記録した順番を並べる。 */
+/* 下の面は幅があるので、説明と読む操作を左、図を右に置く。狭い画面では縦に積む。 */
+.attack-live__activity { display: grid; grid-template-columns: minmax(230px, 320px) minmax(0, 1fr); gap: 8px 18px; align-items: start; padding: 8px 10px; }
+.attack-live__activity-explain > h3 { margin: 0 0 4px; }
+.attack-live__activity-view { min-width: 0; }
+@media (max-width: 760px) { .attack-live__activity { grid-template-columns: minmax(0, 1fr); } }
+.attack-live__activity-steps { margin: 4px 0 8px; padding-left: 20px; font-size: .72rem; line-height: 1.5; }
+.attack-live__activity-summary { margin: 8px 0 4px; font-size: .72rem; }
+.attack-live__activity-scroll { max-width: 100%; overflow-x: auto; padding-bottom: 4px; }
+.attack-live__activity-lane { fill: var(--tt-ink); font-size: 10.5px; }
+.attack-live__activity-shot { fill: var(--tt-ink-mid); font: 10.5px var(--tt-mono); }
+.attack-live__activity-text { fill: var(--tt-void); font-size: 10px; font-weight: 700; pointer-events: none; }
+.attack-live__activity-block { stroke: var(--tt-ink); stroke-width: 1; }
+.attack-live__activity-block--victim { fill: var(--tt-ink); }
+.attack-live__activity-block--attacker { fill: var(--tt-ink-mid); }
+.attack-live__activity-block--service { fill: var(--tt-panel-3); }
+.attack-live__activity-block--service + .attack-live__activity-text { fill: var(--tt-ink); }
+.attack-live__activity-block.is-after-victim { stroke-width: 2.5; }
+.attack-live__activity-text-lines { margin: 6px 0 0; white-space: pre-wrap; font-size: .68rem; }

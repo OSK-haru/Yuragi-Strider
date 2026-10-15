@@ -241,6 +241,7 @@ function createLiveConnection(
   let clockMode: 'explicit_wait' | 'host_clock' = 'explicit_wait'
   let pauseWhileCatchingUp = false
   let maxProgramQubits: number | null = null
+  let victimActivityAvailable = false
   let closeRequested = false
   let readySettled = false
   let resolveReady: () => void = () => {}
@@ -300,6 +301,7 @@ function createLiveConnection(
       clockMode = message.clock_mode
       pauseWhileCatchingUp = message.pause_while_catching_up
       maxProgramQubits = typeof limit === 'number' ? limit : null
+      victimActivityAvailable = message.victim_activity === true
       worldTimeUs = message.world_time_us
       transition('open')
       if (!readySettled) {
@@ -419,6 +421,7 @@ function createLiveConnection(
     get clockMode() { return clockMode },
     get pauseWhileCatchingUp() { return pauseWhileCatchingUp },
     get maxProgramQubits() { return maxProgramQubits },
+    get victimActivityAvailable() { return victimActivityAvailable },
     connected: ready,
     async submit(program: ProgramSubmission) {
       const payload: Record<string, unknown> = {
@@ -433,6 +436,7 @@ function createLiveConnection(
     cancel(jobId) { return accepted('job.cancel', 'cancel', { job_id: jobId }) },
     status(jobId) { return accepted('job.status.read', 'status', { job_id: jobId }) },
     result(jobId) { return accepted('job.result.read', 'result', { job_id: jobId }) },
+    victimActivity(jobId) { return accepted('job.victim_activity.read', 'victim_activity', { job_id: jobId }) },
     async pendingRequests() {
       const message = await issue('request.pending.list', {}, 'pending-list')
       if (!Array.isArray(message.requests) || message.requests.length > 4096) {
@@ -441,7 +445,7 @@ function createLiveConnection(
       return message.requests.map((item: unknown): LiveRequest => {
         if (!isRecord(item) || typeof item.request_id !== 'string'
             || !/^[\x21-\x7e]{1,128}$/.test(item.request_id)
-            || !['submit', 'cancel', 'status', 'result'].includes(String(item.kind))
+            || !['submit', 'cancel', 'status', 'result', 'victim_activity'].includes(String(item.kind))
             || !(item.job_id === null || typeof item.job_id === 'string'
               && /^[\x21-\x7e]{1,128}$/.test(item.job_id))
             || typeof item.issued_at_world_us !== 'number'

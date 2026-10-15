@@ -116,6 +116,7 @@ function fakeConnection({ replyFirst = false } = {}) {
       submit: (program) => accept('submit', { program }),
       status: (jobId) => accept('status', { jobId }), result: (jobId) => accept('result', { jobId }),
       cancel: (jobId) => accept('cancel', { jobId }),
+      victimActivity: (jobId) => accept('victim_activity', { jobId }),
       onReply(listener) { listeners.add(listener); return () => listeners.delete(listener) },
       onClockChange() { return () => {} }, onStateChange() { return () => {} },
       close() { closed = true },
@@ -160,6 +161,15 @@ await check('issue sends without waiting and reply collects that request only', 
   assert.equal(earlier.value.value.kind, 'submit')
   assert.equal((await services.call('reply', { request_id: first.value.request_id })).error.code, 'UNKNOWN_REQUEST')
   assert.equal((await services.call('reply', { request_id: 'someone-else' })).error.code, 'UNKNOWN_REQUEST')
+})
+await check('the victim-activity read is an allowed script operation and rejects a malformed job id', async () => {
+  const fake = fakeConnection()
+  const services = createScriptServices(portFor(fake).port, async () => null)
+  const outcome = await services.call('request', { operation: 'job.victim_activity.read', payload: { job_id: 'job-5' } })
+  assert.equal(outcome.value.value.kind, 'victim_activity')
+  assert.equal(fake.sent.at(-1).jobId, 'job-5')
+  const bad = await services.call('request', { operation: 'job.victim_activity.read', payload: { job_id: 'bad id' } })
+  assert.equal(bad.error.code, 'INVALID')
 })
 await check('a reply delivered before the accepted promise settles is not lost', async () => {
   const fake = fakeConnection({ replyFirst: true })

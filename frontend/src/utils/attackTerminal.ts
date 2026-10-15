@@ -18,7 +18,7 @@ export type TerminalCommand =
   | { kind: 'connect' }
   | { kind: 'pending' }
   | { kind: 'submit'; shots?: number; initialization?: 'prepare' | 'inherit'; interleave?: InterleaveReference; measure?: Record<number, number> }
-  | { kind: 'job'; action: 'status' | 'result' | 'cancel'; jobId?: string }
+  | { kind: 'job'; action: 'status' | 'result' | 'cancel' | 'activity'; jobId?: string }
   | { kind: 'answer'; submission: SolutionSubmission }
   | { kind: 'wait'; target: 'any' }
   | { kind: 'wait'; target: 'duration'; durationUs: number }
@@ -37,6 +37,7 @@ export const TERMINAL_HELP = [
   'status [ジョブID]                             ジョブの状態を照会',
   'result [ジョブID]                             ジョブの結果を照会',
   'cancel [ジョブID]                             ジョブを取消',
+  'activity [ジョブID]                           被害者の動きを照会（抽象コマンド。自由モードで有効にした環境だけ）',
   'wait <時間>                                   指定時間だけ待機（例: wait 250us）',
   'wait any                                      最も早いreplyを待つ',
   'wait <要求ID>                                 指定した要求のreplyを待つ',
@@ -74,6 +75,7 @@ export function parseTerminalCommand(line: string): TerminalCommand | null {
       return parseAnswer(args)
     case 'status':
     case 'result':
+    case 'activity':
     case 'cancel': {
       if (args.length > 1) return { kind: 'error', message: `${name} に渡せるジョブIDは1つです。` }
       if (args.length === 1 && !JOB_ID.test(args[0])) return { kind: 'error', message: 'ジョブIDの形式が正しくありません。' }

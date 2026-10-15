@@ -68,6 +68,9 @@ class HostClockWorldController:
     def max_program_qubits(self, principal_id):
         return self._world.max_program_qubits(principal_id)
 
+    def can_read_victim_activity(self, principal_id):
+        return self._world.can_read_victim_activity(principal_id)
+
     def is_reply_released(self, receipt):
         return self._world.is_reply_released(receipt)
 

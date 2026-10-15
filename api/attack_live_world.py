@@ -27,8 +27,8 @@ from core.attack_simulation.live_time_policy import (
     EXPLICIT_WAIT, LiveTimePolicy, parse_live_time_policy,
 )
 from core.attack_simulation.program_request import (
-    STATE_INHERIT_OPERATION_ID, CircuitProgram, ProgramRequestError, ProgramSubmitRequest,
-    interleave_operation_id,
+    STATE_INHERIT_OPERATION_ID, VICTIM_ACTIVITY_OPERATION_ID, CircuitProgram, ProgramRequestError,
+    ProgramSubmitRequest, interleave_operation_id,
 )
 from core.attack_simulation.request_receipts import RequestReceipt
 from core.attack_simulation.victim_workload import Phase
@@ -250,6 +250,14 @@ class LiveWorkloadWorld:
         except PermissionError:
             return None
         return devices[0].max_qubits if devices else None
+
+    def can_read_victim_activity(self, principal_id: str) -> bool:
+        """Whether this principal may use the free-mode abstract command (a yes/no, nothing else)."""
+        try:
+            self._runner._session._service._authorize(principal_id, VICTIM_ACTIVITY_OPERATION_ID)
+        except PermissionError:
+            return False
+        return True
 
     def request_world_time_us(self, receipt: RequestReceipt) -> float:
         """Return the captured service-arrival world time for an exact receipt."""

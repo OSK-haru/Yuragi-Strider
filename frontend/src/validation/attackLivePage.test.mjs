@@ -281,10 +281,19 @@ function fixture(clockMode = 'host_clock') {
         const requestId = `request-${++requestSequence}`
         serverPending.push({ request_id: requestId,
           kind: { 'program.submit': 'submit', 'job.status.read': 'status',
-            'job.result.read': 'result', 'job.cancel': 'cancel' }[frame.operation],
+            'job.result.read': 'result', 'job.cancel': 'cancel',
+            'job.victim_activity.read': 'victim_activity' }[frame.operation],
           job_id: frame.payload.job_id ?? null, issued_at_world_us: worldClock })
         this.message({ type: 'accepted', command_id: frame.command_id, request_id: requestId,
           issued_at_world_us: worldClock })
+        if (frame.operation === 'job.victim_activity.read') setTimeout(() => {
+          for (const item of serverPending.splice(0)) for (const socket of sockets) if (socket.readyState === 1) socket.message({
+            type: 'reply', request_id: item.request_id, error_code: null,
+            value: { job_id: JOB, reference: 'training:1', victim_prepared_bit: 1, shots_total: 1, shots_shown: 1,
+              shots: [{ index: 0, steps: [{ actor: 'victim', kind: 'victim_run', start_us: 0, end_us: 2, tenant: 'private-tenant', density: [[1]] }] }],
+              attacker_credential: SECRET, host_time: 9123 },
+          })
+        }, 5)
         if (frame.operation === 'program.submit') setTimeout(() => {
           worldClock += 1
           for (const socket of sockets) if (socket.readyState === 1) socket.message({ type: 'clock', world_time_us: worldClock })
@@ -341,6 +350,22 @@ assert.equal(brokenConnection.getSnapshot().busy, null)
 await brokenConnection.discard()
 assert.equal(brokenConnection.getSnapshot().environment, null)
 checks.push('connection failure preserves the environment for explicit disposal; never claims connecting forever')
+{
+  const f = fixture()
+  await f.workspace.loadCatalog()
+  await f.workspace.establish(request)
+  await f.workspace.job('victim_activity', JOB)
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const reply = f.workspace.getSnapshot().replies.at(-1)
+  assert.equal(reply.value.reference, 'training:1')
+  assert.deepEqual(Object.keys(reply.value.shots[0].steps[0]).sort(), ['actor', 'after', 'end_us', 'kind', 'start_us'])
+  for (const secret of [SECRET, 'private-tenant', 'density', 'host_time', 'attacker_credential']) {
+    assert.ok(!JSON.stringify(f.workspace.getSnapshot()).includes(secret), secret)
+  }
+  await f.workspace.discard()
+  f.workspace.disconnect()
+  checks.push('a victim-activity reply keeps only its validated fields; extra server fields never reach page state')
+}
 for (const mode of ['free', 'challenge']) {
   const f = fixture()
   const selected = mode === 'free' ? request : { mode, preset_id: 'public-demo', settings: {} }
@@ -616,5 +641,71 @@ check('an INVALID_PROGRAM reply names the unmet service condition', () => {
   assert.equal(settings.describeRejectionReason(null), null)
   assert.equal(settings.describeRejectionReason({ job_id: 'x' }), null)
 })
+const activityUtil = load('utils/victimActivity.ts')
+const terminalUtil = load('utils/attackTerminal.ts')
+const { VictimActivityPanel } = load('components/VictimActivityPanel.tsx')
+const step = (actor, kind, start, end, after) => ({ actor, kind, start_us: start, end_us: end, ...(after ? { after } : {}) })
+const serviceActivity = {
+  job_id: 'job-1', reference: 'victim', victim_prepared_bit: 1, shots_total: 32, shots_shown: 2,
+  shots: [
+    { index: 0, steps: [step('victim', 'victim_run', 0, 2.02), step('service', 'service_reset', 2.02, 3.02, 'victim'), step('attacker', 'attacker_measure', 3.02, 4.02)] },
+    { index: 1, steps: [step('service', 'service_reset', 4.02, 5.02, 'attacker'), step('victim', 'victim_run', 5.02, 7.04), step('service', 'service_reset', 7.04, 8.04, 'victim'), step('attacker', 'attacker_measure', 8.04, 9.04)] },
+  ],
+}
+
+check('the victim activity reply is read strictly: the server shape passes, anything else is not shown', () => {
+  const parsed = activityUtil.parseVictimActivity(serviceActivity)
+  assert.equal(parsed.shots.length, 2)
+  assert.equal(parsed.shots[1].steps[0].after, 'attacker')
+  const bad = [
+    null, {}, { ...serviceActivity, shots: 'x' }, { ...serviceActivity, victim_prepared_bit: 7 },
+    { ...serviceActivity, shots: [{ index: 0, steps: [step('stranger', 'victim_run', 0, 1)] }] },
+    { ...serviceActivity, shots: [{ index: 0, steps: [step('victim', 'victim_run', 5, 1)] }] },
+    { ...serviceActivity, shots: [{ index: 0, steps: [step('victim', 'victim_run', -1, 1)] }] },
+    { ...serviceActivity, shots: Array.from({ length: 65 }, (_, index) => ({ index, steps: [] })) },
+  ]
+  for (const value of bad) assert.equal(activityUtil.parseVictimActivity(value), null, JSON.stringify(value)?.slice(0, 60))
+  // A job result is not an activity reply.
+  assert.equal(activityUtil.parseVictimActivity({ job_id: 'job-1', status: 'succeeded', shots: 4, counts: { 0: 1, 1: 3 } }), null)
+})
+
+check('the terminal text names each step, tells whose state a reset cleared, and counts the shots it leaves out', () => {
+  const lines = activityUtil.describeVictimActivity(activityUtil.parseVictimActivity(serviceActivity), 1)
+  assert.match(lines[0], /本物の被害者.*被害者が準備する bit: 1/)
+  assert.match(lines[1], /被害者の実行.*→ Reset（被害者の後）.*→ 攻撃者の測定/)
+  assert.match(lines[2], /ほか 31 shot/)
+  const plain = activityUtil.describeVictimActivity({ ...serviceActivity, reference: null, victim_prepared_bit: null })
+  assert.match(plain[1], /挟まっていません/)
+})
+
+check('the activity command parses with and without a job id, and the help lists it', () => {
+  assert.deepEqual(terminalUtil.parseTerminalCommand('activity'), { kind: 'job', action: 'activity' })
+  assert.deepEqual(terminalUtil.parseTerminalCommand('activity job-9'), { kind: 'job', action: 'activity', jobId: 'job-9' })
+  assert.ok(terminalUtil.TERMINAL_HELP.some((line) => line.startsWith('activity ')))
+})
+
+check('the victim activity panel lays out three lanes, labels every block, and states what it cannot show', () => {
+  const panel = (activity, jobId = 'job-1') => renderToStaticMarkup(React.createElement(VictimActivityPanel,
+    { activity, jobId, busy: false, onRead() {} }))
+  const html = panel(activityUtil.parseVictimActivity(serviceActivity))
+  for (const text of ['被害者の動き', 'shot 0', 'shot 1', '被害者', 'サービス', '攻撃者', 'Reset（被害者の後）', '攻撃者の測定', '先頭2shot', 'このジョブの動きを読む']) {
+    assert.ok(html.includes(text), text)
+  }
+  assert.ok(html.includes('role="img"') && html.includes('aria-label="被害者の動き。'))
+  assert.ok(html.includes('抽象コマンド'))
+  assert.ok(!html.includes('density') && !html.includes('tenant'))
+  const none = panel(null, '')
+  assert.ok(none.includes('ジョブを送ると読めます') && !none.includes('<svg'))
+  const ordinary = panel({ ...serviceActivity, reference: null, victim_prepared_bit: null, shots: [] })
+  assert.ok(ordinary.includes('挟まっていません') && !ordinary.includes('<svg'))
+})
+
+check('the page shows the panel only when the service says the command is on', () => {
+  const source = readFileSync(path.join(sourceRoot, 'pages', 'AttackLivePage.tsx'), 'utf8')
+  assert.ok(source.includes("messagesView === 'activity' && <VictimActivityPanel"))
+  assert.ok(source.includes("{currentTab === 'workspace' && state.victimActivityAvailable && <button"))
+  assert.ok(source.includes("command.action === 'activity' && !state.victimActivityAvailable"))
+})
+
 console.log(`PASS ${checks.length} attack live page checks`)
 for (const label of checks) console.log(`  ${label}`)

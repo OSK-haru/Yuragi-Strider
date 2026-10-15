@@ -19,6 +19,8 @@ import { parseTerminalCommand, TERMINAL_HELP } from '../utils/attackTerminal'
 import { canEditQubitNoise, graphEdges, regionDefaults, regionSelectionRequest, replaceRegionQubit, type RegionOwner } from '../utils/attackLiveTopology'
 import { exportCircuitConfigBundleJson } from '../utils/circuitConfigTransfer'
 import { AttackScriptEditor } from '../components/AttackScriptEditor'
+import { VictimActivityPanel } from '../components/VictimActivityPanel'
+import { describeVictimActivity, parseVictimActivity } from '../utils/victimActivity'
 import { browserStorage, defaultScriptFiles, loadScriptFiles, saveScriptFiles, type ScriptFiles } from '../scripting/scriptFiles'
 import { EXIT_KILLED, scriptRuntimeSupport, type RunnerPhase, type ScriptRunner } from '../scripting/scriptRunner'
 import { createScriptServices } from '../scripting/scriptServices'
@@ -29,7 +31,10 @@ import './AttackLivePage.css'
 const CONNECTION_LABELS = {
   idle: '未成立', connecting: '接続中', open: '接続済み', closed: '切断', failed: '接続失敗',
 }
-const REQUEST_LABELS = { submit: '回路送信', status: '状態照会', result: '結果照会', cancel: '取消' }
+const REQUEST_LABELS: Record<string, string> = {
+  submit: '回路送信', status: '状態照会', result: '結果照会', cancel: '取消',
+  victim_activity: '被害者の動きの照会', activity: '被害者の動きの照会',
+}
 const SCRIPT_PHASE_LABELS: Record<RunnerPhase, string> = {
   idle: '', loading: 'Python を読み込み中', packages: 'パッケージを準備中', running: 'スクリプト実行中', stopping: '停止中',
 }
@@ -300,6 +305,8 @@ function replyLines(reply: LiveReply): TerminalLine[] {
   const error = describeReplyError(reply.errorCode)
   const jobId = jobIdFor(reply)
   const reason = describeRejectionReason(reply.value)
+  const activity = error ? null : parseVictimActivity(reply.value)
+  if (activity) return terminalLines('output', [`reply ${reply.requestId}:`, ...describeVictimActivity(activity)])
   return [
     ...terminalLines(error ? 'error' : 'output', [`reply ${reply.requestId}: ${error ?? JSON.stringify(reply.value)}`]),
     ...(error && reason ? terminalLines('error', [`  満たされていない条件: ${reason}`]) : []),
@@ -333,7 +340,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
   /* 今の環境をどの課題プリセットで作ったか。チュートリアルが「案内する課題の環境か」を見分けるのに使う。 */
   const [environmentPreset, setEnvironmentPreset] = useState<string | null>(null)
   const tutorial = useTutorial()
-  const [messagesTab, setMessagesTab] = useState<'terminal' | 'pending'>('terminal')
+  const [messagesTab, setMessagesTab] = useState<'terminal' | 'pending' | 'activity'>('terminal')
   const ideLayout = useIdeLayout('attack')
   const [setupCategory, setSetupCategory] = useState<SetupCategoryId>('mode')
   const [jobId, setJobId] = useState('')
@@ -359,6 +366,9 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
   const scriptRunning = scriptPhase !== 'idle'
   const scriptUnavailable = scriptSupport.ok ? null : scriptSupport.reason
   const busy = state.busy !== null
+  /* 最後に読んだ「被害者の動き」。いまのジョブのものを優先する。 */
+  const activities = state.replies.map((reply) => (reply.errorCode ? null : parseVictimActivity(reply.value))).filter((item) => item !== null)
+  const latestActivity = activities.findLast((item) => item.job_id === jobId) ?? activities.at(-1) ?? null
   const locked = busy || state.environment !== null
   const connected = state.connectionState === 'open'
   const catalog = state.catalog
@@ -394,7 +404,9 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
   const deviceId = catalog?.free_mode.standard_initial_values.device ?? ''
   const prompt = `attacker@${deviceId || 'qpu'}:~$`
   const currentTab = state.environment ? tab : 'setup'
-  const messagesView = currentTab === 'workspace' && (messagesTab !== 'pending' || state.clockMode === 'explicit_wait')
+  const messagesView = currentTab === 'workspace'
+    && (messagesTab === 'terminal' || (messagesTab === 'pending' && state.clockMode === 'explicit_wait')
+      || (messagesTab === 'activity' && state.victimActivityAvailable))
     ? messagesTab : 'terminal'
   /* 送信前検査は、測定先を自動で割り当てた（--measure を付けない）submit の回路で行う。 */
   const serviceBundle = useMemo(
@@ -644,11 +656,14 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
     if (command.kind === 'submit') await submit(command)
     if (command.kind === 'job') {
       /* 省略時は操作中のジョブ（最後に届いたジョブ、または最後に指定したジョブ）を使う。 */
+      if (command.action === 'activity' && !state.victimActivityAvailable) {
+        print('error', 'この環境では「被害者の動き」は使えません。自由モードで「抽象コマンド: 被害者の動きの表示を有効にする」をオンにして、環境を作り直してください（課題モードでは使えません）。'); return
+      }
       const id = command.jobId ?? jobId
       if (!id) { print('error', 'ジョブIDを指定してください（例: status job-…）。'); return }
       setJobId(id)
       print('output', `${REQUEST_LABELS[command.action]}を要求します（${id}）。`)
-      await workspace.job(command.action, id)
+      await workspace.job(command.action === 'activity' ? 'victim_activity' : command.action, id)
     }
     if (command.kind === 'wait') {
       if (state.clockMode !== 'explicit_wait') { print('error', 'この環境では世界時刻が実時間で進むため、待機コマンドは使えません。'); return }
@@ -921,6 +936,8 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
           <div className="ide__doc-tabs" role="group" aria-label="メッセージの種類">
             <button type="button" aria-pressed={messagesView === 'terminal'} onClick={() => setMessagesTab('terminal')}>
               {currentTab === 'setup' ? '入力エラー' : 'ターミナル'} <span>{currentTab === 'setup' ? errorEntries.length : preflightIssues.length}</span></button>
+            {currentTab === 'workspace' && state.victimActivityAvailable && <button type="button" aria-pressed={messagesView === 'activity'} onClick={() => setMessagesTab('activity')}>
+              被害者の動き</button>}
             {currentTab === 'workspace' && state.clockMode === 'explicit_wait' && <button type="button" aria-pressed={messagesView === 'pending'} onClick={() => setMessagesTab('pending')}>
               未完了の要求 <span>{state.pending.length}</span></button>}
           </div>
@@ -930,6 +947,8 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
                 ? errorEntries.map(([fieldPath, message]) => <pre key={fieldPath} className="attack-live__terminal-error">ERROR: {visibleFields.find((field) => field.path === fieldPath)?.label ?? fieldPath}: {message}</pre>)
                 : <pre>入力エラーはありません。</pre>}
             </div>}
+            {currentTab === 'workspace' && messagesView === 'activity' && <VictimActivityPanel activity={latestActivity} jobId={jobId} busy={busy}
+              onRead={() => { print('output', `被害者の動きの照会を要求します（${jobId}）。`); void workspace.job('victim_activity', jobId) }} />}
             {currentTab === 'workspace' && messagesView === 'terminal' && <section className="attack-live__terminal" aria-label="攻撃者ターミナル" data-tutorial-anchor="attack-terminal">
               <div ref={terminalLogRef} className="ide__terminal-log" role="log" aria-label="コマンドの実行結果とreply" aria-live="polite">
                 {preflightIssues.length

@@ -219,6 +219,7 @@ function issue(live: LiveAttackConnection, operation: unknown, payload: Record<s
   }
   if (operation === 'job.status.read') return live.status(jobId)
   if (operation === 'job.result.read') return live.result(jobId)
+  if (operation === 'job.victim_activity.read') return live.victimActivity(jobId)
   if (operation === 'job.cancel') return live.cancel(jobId)
   throw new ServiceError('OPERATION_DENIED', 'スクリプトから使えない操作です。')
 }

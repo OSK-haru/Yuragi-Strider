@@ -76,7 +76,7 @@ class FakeSocket {
     if (message.type === 'authenticate') {
       queueMicrotask(() => this.emit('message', { data: JSON.stringify({
         type: 'ready', protocol: 'quanyu.attack.v1', world_time_us: 0,
-        clock_mode: 'host_clock', pause_while_catching_up: false, max_program_qubits: 1,
+        clock_mode: 'host_clock', pause_while_catching_up: false, max_program_qubits: 1, victim_activity: true,
       }) }))
     } else if (message.operation === 'program.submit') {
       queueMicrotask(() => this.emit('message', { data: JSON.stringify({
@@ -89,6 +89,10 @@ class FakeSocket {
           type: 'reply', request_id: 'opaque-request-1', value: { counts: { '0': 2 } }, error_code: null,
         }) })
       }, 2)
+    } else if (message.operation === 'job.victim_activity.read') {
+      queueMicrotask(() => this.emit('message', { data: JSON.stringify({
+        type: 'accepted', command_id: message.command_id, request_id: 'activity-request-1', issued_at_world_us: 3,
+      }) }))
     } else if (message.operation === 'request.pending.list') {
       queueMicrotask(() => this.emit('message', { data: JSON.stringify({
         type: 'pending.list', command_id: message.command_id, requests: [{
@@ -129,7 +133,8 @@ const socket = sockets[0]
 socket.open()
 const connection = await opening
 assert.equal(connection.maxProgramQubits, 1)
-checks.push('the ready frame carries the program-qubit limit from device information')
+assert.equal(connection.victimActivityAvailable, true)
+checks.push('the ready frame carries the program-qubit limit and whether the victim-activity command is on')
 assert.equal(connection.state, 'open')
 assert.equal(connection.clockMode, 'host_clock')
 assert.deepEqual(socket.sent[0], { type: 'authenticate', credential: SECRET })
@@ -137,6 +142,12 @@ const stateChanges = []
 connection.onStateChange((state) => stateChanges.push(state))
 const replies = []
 connection.onReply((reply) => replies.push(reply))
+const activityRequest = await connection.victimActivity('job-123')
+assert.deepEqual(activityRequest, { requestId: 'activity-request-1', kind: 'victim_activity', issuedAtWorldUs: 3 })
+const activitySent = socket.sent.at(-1)
+assert.equal(activitySent.operation, 'job.victim_activity.read')
+assert.deepEqual(activitySent.payload, { job_id: 'job-123' })
+checks.push('the victim-activity read goes out as its own operation with only a job id')
 const request = await connection.submit({
   deviceId: 'qpu-sim-100', shots: 2,
   circuitConfig: { logical_qubits: 2, columns: [] }, initialization: 'prepare',

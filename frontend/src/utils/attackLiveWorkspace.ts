@@ -5,6 +5,7 @@ import type {
 } from '../types/attackLive'
 import type { ScriptServicePort } from '../scripting/scriptServices'
 import { assertSupportedCatalog, settleRequest } from './attackLiveSettings'
+import { parseVictimActivity } from './victimActivity'
 
 export type LiveWorkspaceState = {
   catalog: SettingsCatalog | null
@@ -15,6 +16,8 @@ export type LiveWorkspaceState = {
   pauseWhileCatchingUp: boolean
   /** Upper bound for the circuit editor; null until a connection reports it. */
   maxProgramQubits: number | null
+  /** 自由モードの抽象コマンド「被害者の動き」が、この環境で使える。 */
+  victimActivityAvailable: boolean
   worldTimeUs: number
   pending: LiveRequest[]
   pendingUnknown: boolean
@@ -41,7 +44,7 @@ const FAILURE_MESSAGES = {
 export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs = 30_000) {
   let state: LiveWorkspaceState = {
     catalog: null, ownedEnvironments: [], environment: null, connectionState: 'idle',
-    clockMode: null, pauseWhileCatchingUp: false, maxProgramQubits: null, worldTimeUs: 0,
+    clockMode: null, pauseWhileCatchingUp: false, maxProgramQubits: null, victimActivityAvailable: false, worldTimeUs: 0,
     pending: [], pendingUnknown: false, replies: [], busy: null, notice: '', noticeWarning: false, replacement: null,
   }
   let connection: LiveAttackConnection | null = null
@@ -102,7 +105,7 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
     connection = opened
     update({ connectionState: opened.state, worldTimeUs: opened.worldTimeUs,
       clockMode: opened.clockMode, pauseWhileCatchingUp: opened.pauseWhileCatchingUp,
-      maxProgramQubits: opened.maxProgramQubits })
+      maxProgramQubits: opened.maxProgramQubits, victimActivityAvailable: opened.victimActivityAvailable })
     subscriptions = [
       opened.onStateChange((connectionState) => update({ connectionState })),
       opened.onClockChange((worldTimeUs) => update({ worldTimeUs })),
@@ -148,7 +151,7 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
     detach()
     update({ environment: null, ownedEnvironments: state.ownedEnvironments.filter((item) =>
       item.environmentId !== environment.environmentId), connectionState: 'idle', pending: [], pendingUnknown: false, replies: [],
-      worldTimeUs: 0, clockMode: null, pauseWhileCatchingUp: false, maxProgramQubits: null,
+      worldTimeUs: 0, clockMode: null, pauseWhileCatchingUp: false, maxProgramQubits: null, victimActivityAvailable: false,
       replacement: null, notice: '環境を破棄しました。設定を変更できます。' })
   }
   async function issue(label: string, action: (live: LiveAttackConnection) => Promise<LiveRequest>) {
@@ -257,7 +260,8 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
         submitSolution: (estimator, signal) => client.submitSolution(environment.environmentId, estimator, signal),
       }
     },
-    job: (kind: 'status' | 'result' | 'cancel', jobId: string) => issue(kind, (live) => live[kind](jobId)),
+    job: (kind: 'status' | 'result' | 'cancel' | 'victim_activity', jobId: string) => issue(kind,
+      (live) => (kind === 'victim_activity' ? live.victimActivity(jobId) : live[kind](jobId))),
     wait: (target: WaitTarget) => perform('wait', async (_signal, current) => {
       if (!connection || connection.state !== 'open') return
       if (target.kind === 'request' && !state.pending.some((request) => request.requestId === target.requestId)) {
@@ -285,6 +289,9 @@ export function createLiveWorkspace(client: AttackEnvironmentClient, timeoutMs =
  * boundary. Unknown fields (including accidentally supplied credentials) are
  * never copied into page state or rendered. */
 function publicReply(reply: LiveReply): LiveReply {
+  /* 「被害者の動き」は、厳密に検査した形のときだけ、そのまま通す（知らない項目は落ちる）。 */
+  const activity = reply.errorCode === null ? parseVictimActivity(reply.value) : null
+  if (activity !== null && /^job-[a-f0-9-]{32,36}$/.test(activity.job_id)) return { ...reply, value: activity }
   const value: Record<string, unknown> = {}
   if (isRecord(reply.value)) {
     if (typeof reply.value.job_id === 'string' && /^job-[a-f0-9-]{32,36}$/.test(reply.value.job_id)) value.job_id = reply.value.job_id

@@ -214,6 +214,7 @@ class LiveWebSocketTests(unittest.TestCase):
             self.assertEqual((ready["type"], ready["world_time_us"]), ("ready", 0.0))
             # The attacker's ordinary device information, so the editor can match it.
             self.assertEqual(ready["max_program_qubits"], 2)
+            self.assertIs(ready["victim_activity"], False)  # Not enabled in this scenario.
             payload = {"device_id": "qpu-1", "shots": 2,
                        "circuit_config": json.loads(program_json(2)), "initialization": "prepare"}
             await socket.send({"type": "command", "command_id": "submit-1",
