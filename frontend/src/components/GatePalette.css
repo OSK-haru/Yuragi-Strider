@@ -60,6 +60,7 @@
 }
 
 .gate-palette__qubit-input-range {
+  white-space: nowrap;
   color: var(--tt-ink-mid);
   font-size: 0.74rem;
   letter-spacing: 0.04em;
@@ -137,48 +138,56 @@
   position: relative;
   display: inline-flex;
   --gate-accent-rgb: var(--tt-ink-rgb);
+  --gate-accent-ink-rgb: var(--tt-ink-rgb);
 }
 
 .gate-palette__item[data-family='rotation'] {
   --gate-accent-rgb: var(--gate-rotation-rgb);
+  --gate-accent-ink-rgb: var(--gate-rotation-ink-rgb);
 }
 
 .gate-palette__item[data-family='phase'] {
   --gate-accent-rgb: var(--gate-phase-rgb);
+  --gate-accent-ink-rgb: var(--gate-phase-ink-rgb);
 }
 
 .gate-palette__item[data-family='control'] {
   --gate-accent-rgb: var(--gate-control-rgb);
+  --gate-accent-ink-rgb: var(--gate-control-ink-rgb);
 }
 
 .gate-palette__item[data-family='register'] {
   --gate-accent-rgb: var(--gate-register-rgb);
+  --gate-accent-ink-rgb: var(--gate-register-ink-rgb);
 }
 
 .gate-palette__item[data-family='measurement'] {
   --gate-accent-rgb: var(--gate-measurement-rgb);
+  --gate-accent-ink-rgb: var(--gate-measurement-ink-rgb);
 }
 
 .gate-palette__item[data-family='annotation'] {
   --gate-accent-rgb: var(--gate-annotation-rgb);
+  --gate-accent-ink-rgb: var(--gate-annotation-ink-rgb);
 }
 
 /* 系統色は枠と文字に載せる。地は暗いままにして、並んだときの明度差を保つ。 */
 .gate-palette__item .gate-palette__button {
   border-color: rgb(var(--gate-accent-rgb) / 0.45);
   background: rgb(var(--gate-accent-rgb) / 0.08);
-  color: rgb(var(--gate-accent-rgb));
+  color: rgb(var(--gate-accent-ink-rgb));
 }
 
-.gate-palette__item .gate-palette__button:hover:not(:disabled) {
+.gate-palette__item .gate-palette__button:hover:not(:disabled):not(.gate-palette__button--selected) {
   border-color: rgb(var(--gate-accent-rgb) / 0.8);
   background: rgb(var(--gate-accent-rgb) / 0.18);
 }
 
 /* 選択中は塗りつぶす。いま手に持っているゲートは一目で分かる必要がある。 */
-.gate-palette__item .gate-palette__button--selected {
+/* 画面側の button[aria-pressed=true]（薄い地）に負けないよう、詳しさを1段上げる。 */
+.gate-palette__item .gate-palette__button.gate-palette__button--selected {
   border-color: rgb(var(--gate-accent-rgb));
-  background: rgb(var(--gate-accent-rgb));
+  background: rgb(var(--gate-accent-ink-rgb));
   color: var(--tt-void);
 }
 

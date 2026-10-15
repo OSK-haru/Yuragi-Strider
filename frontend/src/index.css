@@ -76,6 +76,17 @@
   --gate-register-rgb: 47 191 143;
   --gate-measurement-rgb: 255 77 77;
   --gate-annotation-rgb: 163 163 163;
+  /*
+   * 系統色を「文字」に使うときの色。暗いテーマでは塗りと同じ値で、ライトテーマでは
+   * 明るい地の上で4.5:1以上（ホバーの薄い色付き地の上でも）になる濃さに替える。
+   * 塗り・枠・グラフの色（--gate-*-rgb）はテーマ間で変えない。
+   */
+  --gate-rotation-ink-rgb: var(--gate-rotation-rgb);
+  --gate-phase-ink-rgb: var(--gate-phase-rgb);
+  --gate-control-ink-rgb: var(--gate-control-rgb);
+  --gate-register-ink-rgb: var(--gate-register-rgb);
+  --gate-measurement-ink-rgb: var(--gate-measurement-rgb);
+  --gate-annotation-ink-rgb: var(--gate-annotation-rgb);
 
   /* -- Blueprint column rule, drawn across every workspace substrate ----- */
   --tt-blueprint: rgb(var(--tt-ink-rgb) / 0.035);
@@ -154,6 +165,13 @@ html[data-theme='light'] {
   --tt-ink-mid-rgb: 92 88 80;
   --tt-accent-deep-rgb: 118 15 15;
   --tt-blueprint: rgba(37, 35, 32, 0.05);
+
+  --gate-rotation-ink-rgb: 6 70 150;
+  --gate-phase-ink-rgb: 120 62 0;
+  --gate-control-ink-rgb: 80 34 170;
+  --gate-register-ink-rgb: 0 86 62;
+  --gate-measurement-ink-rgb: 150 14 14;
+  --gate-annotation-ink-rgb: 78 78 78;
 
   color-scheme: light;
 }

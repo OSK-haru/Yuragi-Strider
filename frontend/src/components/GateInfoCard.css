@@ -22,37 +22,44 @@
   padding: 3px 8px;
   border: 1px solid rgb(var(--gate-family-rgb) / 0.45);
   background: rgb(var(--gate-family-rgb) / 0.12);
-  color: rgb(var(--gate-family-rgb));
+  color: rgb(var(--gate-family-ink-rgb));
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
   --gate-family-rgb: var(--tt-ink-rgb);
+  --gate-family-ink-rgb: var(--tt-ink-rgb);
 }
 
 .gate-info-card__family--rotation {
   --gate-family-rgb: var(--gate-rotation-rgb);
+  --gate-family-ink-rgb: var(--gate-rotation-ink-rgb);
 }
 
 .gate-info-card__family--phase {
   --gate-family-rgb: var(--gate-phase-rgb);
+  --gate-family-ink-rgb: var(--gate-phase-ink-rgb);
 }
 
 .gate-info-card__family--control {
   --gate-family-rgb: var(--gate-control-rgb);
+  --gate-family-ink-rgb: var(--gate-control-ink-rgb);
 }
 
 .gate-info-card__family--register {
   --gate-family-rgb: var(--gate-register-rgb);
+  --gate-family-ink-rgb: var(--gate-register-ink-rgb);
 }
 
 .gate-info-card__family--measurement {
   --gate-family-rgb: var(--gate-measurement-rgb);
+  --gate-family-ink-rgb: var(--gate-measurement-ink-rgb);
 }
 
 .gate-info-card__family--annotation {
   --gate-family-rgb: var(--gate-annotation-rgb);
+  --gate-family-ink-rgb: var(--gate-annotation-ink-rgb);
 }
 
 .gate-info-card__description {
