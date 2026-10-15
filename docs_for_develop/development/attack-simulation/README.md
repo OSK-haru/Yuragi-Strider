@@ -1,6 +1,6 @@
 # 攻撃シミュレーションモード設計
 
-最終同期: 2026-10-08（D72の製品時計・画面接続を同期。詳細なコード確認日は進捗文書を参照）
+最終同期: 2026-10-15（公開再開・メッセージ課題・ブラウザ内Pythonの公開デモ配備まで同期。詳細なコード確認日は進捗文書を参照）
 
 本フォルダは、会話で検討してきた攻撃シミュレーションの開発用設計記録である。
 
@@ -13,7 +13,7 @@
 - 現実のサービスに無い操作（交互観測など）は抽象コマンドとして分け、既定では無効にしている。前提と仮定は、環境ごとの仮定記録に残す。
 
 個人教材の `learning/private/` や公開サイトの説明とは区別する。
-**物理モデル基準版は固定済み。共通コマンドのdesktop／development経路をmountし、画面は製品`host_clock`（1x）・server pushに接続済み。explicit_waitは試験経路のみ。HTTP polling候補、in-process／WebSocket接続、Reset漏洩の内部orchestrator・推定器・hidden graderは存在するが、Reset課題の製品preset／採点接続、永続化・複数process復旧、管理者bootstrapは未完了。利用者のコードはブラウザ内のWorker（Pyodide）でだけ実行し、サーバー側では実行しない（[スクリプトアクセス](script-access.md)）。service timing値の根拠見直しは提案中で、未承認値は変更していない。**
+**物理モデル基準版は固定済み。共通コマンドの経路（desktop・development・公開デモ）に、設定目録・環境の作成と破棄・WebSocketをmount済みで、画面は製品`host_clock`（1x）・server pushに接続している。課題は2つ（メッセージ課題 `reset-leakage-message`〔完全一致で採点〕と、判定規則を提出する `reset-leakage`）で、どちらも製品presetと採点器に接続済み。利用者のコードはブラウザ内のWorker（Pyodide）でだけ実行し、サーバー側では実行しない（[スクリプトアクセス](script-access.md)）。未完了は、永続化・複数processの復旧、管理者bootstrap、service timing値の根拠見直し（提案中で、未承認値は変更していない）。explicit_waitは試験経路のみ。**
 
 ## 読む順序
 
