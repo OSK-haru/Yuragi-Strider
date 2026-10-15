@@ -359,6 +359,10 @@ class LiveWorkloadWorld:
     def result(self, credential, job_id, *, owner_context=None):
         return self._job_request(credential, "job.result.read", job_id, owner_context)
 
+    def victim_activity(self, credential, job_id, *, owner_context=None):
+        """Abstract command; the service refuses it unless the scenario enabled it."""
+        return self._job_request(credential, "job.victim_activity.read", job_id, owner_context)
+
     def reply(self, credential, receipt, *, owner_context=None):
         session = self._runner._session
         with session._scope_lock:
@@ -603,6 +607,8 @@ class LiveWorkloadWorld:
                         value = JobStatusView(trace.job_id, JobStatus.CANCELLED)
                     elif op.receipt.operation_id == "job.status.read":
                         value = service._get_status_at(principal, op.payload, op.window.arrival)
+                    elif op.receipt.operation_id == "job.victim_activity.read":
+                        value = service._get_victim_activity_at(principal, op.payload, op.window.arrival)
                     else:
                         value = service._get_result_at(principal, op.payload, op.window.arrival)
                 except JobExpiredError:

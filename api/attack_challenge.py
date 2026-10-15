@@ -25,7 +25,7 @@ from api.attack_product_factory import (
     IDLE_INPUT_CALIBRATION, ProductAssemblyLimits, _interleave_victims, _parse_frozen_inputs,
     build_service_stack, message_bits,
 )
-from api.attack_product_profiles import MAX_RETAINED_QUBITS, OPERATIONS, _profile, _topology
+from api.attack_product_profiles import CHALLENGE_OPERATIONS, MAX_RETAINED_QUBITS, _profile, _topology
 from api.attack_settings_resolver import (
     ChallengeDefinition, RESET_LEAKAGE_MESSAGE_PRESET_ID, RESET_LEAKAGE_PRESET_ID,
 )
@@ -132,8 +132,11 @@ def _preset(base, region: tuple[int, ...], settings: ResetLeakageV0Settings, tem
     template = base.template
     qpu = _thaw(template.qpu_service_config)
     # This challenge is built on the abstract interleaved observation, so the preset turns it on.
-    qpu["abstract_commands"] = {"interleaved_observation": True}
-    qpu["supported_operations"] = list(OPERATIONS)
+    # Explicitly off: a challenge never reveals the victim's runs, whatever the author sets in free mode.
+    qpu["abstract_commands"] = {"interleaved_observation": True, "victim_activity": False}
+    # The challenge offers the service's operations and the interleaved observation, never the
+    # free-mode-only abstract command that reveals the victim's runs.
+    qpu["supported_operations"] = list(CHALLENGE_OPERATIONS)
     entries = qpu["reset_model"]["qubits"]
     entries[str(region[0])]["success_probability"] = settings.reset_success_probability
     model = PerQubitPhenomenologicalResetModel(
@@ -146,7 +149,9 @@ def _preset(base, region: tuple[int, ...], settings: ResetLeakageV0Settings, tem
     qpu["runtime_execution"]["reset_count"] = settings.reset_count
     attacker = _thaw(template.attacker_config)
     attacker["interleaved_access"] = {"max_rounds_per_query": settings.shots_per_case}
+    attacker["operation_grants"] = list(CHALLENGE_OPERATIONS)
     victim = _thaw(template.victim_config)
+    victim["operation_grants"] = list(CHALLENGE_OPERATIONS)
     victim["interleaved_run"] = {"program": "prepare_basis_state_then_measure", **secret}
     experiment = _thaw(template.experiment_config)
     experiment[EVALUATION_KEY] = dict(evaluation)
@@ -170,7 +175,7 @@ def _preset(base, region: tuple[int, ...], settings: ResetLeakageV0Settings, tem
         hidden_fields=("victim.interleaved_run", f"experiment.{EVALUATION_KEY}"),
         evaluator_id=evaluator_id,
         submission_enabled=True,
-        allowed_operations=OPERATIONS,
+        allowed_operations=CHALLENGE_OPERATIONS,
     )
     secret_path = f"victim.interleaved_run.{next(iter(secret))}"
     # The base profile documents a secret bit; a message preset documents its message instead.

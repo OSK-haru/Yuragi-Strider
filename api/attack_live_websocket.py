@@ -306,7 +306,7 @@ def create_live_attack_websocket_router(
                     "initialization": body.initialization,
                     "interleave": body.interleave,
                 }
-            elif operation in {"job.cancel", "job.status.read", "job.result.read"}:
+            elif operation in {"job.cancel", "job.status.read", "job.result.read", "job.victim_activity.read"}:
                 if set(payload) != {"job_id"} or type(payload["job_id"]) is not str:
                     raise ValueError
                 job_id = payload["job_id"]
@@ -433,6 +433,9 @@ def create_live_attack_websocket_router(
                     elif operation == "job.status.read":
                         receipt = await asyncio.to_thread(entry.controller.status, credential,
                             normalized["job_id"], owner_context=owner)
+                    elif operation == "job.victim_activity.read":
+                        receipt = await asyncio.to_thread(entry.controller.victim_activity, credential,
+                            normalized["job_id"], owner_context=owner)
                     else:
                         receipt = await asyncio.to_thread(entry.controller.result, credential,
                             normalized["job_id"], owner_context=owner)
@@ -440,7 +443,8 @@ def create_live_attack_websocket_router(
                     issued_at_world_us = await asyncio.to_thread(
                         entry.controller.request_world_time_us, receipt)
                     kind = {"program.submit": "submit", "job.cancel": "cancel",
-                            "job.status.read": "status", "job.result.read": "result"}[operation]
+                            "job.status.read": "status", "job.result.read": "result",
+                            "job.victim_activity.read": "victim_activity"}[operation]
                     entry.handles[request_id] = _RequestHandle(
                         receipt, principal, kind, normalized.get("job_id"), issued_at_world_us,
                         origin=websocket)

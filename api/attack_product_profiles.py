@@ -12,6 +12,7 @@ from core.attack_simulation.qpu_topology import QpuTopology, TopologyLimits
 from core.attack_simulation.placement import PlacementPolicy
 from core.attack_simulation.program_request import (
     INTERLEAVE_TRAINING_OPERATION_ID, INTERLEAVE_VICTIM_OPERATION_ID, STATE_INHERIT_OPERATION_ID,
+    VICTIM_ACTIVITY_OPERATION_ID,
 )
 from core.attack_simulation.scenario_assumptions import AssumptionBasis, AssumptionRecord
 from core.attack_simulation.scenario_compiler import ScenarioOverride
@@ -26,13 +27,19 @@ from core.physical_environment import UNIFIED_ENVIRONMENT_MODEL
 OPERATIONS = (
     "device.info.read", "program.submit", "job.status.read", "job.result.read", "job.cancel",
     STATE_INHERIT_OPERATION_ID, INTERLEAVE_VICTIM_OPERATION_ID, INTERLEAVE_TRAINING_OPERATION_ID,
+    VICTIM_ACTIVITY_OPERATION_ID,
 )
 # Operations that exist in a real service. The interleaved observation is an abstract command
 # (no real service lets a tenant run another tenant's job before each shot), so it is a separate,
 # opt-in setting that is off unless a scenario or the author turns it on.
 INTERLEAVE_OPERATIONS = (INTERLEAVE_VICTIM_OPERATION_ID, INTERLEAVE_TRAINING_OPERATION_ID)
-SERVICE_OPERATIONS = tuple(item for item in OPERATIONS if item not in INTERLEAVE_OPERATIONS)
+# Reading the victim's runs behind one's own job is also abstract: free mode only. A challenge
+# preset never lists it (api/attack_challenge.py builds its operations from CHALLENGE_OPERATIONS).
+ABSTRACT_OPERATIONS = (*INTERLEAVE_OPERATIONS, VICTIM_ACTIVITY_OPERATION_ID)
+SERVICE_OPERATIONS = tuple(item for item in OPERATIONS if item not in ABSTRACT_OPERATIONS)
+CHALLENGE_OPERATIONS = (*SERVICE_OPERATIONS, *INTERLEAVE_OPERATIONS)
 ABSTRACT_INTERLEAVE = "qpu_service.abstract_commands.interleaved_observation"
+ABSTRACT_VICTIM_ACTIVITY = "qpu_service.abstract_commands.victim_activity"
 SUPPORTED_OPERATIONS_PATH = "qpu_service.supported_operations"
 INTERLEAVED_RUN_SECRET_BIT = "victim.interleaved_run.secret_bit"
 INTERLEAVED_MAX_ROUNDS = "attacker.interleaved_access.max_rounds_per_query"
@@ -332,7 +339,7 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
     qpu = {
         "execution_regime": "nisq_physical",
         "supported_operations": list(SERVICE_OPERATIONS),
-        "abstract_commands": {"interleaved_observation": False},
+        "abstract_commands": {"interleaved_observation": False, "victim_activity": False},
         "runtime_execution": runtime.to_manifest_config(),
         "circuit_execution": {
             "compiler_id": "local_sampling_v1",
@@ -436,10 +443,15 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
     def derive_overrides(supplied: Mapping[str, object]) -> tuple[ScenarioOverride, ...]:
         prefix = "qpu_service.reset_model.qubits."
         derived: list[ScenarioOverride] = []
-        if supplied.get(ABSTRACT_INTERLEAVE) is True:
+        interleave_on = supplied.get(ABSTRACT_INTERLEAVE) is True
+        activity_on = supplied.get(ABSTRACT_VICTIM_ACTIVITY) is True
+        if interleave_on or activity_on:
+            # Each abstract command adds only its own operations to the real service's list.
             derived.append(ScenarioOverride(
-                SUPPORTED_OPERATIONS_PATH, list(OPERATIONS),
-                "Server-derived: the author enabled the abstract interleaved-observation command."))
+                SUPPORTED_OPERATIONS_PATH,
+                [*SERVICE_OPERATIONS, *(INTERLEAVE_OPERATIONS if interleave_on else ()),
+                 *((VICTIM_ACTIVITY_OPERATION_ID,) if activity_on else ())],
+                "Server-derived: the author enabled an abstract command."))
         if not any(path.startswith(prefix) for path in supplied):
             return tuple(derived)
         edited = tuple(
@@ -529,7 +541,7 @@ def _template(template_id: str, qpu: Mapping[str, object], mode: str,
                           "qubit_frequency_ghz", "t1_max_us", "tphi_max_us")
         )
     editable.extend((INTERLEAVED_RUN_SECRET_BIT, INTERLEAVED_MAX_ROUNDS, RESET_CONFIGURATION_ID,
-                     ABSTRACT_INTERLEAVE, SUPPORTED_OPERATIONS_PATH))
+                     ABSTRACT_INTERLEAVE, ABSTRACT_VICTIM_ACTIVITY, SUPPORTED_OPERATIONS_PATH))
     editable.extend(f"qpu_service.reset_model.qubits.{qid}.success_probability" for qid in region)
     return ScenarioTemplate(
         template_id, "1",
@@ -715,6 +727,11 @@ def _interleaving_assumptions(region: tuple[int, ...]) -> list[AssumptionRecord]
                 "The interleaved observation does not exist in real services. It is off by default and available "
                 "only when the author (free mode) or the preset (challenge) enables it; when off the service does "
                 "not list the interleave operations at all."),
+        _record(ABSTRACT_VICTIM_ACTIVITY, AssumptionBasis.SIMULATOR_CHOICE,
+                "Reading who ran when behind one's own job (victim run, service reset, attacker measurement) does "
+                "not exist in real services. It is off by default, available only when the author enables it in "
+                "free mode, and never in a challenge preset. It returns only the recorded steps and world times, "
+                "never a state, a measured value or a tenant identity."),
         _record("attacker.operation_grants", AssumptionBasis.SIMULATOR_CHOICE,
                 "The attacker may submit inherit Programs and interleaved observation runs. The server fixes this "
                 "grant; the browser cannot widen it."),
@@ -756,6 +773,14 @@ def _fields(region: tuple[int, ...], mode: str, calibrations: Mapping[int, objec
                      "実在のクラウドでは、他の利用者のジョブが自分の測定の直前に実行されるよう指定する手段はありません。"
                      "この設定は、論文の攻撃条件（被害者の直後に攻撃者が測る）を、待ち行列の偶然に頼らず再現するための"
                      "シミュレーター上の便宜です。オフのときは、通常のジョブ送信だけが使えます。"),
+        SettingField(ABSTRACT_VICTIM_ACTIVITY, "抽象コマンド: 被害者の動きの表示を有効にする", "boolean",
+                     "現実のサービスには無い操作です。初期値はオフです。オンにすると、交互観測のジョブのあとに "
+                     "activity（または画面の「被害者の動き」）で、shotごとの「被害者の実行 → サービスのReset → "
+                     "攻撃者の測定」の順番と世界時刻を読めます。自由モード専用で、課題モードでは使えません。",
+                     "実在のクラウドでは、自分の測定の合間に他の利用者が何を実行したかを知る手段はありません。"
+                     "この設定は、論文の攻撃条件が成り立つ仕組み（被害者の直後にサービスのResetを挟んで攻撃者が"
+                     "測る）を、画面で確かめて学ぶためのシミュレーター上の便宜です。読み出せるのは記録された"
+                     "手順と時刻だけで、状態や被害者の測定値は含みません。"),
         SettingField(INTERLEAVED_RUN_SECRET_BIT, "被害者の秘密bit", "integer",
                      "被害者が毎回準備して測定する1 qubitの値です。自由モードでは見て変更できます。課題モードでは非公開になります。",
                      "共有qubitの交代を「被害者の実行 → サービスのReset → 攻撃者の測定」の繰り返しとして観測する実験で、"

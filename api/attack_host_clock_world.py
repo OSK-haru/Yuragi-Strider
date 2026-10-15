@@ -51,6 +51,10 @@ class HostClockWorldController:
         with self._lock:
             return self._world.result(credential, job_id, owner_context=owner_context)
 
+    def victim_activity(self, credential, job_id, *, owner_context=None):
+        with self._lock:
+            return self._world.victim_activity(credential, job_id, owner_context=owner_context)
+
     def reply(self, credential, receipt, *, owner_context=None):
         with self._lock:
             return self._world.reply(credential, receipt, owner_context=owner_context)
