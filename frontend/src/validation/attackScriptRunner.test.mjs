@@ -41,20 +41,34 @@ new Function('require', 'module', 'exports', workerData.source)(() => { throw ne
 const { waitForResponse } = module.exports
 parentPort.on('message', ({ buffer, callId, timeoutMs }) => {
   let slices = 0
-  const outcome = waitForResponse(buffer, callId, () => { slices += 1 }, timeoutMs)
+  // The first slice runs just before the first block: only then may the main thread write.
+  const outcome = waitForResponse(buffer, callId, () => {
+    slices += 1
+    if (slices === 1) parentPort.postMessage({ started: true })
+  }, timeoutMs)
   parentPort.postMessage({ outcome, slices })
 })
 `
 const thread = new Worker(workerSource, { eval: true, workerData: { source: transpile('scripting/syncChannel.ts') } })
-const ask = (message) => new Promise((resolve) => { thread.once('message', resolve); thread.postMessage(message) })
+/* Resolves with the worker's result; onStarted runs once the worker is about to block. */
+const ask = (message, onStarted = () => {}) => new Promise((resolve) => {
+  const listener = (reply) => {
+    if (reply.started) { onStarted(); return }
+    thread.off('message', listener)
+    resolve(reply)
+  }
+  thread.on('message', listener)
+  thread.postMessage(message)
+})
 
 await check('a blocked worker wakes on its own call id and ignores an abandoned call', async () => {
   const buffer = channel.createChannelBuffer(1024)
   const responder = channel.createResponder(buffer)
-  const waiting = ask({ buffer, callId: 2, timeoutMs: 5000 })
-  responder.received(1)
-  setTimeout(() => responder.write(1, { value: 'stale' }), 30)
-  setTimeout(() => { responder.received(2); responder.write(2, { value: { ok: 'fresh' } }) }, 120)
+  const waiting = ask({ buffer, callId: 2, timeoutMs: 5000 }, () => {
+    responder.received(1)
+    setTimeout(() => responder.write(1, { value: 'stale' }), 30)
+    setTimeout(() => { responder.received(2); responder.write(2, { value: { ok: 'fresh' } }) }, 120)
+  })
   const { outcome, slices } = await waiting
   assert.deepEqual(outcome, { value: { ok: 'fresh' } })
   assert.ok(slices >= 1, 'the worker checks for interruption while it waits')
