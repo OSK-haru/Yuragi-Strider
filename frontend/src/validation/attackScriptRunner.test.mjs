@@ -132,6 +132,21 @@ await check('a script request maps the wire payload onto the existing client cal
   assert.equal(opened.length, 1, 'one connection per run')
   assert.ok(!JSON.stringify(outcome).includes(SECRET))
 })
+await check('issue sends without waiting and reply collects that request only', async () => {
+  const fake = fakeConnection()
+  const services = createScriptServices(portFor(fake).port, async () => null)
+  const payload = { device_id: 'ibm_kingston', shots: 8, circuit_config: { columns: [] } }
+  const first = await services.call('issue', { operation: 'program.submit', payload })
+  const second = await services.call('issue', { operation: 'program.submit', payload })
+  assert.equal(fake.sent.length, 2)
+  assert.notEqual(first.value.request_id, second.value.request_id)
+  const later = await services.call('reply', { request_id: second.value.request_id })
+  const earlier = await services.call('reply', { request_id: first.value.request_id })
+  assert.equal(later.value.value.kind, 'submit')
+  assert.equal(earlier.value.value.kind, 'submit')
+  assert.equal((await services.call('reply', { request_id: first.value.request_id })).error.code, 'UNKNOWN_REQUEST')
+  assert.equal((await services.call('reply', { request_id: 'someone-else' })).error.code, 'UNKNOWN_REQUEST')
+})
 await check('a reply delivered before the accepted promise settles is not lost', async () => {
   const fake = fakeConnection({ replyFirst: true })
   const services = createScriptServices(portFor(fake).port, async () => null)

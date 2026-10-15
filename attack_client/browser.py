@@ -39,6 +39,19 @@ class BrowserTransport:
         self.world_time_us = int(reply.get("world_time_us", self.world_time_us))
         return reply
 
+    def issue(self, operation: str, payload: dict[str, Any]) -> str:
+        """要求を送り、受理された要求IDだけを返す（返事は待たない）。"""
+        if self._closed:
+            raise AttackError("the session closed", "CLOSED")
+        accepted = self._call("issue", {"operation": operation, "payload": payload})
+        return str(accepted["request_id"])
+
+    def reply(self, request_id: str) -> dict[str, Any]:
+        """issue した要求の reply（value と error_code）を待って返す。"""
+        reply = self._call("reply", {"request_id": request_id, "timeout_ms": self._timeout_ms})
+        self.world_time_us = int(reply.get("world_time_us", self.world_time_us))
+        return reply
+
     def answer(self, document: dict[str, Any]) -> dict[str, Any]:
         return self._call("answer", document)
 

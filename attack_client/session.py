@@ -35,9 +35,28 @@ class Result:
 
 
 class Job:
-    def __init__(self, session: "AttackSession", job_id: str):
+    """送信したジョブ。送信の返事（ジョブID）は、初めて必要になったときに待つ。
+
+    だから run() を続けて呼ぶと、前の送信の返事を待たずに次を送れる。サービスが
+    送信を拒否した場合（観測回数の上限、待ち行列の上限など）は、job_id・result()・
+    status()・cancel() のどれかを最初に使ったときに AttackError になる。
+    """
+
+    def __init__(self, session: "AttackSession", submit_request_id: str):
         self._session = session
-        self.job_id = job_id
+        self._submit_request_id: str | None = submit_request_id
+        self._job_id: str | None = None
+
+    @property
+    def job_id(self) -> str:
+        if self._job_id is None:
+            value = self._session._settle(self._session._transport.reply(self._submit_request_id))
+            job_id = value.get("job_id")
+            if not isinstance(job_id, str):
+                raise AttackError(f"the service did not accept the program: {value.get('reason', value)}",
+                                  "REJECTED")
+            self._job_id, self._submit_request_id = job_id, None
+        return self._job_id
 
     def result(self, timeout: float = 120.0, poll: float = 0.4) -> Result:
         """完了するまで結果照会を繰り返す。"""
@@ -88,7 +107,7 @@ class AttackSession:
 
     def run(self, circuit: Circuit | dict[str, Any], *, shots: int = 32,
             initialization: str | None = None, interleave: str | None = None) -> Job:
-        """回路を送信してジョブを返す。結果は job.result() で待つ。"""
+        """回路を送信してジョブを返す。送信の返事は待たないので、続けて何本も送れる。結果は job.result() で待つ。"""
         document = circuit.to_dict() if isinstance(circuit, Circuit) else circuit
         payload: dict[str, Any] = {"device_id": self.device, "shots": shots, "circuit_config": document}
         if interleave is not None:
@@ -98,11 +117,7 @@ class AttackSession:
             initialization = initialization or "inherit"
         if initialization is not None:
             payload["initialization"] = initialization
-        value = self._call("program.submit", payload)
-        job_id = value.get("job_id")
-        if not isinstance(job_id, str):
-            raise AttackError(f"the service did not accept the program: {value.get('reason', value)}", "REJECTED")
-        return Job(self, job_id)
+        return Job(self, self._transport.issue("program.submit", payload))
 
     def answer(self, threshold: float | None = None, direction: str | None = None, *,
                message: str | None = None) -> dict[str, Any]:
@@ -134,7 +149,10 @@ class AttackSession:
         return self._call(operation, {"job_id": job_id})
 
     def _call(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
-        reply = self._transport.request(operation, payload)
+        return self._settle(self._transport.request(operation, payload))
+
+    @staticmethod
+    def _settle(reply: dict[str, Any]) -> dict[str, Any]:
         if reply.get("error_code"):
             value = reply.get("value")
             reason = value.get("reason") if isinstance(value, dict) else None

@@ -81,9 +81,11 @@ export function createScriptServices(port: ScriptServicePort, readLine: (prompt:
     })
   }
 
-  async function request(args: Record<string, unknown>) {
+  /* このスクリプトが出した要求の ID。返事を待てるのはここにある要求だけ。 */
+  const issued = new Set<string>()
+
+  async function send(args: Record<string, unknown>) {
     const live = await open()
-    const timeoutMs = timeoutOf(args.timeout_ms)
     const operation = args.operation
     const payload = isRecord(args.payload) ? args.payload : {}
     let accepted: LiveRequest
@@ -93,8 +95,34 @@ export function createScriptServices(port: ScriptServicePort, readLine: (prompt:
       if (error instanceof ServiceError) throw error
       throw new ServiceError('REFUSED', error instanceof Error ? error.message : '要求を送れませんでした。')
     }
-    const reply = await replyFor(accepted.requestId, timeoutMs)
+    issued.add(accepted.requestId)
+    if (issued.size > MAX_BUFFERED_REPLIES) issued.delete(issued.values().next().value as string)
+    return { live, requestId: accepted.requestId }
+  }
+
+  async function awaitReply(live: LiveAttackConnection, requestId: string, timeoutMs: number) {
+    const reply = await replyFor(requestId, timeoutMs)
+    issued.delete(requestId)
     return { value: reply.value ?? null, error_code: reply.errorCode, world_time_us: live.worldTimeUs }
+  }
+
+  async function request(args: Record<string, unknown>) {
+    const { live, requestId } = await send(args)
+    return awaitReply(live, requestId, timeoutOf(args.timeout_ms))
+  }
+
+  /* 送るだけ。受理された要求の ID を返し、返事は reply で待つ（複数の要求を並べて送れる）。 */
+  async function issueOnly(args: Record<string, unknown>) {
+    const { requestId } = await send(args)
+    return { request_id: requestId }
+  }
+
+  async function reply(args: Record<string, unknown>) {
+    const requestId = args.request_id
+    if (typeof requestId !== 'string' || !issued.has(requestId)) {
+      throw new ServiceError('UNKNOWN_REQUEST', 'このスクリプトが出した要求ではありません。')
+    }
+    return awaitReply(await open(), requestId, timeoutOf(args.timeout_ms))
   }
 
   async function answer(args: Record<string, unknown>) {
@@ -134,6 +162,8 @@ export function createScriptServices(port: ScriptServicePort, readLine: (prompt:
           return { value: { environment_id: port.environmentId, world_time_us: live.worldTimeUs } }
         }
         if (method === 'request') return { value: await request(input) }
+        if (method === 'issue') return { value: await issueOnly(input) }
+        if (method === 'reply') return { value: await reply(input) }
         if (method === 'answer') return { value: await answer(input) }
         if (method === 'close') { closeConnection(); return { value: {} } }
         if (method === 'stdin') {
