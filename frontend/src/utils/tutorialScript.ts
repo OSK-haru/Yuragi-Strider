@@ -5,12 +5,14 @@
  * 「何が起きるか」と「画面のどこを見るか」だけを言う。
  * 専門語は初出でかならず言い換えを添える。
  *
- * コースは2本。1本目で回路を組んで動かし、2本目で条件を変えて
- * 結果がどう濁るかを実験する。
+ * コースは3本。1本目で回路を組んで動かし、2本目で条件を変えて
+ * 結果がどう濁るかを実験する。3本目は攻撃シミュレーターで、Resetの漏れを
+ * 攻撃者の立場から確かめる（台本は tutorialResetChallenge.ts）。
  */
 
 import type { TutorialBeat, TutorialCourse, TutorialCourseId } from '../context/TutorialContextCore'
 import { TUTORIAL_LONG_DURATION_US, TUTORIAL_SHORT_T1_US } from './tutorialProgress'
+import { resetChallengeBeats } from './tutorialResetChallenge'
 
 /* ============================================================================
    コース1: はじめての量子回路
@@ -596,11 +598,20 @@ export const tutorialCourses: Record<TutorialCourseId, TutorialCourse> = {
     duration: '約3分',
     beats: noiseParameterBeats,
   },
+  'reset-challenge': {
+    id: 'reset-challenge',
+    title: 'Resetの漏れを突く',
+    summary:
+      '共有された量子コンピュータで、前の利用者の bit が Reset のあとにも残ることを、攻撃者の立場で確かめます。1 bit の課題を、判定ルールの提出まで通します。',
+    duration: '約8分',
+    beats: resetChallengeBeats,
+  },
 }
 
 export const tutorialCourseList: TutorialCourse[] = [
   tutorialCourses['first-circuit'],
   tutorialCourses['noise-parameters'],
+  tutorialCourses['reset-challenge'],
 ]
 
 export function tutorialChapterCount(course: TutorialCourse): number {

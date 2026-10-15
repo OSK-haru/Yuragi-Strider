@@ -42,6 +42,20 @@ export type TutorialCondition =
   | 'duration-extended'
   /* 時間を延ばした状態で実行し終えた。 */
   | 'long-run-finished'
+  /*
+   * 攻撃シミュレーター（Reset課題）。画面が報告する。
+   * 「〜-submitted」「〜-seen」「〜-answered」は出来事なので、コースを始めるたびに
+   * まっさらから数え直す。それ以外は、いま満たされているかを毎回報告する。
+   */
+  | 'attack-mode-challenge'
+  | 'attack-challenge-selected'
+  | 'attack-challenge-env'
+  | 'attack-measure-ready'
+  | 'attack-ref0-submitted'
+  | 'attack-ref1-submitted'
+  | 'attack-result-seen'
+  | 'attack-victim-submitted'
+  | 'attack-answered'
 
 export type TutorialBeat = {
   id: string
@@ -52,6 +66,8 @@ export type TutorialBeat = {
   route: NavigationRoute
   /* IDE画面での作業領域の表示。省略時は利用者の選んだ表示のまま。 */
   ideView?: 'circuit' | 'explorer'
+  /* 攻撃シミュレーターの画面（環境設定／攻撃者ワークスペース）。省略時は今のまま。 */
+  attackView?: 'setup' | 'workspace'
   mood: PetMood
   text: string
   /* 暗転から外して強調する要素の data-tutorial-anchor 値。 */
@@ -73,7 +89,7 @@ export type TutorialBeat = {
   opensPanel?: 'advanced-settings' | 'metric-timeline'
 }
 
-export type TutorialCourseId = 'first-circuit' | 'noise-parameters'
+export type TutorialCourseId = 'first-circuit' | 'noise-parameters' | 'reset-challenge'
 
 export type TutorialCourse = {
   id: TutorialCourseId

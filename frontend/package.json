@@ -14,7 +14,8 @@
     "validate:attack-live-page": "node src/validation/attackLivePage.test.mjs",
     "validate:attack-proxy": "node src/validation/attackWorkerProxy.test.mjs",
     "validate:attack-live-layout": "node src/validation/attackLiveTopologyLayout.test.mjs",
-    "validate:attack-script": "node src/validation/attackScriptRunner.test.mjs"
+    "validate:attack-script": "node src/validation/attackScriptRunner.test.mjs",
+    "validate:tutorial": "node src/validation/tutorialScript.test.mjs"
   },
   "dependencies": {
     "pyodide": "314.0.7",

@@ -4,6 +4,7 @@ import { IdeViewToggles, IdeWorkbench } from '../components/IdeWorkbench'
 import { useIdeLayout } from '../hooks/useIdeLayout'
 import { createAttackEnvironmentClient } from '../clients/attackLiveClient'
 import { useCircuitContext } from '../context/useCircuitContext'
+import { useTutorial } from '../context/useTutorial'
 import type { GateDurationDefaults } from '../types/simulation'
 import type { AttackEnvironmentClient, ChallengeEntry, DeviceSnapshotInitialValues, InterleaveReference, LiveReply, RegionSelectionCatalog, SettingFieldDescriptor, SettingValue, StandardInitialValues } from '../types/attackLive'
 import {
@@ -329,6 +330,9 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
   const [localWarning, setLocalWarning] = useState(false)
   const showNotice = (text: string, warning = false) => { setLocalNotice(text); setLocalWarning(warning) }
   const [tab, setTab] = useState<'setup' | 'workspace'>('setup')
+  /* 今の環境をどの課題プリセットで作ったか。チュートリアルが「案内する課題の環境か」を見分けるのに使う。 */
+  const [environmentPreset, setEnvironmentPreset] = useState<string | null>(null)
+  const tutorial = useTutorial()
   const [messagesTab, setMessagesTab] = useState<'terminal' | 'pending'>('terminal')
   const ideLayout = useIdeLayout('attack')
   const [setupCategory, setSetupCategory] = useState<SetupCategoryId>('mode')
@@ -399,6 +403,42 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
   )
   const submissionBundle = useMemo(() => assignMeasurementTargets(serviceBundle), [serviceBundle])
   const preflightIssues = useMemo(() => validateAttackProgramShape(submissionBundle), [submissionBundle])
+
+  /*
+   * チュートリアル（Reset課題）への報告。いま満たされているかを毎回伝える。
+   * コースの開始（isActive）でも伝え直すので、始める前から満たしていても取りこぼさない。
+   */
+  const { reportCondition: reportTutorial, isActive: tutorialActive } = tutorial
+  const selectedChallengeId = selection?.mode === 'challenge' ? selection.challengeId : null
+  useEffect(() => {
+    reportTutorial('attack-mode-challenge', selection?.mode === 'challenge')
+    reportTutorial('attack-challenge-selected', selectedChallengeId === 'reset-leakage')
+    reportTutorial('attack-challenge-env', state.environment?.mode === 'challenge' && environmentPreset === 'reset-leakage')
+    reportTutorial('attack-measure-ready', state.environment !== null && preflightIssues.length === 0)
+  }, [reportTutorial, tutorialActive, selection?.mode, selectedChallengeId, state.environment, environmentPreset, preflightIssues.length])
+
+  /* 結果の公開は出来事なので、コース開始時点の数を基準にして、増えたときだけ報告する。 */
+  const resultReplies = state.replies.filter((reply) => typeof reply.value === 'object' && reply.value !== null && 'counts' in reply.value).length
+  const resultBaseline = useRef<number | null>(null)
+  useEffect(() => {
+    if (!tutorialActive) { resultBaseline.current = null; return }
+    if (resultBaseline.current === null) { resultBaseline.current = resultReplies; return }
+    if (resultReplies > resultBaseline.current) reportTutorial('attack-result-seen', true)
+  }, [tutorialActive, resultReplies, reportTutorial])
+
+  /*
+   * ビートが指す画面（環境設定／ワークスペース）へ、ビートが変わった瞬間だけ切り替える。
+   * effect で setState すると連鎖して描画し直すので、前のビートを覚えて描画中に判定する。
+   * 環境が無いのにワークスペースは開けない。
+   */
+  const tutorialBeat = tutorial.beat
+  const tutorialBeatId = tutorialBeat?.id ?? ''
+  const [seenTutorialBeat, setSeenTutorialBeat] = useState('')
+  if (seenTutorialBeat !== tutorialBeatId) {
+    setSeenTutorialBeat(tutorialBeatId)
+    const wanted = tutorialBeat?.attackView
+    if (wanted && !(wanted === 'workspace' && state.environment === null)) setTab(wanted)
+  }
   const changedFieldCounts = countChangedSettings(visibleFields, values)
   const defaultRegions = standardSnapshot ? regionDefaults(standardSnapshot) : { shared: [], victim: [], attacker: [] }
   const changedItems: { category: SetupCategoryId; label: string; from: string; to: string }[] = []
@@ -513,6 +553,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
       await workspace.establish(request)
       if (workspace.getSnapshot().environment && !workspace.getSnapshot().replacement) {
         setJobId(''); setTab('workspace')
+        setEnvironmentPreset(selection.mode === 'challenge' ? selection.challengeId : null)
       }
     } catch (error) {
       showNotice(error instanceof Error ? error.message : '設定を確認してください。', true)
@@ -536,6 +577,11 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
       `  測定先: ${describeMeasurementTargets(bundle)}`,
       ...(interleave ? [`  各 shot の前に ${interleave === 'victim' ? '他の利用者' : `参照ラベル ${interleave.slice(-1)} の利用者`}のジョブが実行され、サービスのResetを挟んで測定します。`] : []))
     await workspace.submit({ deviceId, shots: count, initialization: mode, circuitConfig: bundle, ...(interleave ? { interleave } : {}) })
+    /* チュートリアルへ「受け付けられた観測」を知らせる（拒否されたときの警告は数えない）。 */
+    if (interleave && !workspace.getSnapshot().noticeWarning) {
+      tutorial.reportCondition(interleave === 'training:0' ? 'attack-ref0-submitted'
+        : interleave === 'training:1' ? 'attack-ref1-submitted' : 'attack-victim-submitted', true)
+    }
   }
   async function runScript(file: string, argv: string[]) {
     if (scriptUnavailable) { print('error', scriptUnavailable); return }
@@ -591,6 +637,8 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
       print('output', 'message' in command.submission ? 'メッセージを提出します。'
         : '判定規則を提出します。見えないケースの観測に数秒かかることがあります。')
       await workspace.submitAnswer(command.submission)
+      const answered = workspace.getSnapshot()
+      if (!answered.noticeWarning && /^提出 \d+回目/.test(answered.notice)) tutorial.reportCondition('attack-answered', true)
     }
     if (!connected && command.kind !== 'answer') { print('error', '接続されていません。connect で接続してください。'); return }
     if (command.kind === 'submit') await submit(command)
@@ -645,10 +693,12 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
     </header>
     <div className="ide__toolbar" role="toolbar" aria-label="操作">
       {currentTab === 'setup'
-        ? <button type="button" disabled={busy || !selection || !challengeAvailable} aria-describedby="attack-next-step" onClick={() => void establish()}>
+        ? <button type="button" disabled={busy || !selection || !challengeAvailable} aria-describedby="attack-next-step" data-tutorial-anchor="attack-create-button" onClick={() => void establish()}>
           {state.environment ? '今の設定で作り直す' : '環境を作成'}</button>
         : null}
       {state.environment && <button type="button" className="ide__danger" disabled={busy} onClick={() => void workspace.discard()}>環境を破棄</button>}
+      <button type="button" disabled={tutorial.isActive} title="1 bit課題を、判定ルールの提出まで案内します（約8分）"
+        onClick={() => tutorial.start('reset-challenge')}>Reset課題のチュートリアル</button>
       <span id="attack-next-step" className={state.environment ? 'ide__toolbar-note' : 'ide__toolbar-note ide__toolbar-note--next'}>{
         state.environment ? '環境成立 · 前提設定は固定されています。'
           : !selection ? 'まず「モード」でモードを選んでください。選ぶと「環境を作成」が押せます。'
@@ -661,7 +711,8 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
     })()}
     <IdeWorkbench
       controls={ideLayout}
-      forceVisible={{ messages: currentTab === 'setup' && errorEntries.length > 0 }}
+      forceVisible={{ messages: (currentTab === 'setup' && errorEntries.length > 0)
+        || (tutorial.course?.id === 'reset-challenge' && currentTab === 'workspace') }}
       navigator={(
         <aside className="ide__pane ide__navigator" aria-label="ナビゲーター">
           <h2 className="ide__pane-title">{currentTab === 'setup' ? '環境設定' : '環境'}</h2>
@@ -748,7 +799,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
               {catalog && <>
               {setupCategory === 'mode' && <section className="attack-live__panel" aria-label="モード設定">
                 <h2>モード</h2><AttackModeNotice />
-                <div className="attack-live__modes">
+                <div className="attack-live__modes" data-tutorial-anchor="attack-mode-cards">
                   <button disabled={locked} aria-pressed={selection?.mode === 'free'} onClick={() => {
                     const mode = availableNoiseModes(catalog).find((candidate) => candidate.id === 'calibration_values')
                       ?? availableNoiseModes(catalog)[0]
@@ -759,6 +810,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
                 </div>
                 {selection?.mode === 'challenge' && <div className="attack-live__challenge-list"><h3>課題を選ぶ</h3>
                   {catalog.challenges.map((challenge) => <article key={challenge.id} aria-label={challenge.title}
+                    data-tutorial-anchor={`attack-challenge-${challenge.id}`}
                     className={selection.challengeId === challenge.id ? 'attack-live__challenge is-selected' : 'attack-live__challenge'}>
                     <h4>{challenge.title}{!challenge.available && ' · 準備中'}</h4>
                     {/* 長い説明は、文ごとに分けて1行ずつ読めるようにする。 */}
@@ -854,7 +906,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
               </>}
             </>}
             {currentTab === 'workspace' && state.environment && editorView === 'circuit'
-              && <div id="attack-circuit-editor"><AttackCircuitEditor gateDurationDefaults={gateDurationDefaults}
+              && <div id="attack-circuit-editor" data-tutorial-anchor="attack-circuit-editor"><AttackCircuitEditor gateDurationDefaults={gateDurationDefaults}
                 maximumLogicalQubits={state.maxProgramQubits ?? undefined} /></div>}
             {currentTab === 'workspace' && state.environment && editorView === 'script'
               && (scriptFiles ? <AttackScriptEditor value={scriptFiles} onChange={changeScriptFiles} running={scriptRunning}
@@ -878,7 +930,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
                 ? errorEntries.map(([fieldPath, message]) => <pre key={fieldPath} className="attack-live__terminal-error">ERROR: {visibleFields.find((field) => field.path === fieldPath)?.label ?? fieldPath}: {message}</pre>)
                 : <pre>入力エラーはありません。</pre>}
             </div>}
-            {currentTab === 'workspace' && messagesView === 'terminal' && <section className="attack-live__terminal" aria-label="攻撃者ターミナル">
+            {currentTab === 'workspace' && messagesView === 'terminal' && <section className="attack-live__terminal" aria-label="攻撃者ターミナル" data-tutorial-anchor="attack-terminal">
               <div ref={terminalLogRef} className="ide__terminal-log" role="log" aria-label="コマンドの実行結果とreply" aria-live="polite">
                 {preflightIssues.length
                   ? <>{preflightIssues.map((issue, index) => <pre key={`${issue.code}-${index}`} className="ide__terminal-hint ide__terminal-issue">送信前の確認: {issue.message}</pre>)}

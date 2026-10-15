@@ -22,6 +22,15 @@ const emptyConditions: Record<TutorialCondition, boolean> = {
   'short-t1-run-finished': false,
   'duration-extended': false,
   'long-run-finished': false,
+  'attack-mode-challenge': false,
+  'attack-challenge-selected': false,
+  'attack-challenge-env': false,
+  'attack-measure-ready': false,
+  'attack-ref0-submitted': false,
+  'attack-ref1-submitted': false,
+  'attack-result-seen': false,
+  'attack-victim-submitted': false,
+  'attack-answered': false,
 }
 
 type TutorialProviderProps = {
@@ -51,7 +60,9 @@ function readCompletedCourses(): TutorialCourseId[] {
 
   return stored
     .split(',')
-    .filter((id): id is TutorialCourseId => id === 'first-circuit' || id === 'noise-parameters')
+    .filter((id): id is TutorialCourseId => (
+      id === 'first-circuit' || id === 'noise-parameters' || id === 'reset-challenge'
+    ))
 }
 
 export function TutorialProvider({ currentRoute, onNavigate, children }: TutorialProviderProps) {

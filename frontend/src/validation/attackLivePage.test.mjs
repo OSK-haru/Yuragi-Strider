@@ -452,6 +452,7 @@ checks.push('host timeout leaves virtual time unchanged, releases UI busy state 
 
 const { CircuitProvider } = load('context/CircuitContext.tsx')
 const { AdminModeContext } = load('context/AdminModeContextCore.ts')
+const { TutorialProvider } = load('context/TutorialContext.tsx')
 const { AttackLivePage, AttackSnapshotInfo, AttackUnusableQubits, AttackQpuTopology, AttackModeNotice, AttackCredentialInfo } = load('pages/AttackLivePage.tsx')
 check('mode note renders beside mode selection and matches the docs opening', () => {
   const modeNote = '※この画面の量子コンピューター・被害者・サービスは、すべてこのPCの中の仮想環境です。実機やクラウドサービスには一切接続しません。'
@@ -565,8 +566,18 @@ check('Kingston graph renders all fixed-position qubits and snapshot edges with 
 })
 const html = renderToStaticMarkup(React.createElement(AdminModeContext.Provider,
   { value: { adminModeEnabled: false, internalInfoVisible: false, setAdminModeEnabled() {} } },
-  React.createElement(CircuitProvider, { gateDurationDefaults: {}, keyboardEnabled: false, minimumLogicalQubits: 1 },
-    React.createElement(AttackLivePage, { gateDurationDefaults: {}, active: false }))))
+  React.createElement(TutorialProvider, { currentRoute: 'attack-simulator', onNavigate() {} },
+    React.createElement(CircuitProvider, { gateDurationDefaults: {}, keyboardEnabled: false, minimumLogicalQubits: 1 },
+      React.createElement(AttackLivePage, { gateDurationDefaults: {}, active: false })))))
+check('the attack page offers the Reset tutorial and marks the parts the course points at', () => {
+  assert.ok(html.includes('Reset課題のチュートリアル'))
+  assert.ok(html.includes('data-tutorial-anchor="attack-create-button"'))
+  /* モードのカードは設定目録を取得してから出るので、最初の描画ではなくソースで確かめる。 */
+  for (const anchor of ['attack-mode-cards', 'attack-circuit-editor', 'attack-terminal']) {
+    assert.ok(livePageSource.includes(`data-tutorial-anchor="${anchor}"`), anchor)
+  }
+  assert.ok(livePageSource.includes('data-tutorial-anchor={`attack-challenge-${challenge.id}`}'))
+})
 check('real React initial render: no fabricated environment, clock, counts, or credential input', () => {
   assert.ok(html.includes('モードを選んでください'))
   assert.ok(!html.includes('世界時刻'))
