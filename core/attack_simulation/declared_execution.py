@@ -385,6 +385,7 @@ class DeclaredQpuExecutor:
         duration += measurement_duration * len({
             i.time_group for i in op.instructions if i.kind == "measure"})
         duration *= op.shots
+        duration += config.repetition_delay_us * (op.shots - 1)
         if snapshot.owner_tenant_id is not None and snapshot.owner_tenant_id != job.command.tenant_id:
             if not dedicated:
                 duration += config.reset_duration_us
@@ -407,6 +408,7 @@ class DeclaredQpuExecutor:
             regional_reset_models=self.runtime.regional_reset_models if self.runtime.tenant_regions else None,
             regional_idle_models=self.runtime.regional_idle_models if self.runtime.tenant_regions else None,
             regional_service_durations=self.runtime.regional_service_durations if self.runtime.tenant_regions else None,
+            idle_model=self.runtime.idle_model,
         )
         detached._job_authorization = self.runtime.job_authorization
         return detached

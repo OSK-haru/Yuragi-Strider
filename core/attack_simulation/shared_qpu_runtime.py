@@ -63,6 +63,8 @@ class SharedQpuRuntimeConfig:
     isolated_assignment_duration_us: float = 0.0
     resource_binding: ResetResourceBinding | None = None
     program_measurement_duration_us: float = 1.0
+    # Declared wait between consecutive shots of one Program; 0 means no gap.
+    repetition_delay_us: float = 0.0
     max_local_qubits: int = 8
     max_execution_work: int = 536870912
 
@@ -84,6 +86,7 @@ class SharedQpuRuntimeConfig:
             "placement_policy": self.placement_policy.value,
             "isolated_assignment_duration_us": self.isolated_assignment_duration_us,
             "program_measurement_duration_us": self.program_measurement_duration_us,
+            "repetition_delay_us": self.repetition_delay_us,
             "resource_binding": None if binding is None else {
                 "victim": {"qpu_id": binding.victim.qpu_id,
                            "physical_qubit_id": binding.victim.physical_qubit_id},
@@ -124,6 +127,7 @@ class SharedQpuRuntimeConfig:
             "attacker_measurement_duration_us",
             "isolated_assignment_duration_us",
             "program_measurement_duration_us",
+            "repetition_delay_us",
         ):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value < 0.0:
@@ -172,6 +176,7 @@ class SharedQpuRuntime:
         regional_reset_models: Mapping[tuple[int, ...], ResetModelRegistry] | None = None,
         regional_idle_models: Mapping[tuple[int, ...], IndependentIdleModel] | None = None,
         regional_service_durations: Mapping[tuple[int, ...], tuple[float, float]] | None = None,
+        idle_model: IndependentIdleModel | None = None,
     ) -> None:
         snapshot = state_store.read()
         if snapshot.local_dimension != 2 or len(snapshot.physical_qubit_ids) > config.max_local_qubits:
@@ -200,6 +205,12 @@ class SharedQpuRuntime:
         elif any(value is not None for value in (
                 tenant_regions, regional_reset_models, regional_idle_models, regional_service_durations)):
             raise ValueError("regional profiles require dedicated placement")
+        if idle_model is not None and (
+                type(idle_model) is not IndependentIdleModel
+                or len(idle_model.qubits) != len(snapshot.physical_qubit_ids)):
+            raise ValueError("idle model must be a complete IndependentIdleModel for the local register")
+        if config.repetition_delay_us > 0.0 and not dedicated and idle_model is None:
+            raise ValueError("a positive repetition delay requires an explicit complete idle model")
         if config.resource_binding is not None:
             binding = config.resource_binding
             if binding.victim.qpu_id != binding.attacker.qpu_id:
@@ -214,6 +225,7 @@ class SharedQpuRuntime:
         self.regional_reset_models = dict(regional_reset_models or {})
         self.regional_idle_models = dict(regional_idle_models or {})
         self.regional_service_durations = dict(regional_service_durations or {})
+        self.idle_model = idle_model
         self.scheduler = scheduler or FifoJobScheduler()
         reset_model = self.reset_models.get(config.reset_model_id)
         if reset_model.configuration_id != config.reset_model_configuration_id:
@@ -463,9 +475,14 @@ class SharedQpuRuntime:
         classical_targets = tuple(c for i in measurements for c in i.classical_targets)
         measured_slots = tuple(slots[q] for q in measured_qubits)
         measurement_duration = self._active_service_durations()[1] * len({i.time_group for i in measurements})
-        for _ in range(operation.shots):
+        for shot_index in range(operation.shots):
             state = np.asarray(self.state_store.read().density_matrix, dtype=complex)
             duration = 0.0
+            if shot_index and self.config.repetition_delay_us > 0.0:
+                # The declared wait between shots relaxes the inherited state before the next shot.
+                state = np.asarray(self._active_idle_model().evolve(
+                    state, elapsed_us=self.config.repetition_delay_us), dtype=complex)
+                duration += self.config.repetition_delay_us
             assignment: dict[int, tuple[float, float]] = {}
             if operation.initialization == "inherit":
                 errors = register_assignment_errors(
@@ -515,6 +532,11 @@ class SharedQpuRuntime:
             label = "".join(str(bit) for bit in classical)
             counts[label] = counts.get(label, 0) + 1
         return {"shots": operation.shots, "counts": counts}
+
+    def _active_idle_model(self) -> IndependentIdleModel:
+        if self.tenant_regions:
+            return self.regional_idle_models[self.state_store.read().physical_qubit_ids]
+        return self.idle_model
 
     def _service_reset(self, job: JobRecord) -> ResetModelResult | RegisterResetResult:
         snapshot = self.state_store.read()
@@ -644,6 +666,8 @@ class SharedQpuRuntime:
         if (self.config.placement_policy is not PlacementPolicy.GUARANTEED_SAME_PHYSICAL_QUBIT
                 or self.tenant_regions or self.config.resource_binding is not None):
             raise ValueError("interleaved runs require the shared same-region placement")
+        if self.config.repetition_delay_us > 0.0:
+            raise ValueError("interleaved runs do not define a repetition delay")
         roles = self._job_authorization.tenant_roles if self._job_authorization else {}
         if roles.get(victim.tenant_id) != "victim" or roles.get(command.tenant_id) != "attacker":
             raise PermissionError("interleaving pairs the scenario victim with the requesting attacker")

@@ -80,6 +80,7 @@ def compiled_job_duration(
         if instruction.kind == "measure"
     })
     duration *= operation.shots
+    duration += runtime_config.repetition_delay_us * (operation.shots - 1)
     if previous_tenant_id is not None and previous_tenant_id != job.command.tenant_id:
         duration += runtime_config.reset_duration_us
     return _duration(duration, "compiled job duration")
