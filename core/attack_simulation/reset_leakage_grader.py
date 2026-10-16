@@ -1,17 +1,12 @@
-"""Aggregate-only hidden grading for the reset-leakage scenario."""
+"""Binary-observation types and the hidden-evaluation policy for the reset-leakage challenge."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 import math
-import random
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
-
-from core.attack_simulation.reset_leakage_scenario import (
-    ResetLeakageScenarioOrchestrator,
-)
 
 
 @dataclass(frozen=True)
@@ -150,77 +145,6 @@ class HiddenEvaluationResult:
 
 class EstimatorExecutionError(RuntimeError):
     """Generic failure that does not reveal a hidden case or observation."""
-
-
-class ResetLeakageHiddenGrader:
-    """Runs shuffled hidden cases and exposes only aggregate grading output."""
-
-    def __init__(
-        self,
-        *,
-        orchestrator: ResetLeakageScenarioOrchestrator,
-        policy: HiddenEvaluationPolicy,
-    ) -> None:
-        self.orchestrator = orchestrator
-        self.policy = policy
-        if policy.shots_per_case > (
-            orchestrator.observation_budget.shots_per_query
-        ):
-            raise ValueError(
-                "hidden evaluation shots exceed the scenario shot limit"
-            )
-
-    def grade(self, estimator: BinaryVictimEstimator) -> HiddenEvaluationResult:
-        if not isinstance(estimator, BinaryVictimEstimator):
-            raise TypeError("estimator must satisfy BinaryVictimEstimator")
-        estimator_id = _identifier(estimator.estimator_id, "estimator_id")
-        estimator_version = _identifier(
-            estimator.estimator_version,
-            "estimator_version",
-        )
-        victim_bits = [0] * self.policy.zero_case_count
-        victim_bits.extend(
-            [1] * (self.policy.case_count - self.policy.zero_case_count)
-        )
-        random.Random(self.policy.case_order_seed).shuffle(victim_bits)
-        measurement_rng = random.Random(self.policy.measurement_seed)
-
-        correct = 0
-        for victim_bit in victim_bits:
-            case = self.orchestrator._run_hidden_evaluation_case(
-                victim_bit=victim_bit,
-                shots=self.policy.shots_per_case,
-                measurement_seeds=tuple(
-                    measurement_rng.getrandbits(32)
-                    for _ in range(self.policy.shots_per_case)
-                ),
-            )
-            observation = BinaryObservation(
-                shots=case.shots,
-                counts=case.counts,
-            )
-            try:
-                prediction = int(estimator.predict(observation))
-            except Exception as error:
-                raise EstimatorExecutionError(
-                    "estimator failed during hidden evaluation"
-                ) from error
-            if prediction not in (0, 1):
-                raise EstimatorExecutionError(
-                    "estimator returned an invalid binary prediction"
-                )
-            correct += int(prediction == victim_bit)
-
-        return HiddenEvaluationResult(
-            policy_id=self.policy.policy_id,
-            policy_version=self.policy.policy_version,
-            estimator_id=estimator_id,
-            estimator_version=estimator_version,
-            case_count=self.policy.case_count,
-            correct_count=correct,
-            accuracy=correct / self.policy.case_count,
-            passed=correct >= self.policy.required_correct,
-        )
 
 
 def _identifier(value: str, name: str) -> str:

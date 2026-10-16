@@ -5,9 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from core.attack_simulation.reset_leakage_acceptance import (
-    ResetLeakageAcceptancePolicy,
-)
 from core.attack_simulation.reset_leakage_grader import HiddenEvaluationPolicy
 from core.attack_simulation.scenario_policy import ObservationBudget
 from core.experimental_isolation_physics import (
@@ -41,10 +38,6 @@ class ResetLeakageV0Settings:
     hidden_case_count: int = 20
     hidden_zero_case_count: int = 10
     hidden_required_correct: int = 16
-    minimum_candidate_information_bits: float = 0.45
-    minimum_candidate_advantage: float = 0.30
-    maximum_control_information_bits: float = 1e-9
-    maximum_control_advantage: float = 1e-9
 
     def __post_init__(self) -> None:
         for name in ("profile_id", "profile_version", "scope", "source"):
@@ -61,15 +54,6 @@ class ResetLeakageV0Settings:
             "observed_zero_given_one",
         ):
             _probability(getattr(self, name), name)
-        for name in (
-            "minimum_candidate_information_bits",
-            "minimum_candidate_advantage",
-            "maximum_control_information_bits",
-            "maximum_control_advantage",
-        ):
-            value = float(getattr(self, name))
-            if not math.isfinite(value) or value < 0.0:
-                raise ValueError(f"{name} must be finite and non-negative")
         if int(self.reset_count) < 0:
             raise ValueError("reset_count must be non-negative")
         if int(self.shots_per_case) < 1:
@@ -95,7 +79,6 @@ class ResetLeakageV0Settings:
         )
         if int(self.hidden_required_correct) <= constant_best:
             raise ValueError("a constant estimator must not pass")
-        self.acceptance_policy()
 
     def build_reset_model(self) -> PhenomenologicalResetModel:
         """Build the reset-only behavioral model approved for this challenge."""
@@ -167,31 +150,7 @@ class ResetLeakageV0Settings:
             measurement_seed=measurement_seed,
         )
 
-    def acceptance_policy(
-        self,
-        *,
-        shots_per_case: int | None = None,
-    ) -> ResetLeakageAcceptancePolicy:
-        """Build the deterministic calibration acceptance policy."""
 
-        resolved_shots = (
-            self.shots_per_case
-            if shots_per_case is None
-            else int(shots_per_case)
-        )
-        return ResetLeakageAcceptancePolicy(
-            policy_id="reset_leakage_v0_acceptance",
-            policy_version=self.profile_version,
-            shots_per_case=resolved_shots,
-            minimum_candidate_information_bits=(
-                self.minimum_candidate_information_bits
-            ),
-            minimum_candidate_advantage=self.minimum_candidate_advantage,
-            maximum_control_information_bits=(
-                self.maximum_control_information_bits
-            ),
-            maximum_control_advantage=self.maximum_control_advantage,
-        )
 def _probability(value: float, name: str) -> float:
     converted = float(value)
     if not math.isfinite(converted) or converted < 0.0 or converted > 1.0:

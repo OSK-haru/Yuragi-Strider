@@ -10,7 +10,6 @@ from core.attack_simulation import (
     ExecutionRegime,
     InMemoryScenarioManifestStore,
     ObservationBudget,
-    ResetLeakageRuntimePlan,
     ScenarioCompilationError,
     ScenarioCompiler,
     ScenarioConstraintViolation,
@@ -22,7 +21,8 @@ from core.attack_simulation import (
     ScenarioTemplate,
 )
 from core.attack_simulation.config_limits import MAX_CONFIG_BYTES, MAX_CONFIG_NODES
-from core.attack_simulation.attack_path import (
+from core.attack_simulation.attack_path import AttackPathDeclaration
+from core.attack_simulation.reset_leakage_path import (
     RESET_LEAKAGE_MECHANISM,
     reset_leakage_attack_path_config,
 )
@@ -77,14 +77,6 @@ class ScenarioCompilerTests(unittest.TestCase):
         # changing preset editability must never retain the old content hash.
         self.assertEqual(manifest.manifest_id,
                          "sha256:0552266d5e1aa32c28abd1256fa1a059bf930a1f1969bea2322385c4056d5587")
-
-    def test_reset_runtime_rejects_missing_budget_before_physics_resolution(self) -> None:
-        session = _session()
-        manifest = ScenarioCompiler().compile(replace(
-            session, policy=replace(session.policy, observation_budget=None),
-        ))
-        with self.assertRaisesRegex(ValueError, "requires an explicit observation budget"):
-            ResetLeakageRuntimePlan.from_manifest(manifest)
 
     def test_direct_manifest_rejects_untyped_budget(self) -> None:
         with self.assertRaises(TypeError):
@@ -295,107 +287,22 @@ class ScenarioCompilerTests(unittest.TestCase):
             rejecting.compile(_session())
         self.assertIn("reject-test", str(raised.exception))
 
-    def test_reset_runtime_plan_contains_only_hot_path_values(self) -> None:
-        manifest = ScenarioCompiler().compile(_session())
-
-        plan = ResetLeakageRuntimePlan.from_manifest(manifest)
-
-        self.assertEqual(plan.manifest_id, manifest.manifest_id)
-        self.assertIs(plan.execution_regime, ExecutionRegime.NISQ_PHYSICAL)
-        self.assertTrue(plan.access_config.labeled_training_enabled)
-        self.assertEqual(
-            plan.reset_model_id,
-            "phenomenological_imperfect_reset",
-        )
-        self.assertEqual(
-            plan.reset_model_configuration_id,
-            "test-reset-config-v1",
-        )
-        self.assertFalse(hasattr(plan, "attacker_config"))
-        self.assertFalse(hasattr(plan, "assumptions"))
-
-    def test_unsupported_placement_is_rejected_before_runtime(self) -> None:
-        manifest = ScenarioCompiler().compile(_session(
-            placement_policy="scheduler_dependent",
-        ))
-
-        with self.assertRaises(ValueError):
-            ResetLeakageRuntimePlan.from_manifest(manifest)
-
-    def test_reset_path_must_be_declared_and_supported_before_runtime(self) -> None:
+    def test_attack_path_must_be_declared_and_supported(self) -> None:
         baseline = ScenarioCompiler().compile(_session())
         missing = dict(baseline.relation_config)
         missing.pop("attack_path")
         with self.assertRaisesRegex(ValueError, "relation_config.attack_path"):
-            ResetLeakageRuntimePlan.from_manifest(replace(
+            AttackPathDeclaration.from_manifest(replace(
                 baseline, relation_config=missing, manifest_id="",
             ))
 
         unsupported = dict(baseline.qpu_service_config)
         unsupported["supported_attack_mechanisms"] = []
         with self.assertRaisesRegex(ValueError, "not supported by the service"):
-            ResetLeakageRuntimePlan.from_manifest(replace(
+            AttackPathDeclaration.from_manifest(replace(
                 baseline, qpu_service_config=unsupported, manifest_id="",
             ))
 
-        wrong_resource = dict(baseline.relation_config)
-        wrong_resource["attack_path"] = {
-            **reset_leakage_attack_path_config(),
-            "shared_resource": "separate_qpus",
-        }
-        with self.assertRaisesRegex(ValueError, "not supported by the reset-leakage runtime"):
-            ResetLeakageRuntimePlan.from_manifest(replace(
-                baseline, relation_config=wrong_resource, manifest_id="",
-            ))
-
-    def test_reset_resource_binding_rejects_mismatched_placements(self) -> None:
-        baseline = ScenarioCompiler().compile(_session())
-        for binding, message in (
-            (reset_resource_binding_config("qpu-1", attacker_qubit_id=1),
-             "identical resource IDs"),
-            (reset_resource_binding_config("qpu-1", attacker_qubit_id=99),
-             "absent from service inventory"),
-            ({"victim": {"qpu_id": "qpu-1", "physical_qubit_id": 0},
-              "attacker": {"qpu_id": "qpu-2", "physical_qubit_id": 0}},
-             "only one QPU"),
-        ):
-            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
-                ResetLeakageRuntimePlan.from_manifest(replace(
-                    baseline,
-                    relation_config={**baseline.relation_config, "resource_binding": binding},
-                    manifest_id="",
-                ))
-
-        isolated = ScenarioCompiler().compile(_session(
-            placement_policy="isolated_physical_resource",
-        ))
-        with self.assertRaisesRegex(ValueError, "distinct physical qubit IDs"):
-            ResetLeakageRuntimePlan.from_manifest(replace(
-                isolated,
-                relation_config={**isolated.relation_config,
-                                 "resource_binding": reset_resource_binding_config("qpu-1")},
-                manifest_id="",
-            ))
-
-    def test_ftqc_profile_compiles_but_is_rejected_by_nisq_reset_runtime(self) -> None:
-        manifest = ScenarioCompiler().compile(_session(
-            execution_regime="fault_tolerant_logical",
-        ))
-
-        self.assertEqual(
-            manifest.resolve_path("qpu_service.execution_regime"),
-            "fault_tolerant_logical",
-        )
-        with self.assertRaisesRegex(ValueError, "nisq_physical"):
-            ResetLeakageRuntimePlan.from_manifest(manifest)
-
-    def test_effective_observation_model_cannot_enter_stateful_runtime(self) -> None:
-        manifest = ScenarioCompiler().compile(_session(
-            reset_model_mode="effective_observation_only",
-        ))
-
-        with self.assertRaisesRegex(ValueError, "state_transition_with_readout"):
-            ResetLeakageRuntimePlan.from_manifest(manifest)
 
     def test_free_override_creates_a_new_manifest_without_mutating_template(self) -> None:
         session = _session(mode=ScenarioMode.FREE)
@@ -494,13 +401,6 @@ class ScenarioCompilerTests(unittest.TestCase):
         with self.assertRaises(ScenarioCompilationError):
             ScenarioCompiler().compile(invalid)
 
-    def test_labeled_training_requires_an_experiment_label_source(self) -> None:
-        manifest = ScenarioCompiler().compile(_session(
-            include_label_source=False,
-        ))
-
-        with self.assertRaises(ValueError):
-            ResetLeakageRuntimePlan.from_manifest(manifest)
 
 
 @dataclass

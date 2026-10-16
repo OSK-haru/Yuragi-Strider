@@ -17,6 +17,7 @@
 物理モデルがパルスを扱うことと、攻撃者にパルス指定を許すことも別である。
 攻撃者・被害者は同一service profile内で同じ主体非依存の操作catalogを使い、実効能力をservice能力、ActorPolicy、ScenarioPolicyの積集合として解決する。詳細は[共通操作・観測・校正契約](common-command-observation-contract.md)を参照。
 疑似terminalは通常tenantのSDK／CLI／REST clientを表し、QPUや制御装置へのshell accessを表さない。
+本節の権限は環境設定時の仮定として固定され、過程で変わるのはサービス状態から導かれる操作可能範囲だけで、攻撃者へ権限が与えられることはない。基盤の機能境界も仮定では変えない。詳細は[仮定・過程変化・不変の基盤](assumption-process-model.md)（D74）。
 
 ## 2. 攻撃目的・能力・成立機構の三軸
 

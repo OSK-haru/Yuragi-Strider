@@ -12,9 +12,6 @@
 .attack-live__setup-categories button { flex: 1 0 150px; min-width: 0; padding: 10px 12px; text-align: left; }
 .attack-live__setup-categories button[aria-pressed=true] { box-shadow: inset 0 -3px var(--tt-interact); }
 .attack-live__setup-categories small { white-space: nowrap; font-size: .68rem; }
-.attack-live__basis { margin-top: 8px; font-size: .78rem; }
-.attack-live__basis summary { display: inline-block; padding: 2px 0; }
-.attack-live__basis small { margin-top: 4px; }
 .attack-live__changes { padding-left: 22px; }
 .attack-live__changes li { padding: 8px 0; border-bottom: 1px solid var(--tt-rule-mid); }
 .attack-live__changes li small { margin-top: 3px; }

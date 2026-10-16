@@ -80,7 +80,7 @@
 python scripts/calibrate_reset_leakage_policy.py --success-probabilities 0.80 0.90 0.95 0.98 --target-excited-population 0.02 --observed-one-given-zero 0.02 --observed-zero-given-one 0.04 --shots 8 16 32 64 --case-count 20 --zero-case-count 10 --required-correct 14 15 16 17 18 --generated-at-utc 2026-09-28T00:00:00+00:00
 ```
 
-内部grader benchmark:
+内部grader benchmark（2026-10-16: 対象のorchestratorと`scripts/benchmark_reset_leakage_grader.py`は削除済み。以下は当時の記録）:
 
 ```powershell
 python scripts/benchmark_reset_leakage_grader.py --success-probability 0.90 --target-excited-population 0.02 --observed-one-given-zero 0.02 --observed-zero-given-one 0.04 --shots-per-case 32 --case-count 20 --zero-case-count 10 --required-correct 16 --repetitions 100 --seed 1000 --generated-at-utc 2026-09-28T00:00:00+00:00

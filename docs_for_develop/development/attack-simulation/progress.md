@@ -767,14 +767,14 @@ Reset・同時駆動クロストーク・相関Readoutを[三事例点検](local
 | 設定変更の成立前境界 | `ScenarioTemplate.free_override_fields`に自由modeの変更許可pathを集約。`ScenarioEnvironment`と`ScenarioCompiler`が未宣言の変更を拒否し、成立後の変更も拒否する。課題modeはpresetからの変更を拒否する。設定UI・永続profile registryは未実装 |
 | 単一QPU/FIFO内部runtime | `qpu_state.py`にrevision付き唯一状態・原子的event commit、`jobs.py`にFIFO・状態機械・tenant別冪等性・queued取消、`shared_qpu_runtime.py`に所有者変更時のservice Resetと被害者→攻撃者一sampleを実装 |
 | 共通コマンドclient・局所回路実行 | `api/attack_terminal.py`にdevice／program／job構文とactor別回路namespace、`circuit_program.py`に明示NISQ profileの最大8量子ビットcompilerを追加。配置・共同状態・bit列counts・領域別処理量へ一般化済み。HTTP／画面（desktop／development mount、WebSocket、IDE型端末）は接続済み。Reset既存runnerの主体非依存program移行と動的領域選択は未完了 |
-| Reset漏洩scenario orchestrator | `observation_budget.py`でsession単位のquery・retry・shot予算を原子的に予約し、`reset_leakage_scenario.py`で各shotの全物理系列、既知label学習、未知bit観測、再試行を実装 |
+| Reset漏洩scenario orchestrator | `observation_budget.py`でsession単位のquery・retry・shot予算を原子的に予約し、`reset_leakage_scenario.py`で各shotの全物理系列、既知label学習、未知bit観測、再試行を実装 **（2026-10-16削除: 製品経路は`SharedQpuRuntime`を通り、この単独経路は使われていなかった。[D74追記](decisions.md#d74-仮定過程変化不変の基盤を分ける合意2026-10-16)）** |
 | Reset漏洩hidden grader | `reset_leakage_grader.py`に明示的評価policy、二値推定器境界、hidden case実行、aggregate score・合否だけの結果を実装。Reset課題専用v0の件数・閾値は設定化済み。未信頼コードsandboxは未実装 |
 | Reset漏洩の利用者学習 | `reset_leakage_analysis.py`で公開training結果だけを受理し、両labelの集約頻度から閾値と方向を学習。内部真値へfallbackしない。labelごと10、合計20 queryのtraining予算を採用し、校正CLIと固定seedの内部E2E testへ接続 |
-| Reset課題instance preflight | `reset_leakage_preflight.py`でmanager-private seed bundleを上限付き探索。candidate合格、perfect Reset／isolated resource／定数推定器不合格を同じhidden policyで検査し、選定policyと結果をprivate report化。永続manifest格納は共通基盤側で未実装 |
+| Reset課題instance preflight | `reset_leakage_preflight.py`でmanager-private seed bundleを上限付き探索。candidate合格、perfect Reset／isolated resource／定数推定器不合格を同じhidden policyで検査し、選定policyと結果をprivate report化。永続manifest格納は共通基盤側で未実装 **（2026-10-16削除: 製品経路は`SharedQpuRuntime`を通り、この単独経路は使われていなかった。[D74追記](decisions.md#d74-仮定過程変化不変の基盤を分ける合意2026-10-16)）** |
 | Reset漏洩access設定 | `ResetLeakageAccessConfig`でラベル付き学習・未知被害者観測をAttackerConfigから読み、自由modeの切替と課題modeの固定を実行時に強制 |
 | Scenario compiler | `scenario_compiler.py`でRelation／Experimentを含む設定、仮定根拠、free override、Policyをcontent-addressed manifestへ解決。in-memory重複排除storeとconstraint hookを実装 |
 | Reset漏洩RuntimePlan | manifestからaccess、予算、配置policy、Reset model ID・modeだけを抽出。同一qubitとisolated resourceを実行し、scheduler-dependentは拒否。orchestratorはauthoring treeを保持せず、job／eventへmanifest IDを記録 |
-| Reset漏洩受入監査 | `reset_leakage_acceptance.py`で候補signal、perfect-reset／isolated対照、観測無効、定数推定器、hidden shot整合を明示閾値で判定。`scripts/audit_reset_leakage_acceptance.py`からJSON出力可能。Reset課題専用v0閾値を承認し、自動testへ接続 |
+| Reset漏洩受入監査 | `reset_leakage_acceptance.py`で候補signal、perfect-reset／isolated対照、観測無効、定数推定器、hidden shot整合を明示閾値で判定。`scripts/audit_reset_leakage_acceptance.py`からJSON出力可能。Reset課題専用v0閾値を承認し、自動testへ接続 **（2026-10-16削除: 製品経路は`SharedQpuRuntime`を通り、この単独経路は使われていなかった。[D74追記](decisions.md#d74-仮定過程変化不変の基盤を分ける合意2026-10-16)）** |
 | 既存UI | [frontend/src/App.tsx](../../../frontend/src/App.tsx) のGate-aware/Pulse領域に加え、[AttackLivePage.tsx](../../../frontend/src/pages/AttackLivePage.tsx)の攻撃IDE（分類タブ設定・コマンド端末・トポロジー／領域選択）を実装済み。desktop実画面での視覚確認は未実施 |
 
 既存交換結合や多準位モデルがあることを、残留ZZ攻撃モデルの完成とは扱わない。

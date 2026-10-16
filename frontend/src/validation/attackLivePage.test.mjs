@@ -503,7 +503,8 @@ check('setup categories expose change/error counts, show one category body, and 
   assert.match(livePageSource, /SETUP_CATEGORIES\.map\(\(\{ id, label \}\)/)
   assert.match(livePageSource, /setupCategory === 'review'[\s\S]*初期値から変更した項目/)
   assert.match(livePageSource, /setSetupCategory\(firstErrorCategory\(visibleFields, invalid\) \?\? 'review'\)/)
-  assert.match(livePageSource, /<details id=\{`\$\{id\}-basis`\} className="attack-live__basis"><summary>根拠<\/summary>/)
+  // The rationale of a setting belongs to the official documentation, never to the live screen.
+  assert.doesNotMatch(livePageSource, /attack-live__basis|<summary>根拠<\/summary>/)
 })
 check('virtual credential warning renders beside workspace environment details', () => {
   const noteHtml = renderToStaticMarkup(React.createElement(AttackCredentialInfo))

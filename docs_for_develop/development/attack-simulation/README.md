@@ -35,6 +35,7 @@
 | [有限sourceの共通時間・実行接続](parallel/closed-workload-world-handoff.md) | clock／window／安全seal／結果公開の自動生成、両mode共通進行、応答喪失修正とlive HTTPの残件 |
 | [live受付・投影・実所有の引継ぎ](parallel/live-ingress-boundaries-handoff.md) | D59/D60・共通live実行器、host_clock限定pump、暫定HTTP request_id/pollingとWebSocket置換境界 |
 | [仮定・設定・根拠の取扱契約](assumption-handling-contract.md) | 主体・関係・実験への仮定分類、profileとoverride、根拠、可視性、整合性検査 |
+| [仮定・過程変化・不変の基盤](assumption-process-model.md) | 攻撃の定義、仮定・過程変化・基盤の三層、自由／課題モードの関係、クロストーク課題への適用案 |
 | [決定事項](decisions.md) | ユーザーとの合意、具体化案、以前の案からの変更 |
 | [構造と境界](architecture.md) | ワークスペース、サービス、被害者、演習管理の関係 |
 | [実行境界・時間・矛盾解消方針](runtime-boundaries-and-resolutions.md) | 共通世界、局所実行領域、三種類の時間、処理落ち、観測経路、実装時の不変条件 |

@@ -64,22 +64,19 @@ function SettingInput({ field, value, error, disabled, onChange }: {
     <label htmlFor={id}>{field.label}{field.unit && <span> ({field.unit})</span>}{field.required && ' · 必須'}</label>
     {field.type === 'boolean'
       ? <input id={id} type="checkbox" checked={value === true} disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)} aria-describedby={`${id}-basis`} />
+        onChange={(event) => onChange(event.target.checked)} />
       : field.type === 'choice'
         ? <select id={id} value={value === undefined ? '' : String(value)} disabled={disabled}
-          onChange={(event) => onChange(event.target.value)} aria-invalid={!!error} aria-describedby={`${id}-basis ${id}-error`}>
+          onChange={(event) => onChange(event.target.value)} aria-invalid={!!error} aria-describedby={`${id}-error`}>
           <option value="">選択してください</option>
           {field.choices?.map((choice) => <option key={choice} value={choice}>{placementChoiceLabel(field, choice)}</option>)}
         </select>
         : <input id={id} type={field.type === 'string' ? 'text' : 'number'}
           value={value === undefined || (typeof value === 'number' && !Number.isFinite(value)) ? '' : String(value)}
           min={field.minimum} max={field.maximum} step={field.type === 'integer' ? 1 : 'any'}
-          disabled={disabled} aria-invalid={!!error} aria-describedby={`${id}-basis ${id}-error`}
+          disabled={disabled} aria-invalid={!!error} aria-describedby={`${id}-error`}
           onChange={(event) => onChange(event.target.value === '' ? undefined
             : field.type === 'string' ? event.target.value : event.target.valueAsNumber)} />}
-    <details id={`${id}-basis`} className="attack-live__basis"><summary>根拠</summary>
-      <small>{value !== undefined && value !== field.default && '変更値はユーザー指定。初期値の根拠: '}{field.basis}</small>
-    </details>
     {field.path === PLACEMENT_PATH && <small>{field.description} 現実のクラウドにおける配置保証ではありません。</small>}
     {error && <span id={`${id}-error`} className="attack-live__error" role="alert">{error}</span>}
   </div>
@@ -275,9 +272,6 @@ export function AttackQubitNoiseEditor({ standard, regions, placement, fields, v
     </select>
     {selectedQubit !== null && calibration && <>
       <h3>qubit {selectedQubit} · 待機ノイズ</h3>
-      <details className="attack-live__basis"><summary>根拠</summary>
-        <small>{calibration.basis} · ある時点の値で、現在の実機の代表値ではありません。</small>
-      </details>
       <dl className="attack-live__noise-values">
         <div><dt>T1</dt><dd>{typeof calibration.T1_us !== 'number' ? '較正値なし' : `${calibration.T1_us} µs`}</dd></div>
         <div><dt>T2</dt><dd>{typeof calibration.T2_us !== 'number' ? '較正値なし' : `${calibration.T2_us} µs`}</dd></div>
