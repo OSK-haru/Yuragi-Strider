@@ -36,7 +36,7 @@ from core.experimental_isolation_physics.reset_model import (
     ResetModelRequest,
     RegisterResetResult,
 )
-from core.experimental_isolation_physics.idle_evolution import IndependentIdleModel
+from core.experimental_isolation_physics.idle_evolution import IdleQubitSpec, IndependentIdleModel
 from core.gates import Matrix, density_from_ket
 from core.register_operations import (
     apply_local_depolarizing_replacement, apply_operand_operator, freeze_register, sample_measurement,
@@ -512,6 +512,10 @@ class SharedQpuRuntime:
                             state, operands, instruction.depolarizing_probability,
                         )
                     duration += instruction.duration_us
+                elif instruction.kind == "delay":
+                    if instruction.wait_us > 0.0:
+                        state = self._idle_subset(state, operands, instruction.wait_us)
+                    duration += instruction.duration_us
                 elif instruction.kind == "measure":
                     if measured:
                         continue
@@ -532,6 +536,15 @@ class SharedQpuRuntime:
             label = "".join(str(bit) for bit in classical)
             counts[label] = counts.get(label, 0) + 1
         return {"shots": operation.shots, "counts": counts}
+
+    def _idle_subset(self, state, slots: tuple[int, ...], elapsed_us: float):
+        """Relax only the named register slots; the other qubits are left untouched."""
+        model = self._active_idle_model()
+        disabled = IdleQubitSpec(math.inf, math.inf, 0.0)
+        subset = IndependentIdleModel(
+            tuple(spec if index in slots else disabled for index, spec in enumerate(model.qubits)),
+            model.max_local_qubits)
+        return np.asarray(subset.evolve(state, elapsed_us=elapsed_us), dtype=complex)
 
     def _active_idle_model(self) -> IndependentIdleModel:
         if self.tenant_regions:
@@ -623,6 +636,9 @@ class SharedQpuRuntime:
                 expected = binding.victim if role == "victim" else binding.attacker
                 if layout.physical_qubit_ids != (expected.physical_qubit_id,):
                     raise ValueError("program layout does not match the scenario binding")
+            if any(item.kind == "delay" and item.wait_us > 0.0 for item in command.operation.instructions):
+                if (self.regional_idle_models.get(physical_ids) if self.tenant_regions else self.idle_model) is None:
+                    raise ValueError("a delay needs an explicit complete idle model")
             if command.operation.initialization == "inherit":
                 targets = (tuple(physical_ids.index(q) for q in layout.physical_qubit_ids)
                            if binding is None else (0,))
@@ -633,7 +649,7 @@ class SharedQpuRuntime:
                 )
             cells = 4 ** len(snapshot.physical_qubit_ids)
             def _weight(instructions):
-                return sum((12 * len(item.qubits) if item.kind in {"initialize", "reset"}
+                return sum((12 * len(item.qubits) if item.kind in {"initialize", "reset", "delay"}
                             else 4 * len(item.qubits) if item.kind == "measure"
                             else 2 * (1 << len(item.qubits))) for item in instructions)
             weights = _weight(command.operation.instructions)

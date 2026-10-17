@@ -49,7 +49,7 @@ FREE_INTERLEAVED_QUERY_LIMIT = 1000
 FREE_INTERLEAVED_DEFAULT_ROUNDS = 64
 FREE_INTERLEAVED_ROUNDS_CEILING = 256
 MAX_RETAINED_QUBITS = 6
-_GATE_NAMES = ("H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ", "CNOT", "CZ")
+_GATE_NAMES = ("I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ", "CNOT", "CZ")
 _SINGLE_QUBIT_DECOMPOSITIONS = {
     "Z": ("rz",), "S": ("rz",), "T": ("rz",), "RZ": ("rz",),
     "X": ("x",), "H": ("rz", "sx", "rz"), "Y": ("x", "rz"),

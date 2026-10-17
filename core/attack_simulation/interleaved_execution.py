@@ -25,7 +25,7 @@ def circuit_shot_duration_us(operation: CircuitExecutionOperation,
                             reset_duration_us: float, measurement_duration_us: float) -> float:
     """Physical time of one shot, matching DeclaredQpuExecutor._duration."""
     duration = sum(
-        item.duration_us if item.kind == "unitary"
+        item.duration_us if item.kind in {"unitary", "delay"}
         else reset_duration_us if item.kind in {"initialize", "reset"} else 0.0
         for item in operation.instructions
     )

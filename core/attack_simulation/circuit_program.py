@@ -25,6 +25,18 @@ NATIVE_GATES = ("I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ",
                 "CNOT", "CZ", "CP", "CCX", "SWAP", "QFT", "ORACLE", "MEASURE")
 
 
+MAX_DELAY_US = 10_000.0
+
+
+def _delay_us(gate: GateOperation) -> float:
+    """The declared wait of an identity gate; no duration means no wait."""
+    value = (gate.params or {}).get("duration_us", 0.0)
+    if (type(value) not in (int, float) or not math.isfinite(float(value))
+            or not 0.0 <= float(value) <= MAX_DELAY_US):
+        raise ProgramRequestError(f"a delay must be between 0 and {MAX_DELAY_US:g} us")
+    return float(value)
+
+
 @dataclass(frozen=True)
 class CircuitInstruction:
     kind: str
@@ -34,9 +46,12 @@ class CircuitInstruction:
     classical_targets: tuple[int, ...] = ()
     time_group: int = 0
     depolarizing_probability: float = 0.0
+    # A declared wait (delay instruction): the qubits idle for this long. ``duration_us`` is the
+    # accounted time under the layer rule, so it can differ from the wait itself.
+    wait_us: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.kind not in {"initialize", "reset", "unitary", "measure"}:
+        if self.kind not in {"initialize", "reset", "unitary", "measure", "delay"}:
             raise ValueError("unknown circuit instruction")
         if not math.isfinite(self.duration_us) or self.duration_us < 0:
             raise ValueError("invalid instruction duration")
@@ -45,6 +60,10 @@ class CircuitInstruction:
             raise ValueError("depolarizing probability must be between zero and one")
         if self.kind != "unitary" and probability != 0.0:
             raise ValueError("only unitary instructions may carry a gate error channel")
+        wait = float(self.wait_us)
+        if not math.isfinite(wait) or wait < 0.0 or (self.kind != "delay" and wait != 0.0):
+            raise ValueError("only delay instructions may carry a finite nonnegative wait")
+        object.__setattr__(self, "wait_us", wait)
         object.__setattr__(self, "depolarizing_probability", probability)
         qubits = tuple(self.qubits)
         classical = tuple(self.classical_targets)
@@ -271,7 +290,8 @@ class LocalCircuitCompiler:
                 raise ValueError("gate_durations_us must be a gate-to-duration object")
             durations = dict(self.gate_durations_us)
             calibrated_gates = set(self.single_qubit_gate_decompositions or {})
-            if set(durations) != set(gates) - {"MEASURE"} - calibrated_gates:
+            # A delay ("I") takes its time from the program, so it has no declared gate duration.
+            if set(durations) != set(gates) - {"MEASURE", "I"} - calibrated_gates:
                 raise ValueError("gate_durations_us must specify every supported unitary gate")
             for gate, duration in durations.items():
                 if (type(gate) is not str or type(duration) not in (int, float)
@@ -341,6 +361,8 @@ class LocalCircuitCompiler:
                 survival = math.prod(1.0 - 2.0 * natives[native]["gate_error"]
                                      for native in sequence if native != "rz")
                 return duration, 1.0 - survival
+            if gate.type == "I":
+                return _delay_us(gate), 0.0
             if gate.type != "CZ" or self.cz_gate_calibrations is None:
                 if self.gate_durations_us is not None and gate.type not in self.gate_durations_us:
                     raise ProgramRequestError("gate has no declared service duration")
@@ -364,7 +386,7 @@ class LocalCircuitCompiler:
                 raise ProgramRequestError(f"gate or classical condition is not supported by this service: {gate.type}")
             if gate.controls and gate.type not in {"CNOT", "CZ", "CP", "CCX"}:
                 raise ProgramRequestError("this gate does not support control operands")
-            allowed_params = {"RX": {"theta_rad"}, "RY": {"theta_rad"}, "RZ": {"theta_rad"},
+            allowed_params = {"I": {"duration_us"}, "RX": {"theta_rad"}, "RY": {"theta_rad"}, "RZ": {"theta_rad"},
                               "CP": {"theta_rad"}, "CNOT": {"control_value", "control_state"},
                               "ORACLE": {"marked_index"}}.get(gate.type, set())
             if not set(gate.params or {}) <= allowed_params:
@@ -374,6 +396,12 @@ class LocalCircuitCompiler:
                     raise ProgramRequestError("sampling measurements need classical targets")
                 instructions.append(CircuitInstruction("measure", duration, qubits=tuple(gate.targets),
                                                        classical_targets=tuple(gate.classical_targets or ()), time_group=group))
+                return
+            if gate.type == "I":
+                # A delay: the qubit idles; nothing is applied, and no gate error is charged.
+                instructions.append(CircuitInstruction(
+                    "delay", duration, qubits=tuple(gate.targets), time_group=group,
+                    wait_us=_delay_us(gate)))
                 return
             operands = tuple((gate.controls or []) + gate.targets)
             local_indices = {q: i for i, q in enumerate(operands)}

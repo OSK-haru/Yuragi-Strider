@@ -39,6 +39,14 @@ class Circuit:
             self.measure(qubit, qubit)
         return self
 
+    def delay(self, qubit: int, duration_us: float) -> "Circuit":
+        """量子ビットを duration_us マイクロ秒だけ待たせる（Qiskit の delay に相当）。
+
+        回路JSONでは、継続時間を指定した恒等ゲート（I）として書かれる。
+        """
+        self._columns.append([{"type": "I", "targets": [qubit], "params": {"duration_us": float(duration_us)}}])
+        return self
+
     def cnot(self, control: int, target: int) -> "Circuit":
         return self.gate("CNOT", target, controls=(control,))
 

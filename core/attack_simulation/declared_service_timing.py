@@ -70,7 +70,7 @@ def compiled_job_duration(
             runtime_config.reset_duration_us, runtime_config.program_measurement_duration_us,
         ).duration_us, "compiled job duration")
     duration = sum(
-        instruction.duration_us if instruction.kind == "unitary"
+        instruction.duration_us if instruction.kind in {"unitary", "delay"}
         else runtime_config.reset_duration_us
         if instruction.kind in {"initialize", "reset"} else 0.0
         for instruction in operation.instructions

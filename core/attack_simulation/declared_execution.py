@@ -380,7 +380,7 @@ class DeclaredQpuExecutor:
             if dedicated else
             (config.reset_duration_us, config.program_measurement_duration_us)
         )
-        duration = sum(i.duration_us if i.kind == "unitary" else reset_duration
+        duration = sum(i.duration_us if i.kind in {"unitary", "delay"} else reset_duration
                        if i.kind in {"initialize", "reset"} else 0.0 for i in op.instructions)
         duration += measurement_duration * len({
             i.time_group for i in op.instructions if i.kind == "measure"})
