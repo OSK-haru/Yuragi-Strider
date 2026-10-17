@@ -81,15 +81,11 @@ class DelayInstructionTests(unittest.TestCase):
 
     def test_parallel_columns_take_the_longest_wait(self):
         store, runtime, service, _ = build(ids=(3, 7), initial=("1", "1"))
-        circuit = Circuit(2)
-        circuit._columns.append([
-            {"type": "I", "targets": [0], "params": {"duration_us": 4.0}},
-            {"type": "I", "targets": [1], "params": {"duration_us": 6.0}},
-        ])
-        circuit.measure(0, 0).measure(1, 1)
+        circuit = Circuit(2).delay(0, 4.0).delay(1, 6.0).measure(0, 0).measure(1, 1)
+        self.assertEqual(len(circuit.to_dict()["columns"]), 2)  # one column of delays, one of measurements
         submit(service, circuit)
         runtime.run_next()
-        self.assertAlmostEqual(store.read().device_time_us, 6.0 + 2.0)
+        self.assertAlmostEqual(store.read().device_time_us, 6.0 + 1.0)  # the longer wait, then one simultaneous measurement
 
     def test_a_delay_without_an_idle_model_is_rejected_before_it_runs(self):
         _, runtime, service, _ = build(idle=False)

@@ -470,7 +470,9 @@ class LocalCircuitCompiler:
         if request.shots * len(instructions) > self.max_instruction_executions:
             raise ProgramRequestError(
                 f"program exceeds the service instruction-work limit: {request.shots} shots x "
-                f"{len(instructions)} instructions > {self.max_instruction_executions}")
+                f"{len(instructions)} instructions > {self.max_instruction_executions} "
+                f"(this limit protects the host and is not a property of the simulated service; "
+                f"this program allows at most {self.max_instruction_executions // len(instructions)} shots)")
         try:
             return CircuitExecutionOperation(tuple(instructions), request.shots, sampling_seed,
                                              circuit.logical_qubits, circuit.classical_bits, request.initialization)
