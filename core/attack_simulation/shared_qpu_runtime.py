@@ -65,6 +65,10 @@ class SharedQpuRuntimeConfig:
     program_measurement_duration_us: float = 1.0
     # Declared wait between consecutive shots of one Program; 0 means no gap.
     repetition_delay_us: float = 0.0
+    # Simulation accuracy, not a service property: a shot may reuse the computation of an earlier
+    # shot of the same job whose entry state is within this trace distance. 0 reuses only identical
+    # entry states, which is exact. The total-variation error of the counts is at most shots * this.
+    entry_reuse_tolerance: float = 0.0
     max_local_qubits: int = 8
     max_execution_work: int = 536870912
 
@@ -87,6 +91,7 @@ class SharedQpuRuntimeConfig:
             "isolated_assignment_duration_us": self.isolated_assignment_duration_us,
             "program_measurement_duration_us": self.program_measurement_duration_us,
             "repetition_delay_us": self.repetition_delay_us,
+            "entry_reuse_tolerance": self.entry_reuse_tolerance,
             "resource_binding": None if binding is None else {
                 "victim": {"qpu_id": binding.victim.qpu_id,
                            "physical_qubit_id": binding.victim.physical_qubit_id},
@@ -128,6 +133,7 @@ class SharedQpuRuntimeConfig:
             "isolated_assignment_duration_us",
             "program_measurement_duration_us",
             "repetition_delay_us",
+            "entry_reuse_tolerance",
         ):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value < 0.0:
@@ -475,67 +481,90 @@ class SharedQpuRuntime:
         classical_targets = tuple(c for i in measurements for c in i.classical_targets)
         measured_slots = tuple(slots[q] for q in measured_qubits)
         measurement_duration = self._active_service_durations()[1] * len({i.time_group for i in measurements})
+        cache: list[tuple[bool, np.ndarray, tuple]] = []
+        computed = reused = 0
         for shot_index in range(operation.shots):
-            state = np.asarray(self.state_store.read().density_matrix, dtype=complex)
-            duration = 0.0
-            if shot_index and self.config.repetition_delay_us > 0.0:
-                # The declared wait between shots relaxes the inherited state before the next shot.
-                state = np.asarray(self._active_idle_model().evolve(
-                    state, elapsed_us=self.config.repetition_delay_us), dtype=complex)
-                duration += self.config.repetition_delay_us
-            assignment: dict[int, tuple[float, float]] = {}
-            if operation.initialization == "inherit":
-                errors = register_assignment_errors(
-                    self._active_reset_models().get(self.config.reset_model_id),
-                    subsystem_count=len(snapshot.physical_qubit_ids), targets=slots,
-                )
-                assignment.update(enumerate(errors))
+            entry_state = np.asarray(self.state_store.read().density_matrix, dtype=complex)
+            # Everything before the final measurement is a deterministic channel of the entry
+            # state. Channels never increase trace distance, so a shot whose entry state is within
+            # the tolerance of an earlier one reuses its result; the random draws are unchanged.
+            cached = _find_reusable(cache, shot_index > 0, entry_state, self.config.entry_reuse_tolerance)
+            if cached is None:
+                cached = self._run_before_measurement(operation, slots, entry_state, shot_index)
+                computed += 1
+                if len(cache) >= _entry_cache_size(entry_state):
+                    cache.pop(0)
+                cache.append((shot_index > 0, entry_state, cached))
+            else:
+                reused += 1
+            state, assignment, duration = cached
             classical = [0] * operation.classical_bits
-            measured = False
-            for instruction in operation.instructions:
-                operands = tuple(slots[q] for q in instruction.qubits)
-                if instruction.kind in {"initialize", "reset"}:
-                    readout = self._active_reset_models().run_register(self.config.reset_model_id, ResetModelRequest(
-                        input_state=freeze_register(state), reset_count=1, victim_measurement=False,
-                        subsystem_count=len(snapshot.physical_qubit_ids), targets=operands,
-                    ))
-                    self.state_store.validate_state(readout.post_reset_state)
-                    state = np.asarray(readout.post_reset_state, dtype=complex)
-                    assignment.update(zip(instruction.qubits, readout.assignment_errors))
-                    duration += self._active_service_durations()[0]
-                elif instruction.kind == "unitary":
-                    if instruction.unitary is None:
-                        raise ValueError("compiled unitary is missing")
-                    state = apply_operand_operator(state, instruction.unitary, operands)
-                    if instruction.depolarizing_probability:
-                        state = apply_local_depolarizing_replacement(
-                            state, operands, instruction.depolarizing_probability,
-                        )
-                    duration += instruction.duration_us
-                elif instruction.kind == "delay":
-                    if instruction.wait_us > 0.0:
-                        state = self._idle_subset(state, operands, instruction.wait_us)
-                    duration += instruction.duration_us
-                elif instruction.kind == "measure":
-                    if measured:
-                        continue
-                    # The validated final block has distinct, commuting targets
-                    # and no later gates. Sample its joint distribution once.
-                    state, bits = sample_measurement(state, measured_slots, generator)
-                    for q, bit, target in zip(measured_qubits, bits, classical_targets):
-                        p10, p01 = assignment[q]
-                        classical[target] = int(generator.random() < p10) if bit == 0 else int(generator.random() >= p01)
-                    duration += measurement_duration
-                    measured = True
-                else:
-                    raise ValueError("unknown compiled circuit instruction")
+            # The validated final block has distinct, commuting targets and no later gates.
+            # Sample its joint distribution once.
+            state, bits = sample_measurement(state, measured_slots, generator)
+            for q, bit, target in zip(measured_qubits, bits, classical_targets):
+                p10, p01 = assignment[q]
+                classical[target] = int(generator.random() < p10) if bit == 0 else int(generator.random() >= p01)
+            duration += measurement_duration
             self._commit_event(
                 job=job, event_kind="program_shot", next_state=freeze_register(state),
                 duration_us=duration, next_owner_tenant_id=job.command.tenant_id,
             )
             label = "".join(str(bit) for bit in classical)
             counts[label] = counts.get(label, 0) + 1
+        self.last_entry_reuse = (computed, reused)
         return {"shots": operation.shots, "counts": counts}
+
+    last_entry_reuse: tuple[int, int] = (0, 0)
+
+    def _run_before_measurement(self, operation: CircuitExecutionOperation, slots: tuple[int, ...],
+                                state: np.ndarray, shot_index: int):
+        """One shot up to, not including, the final measurement; returns (state, readout, time)."""
+        snapshot = self.state_store.read()
+        duration = 0.0
+        if shot_index and self.config.repetition_delay_us > 0.0:
+            # The declared wait between shots relaxes the inherited state before the next shot.
+            state = np.asarray(self._active_idle_model().evolve(
+                state, elapsed_us=self.config.repetition_delay_us), dtype=complex)
+            duration += self.config.repetition_delay_us
+        assignment: dict[int, tuple[float, float]] = {}
+        if operation.initialization == "inherit":
+            errors = register_assignment_errors(
+                self._active_reset_models().get(self.config.reset_model_id),
+                subsystem_count=len(snapshot.physical_qubit_ids), targets=slots,
+            )
+            assignment.update(enumerate(errors))
+        for instruction in operation.instructions:
+            operands = tuple(slots[q] for q in instruction.qubits)
+            if instruction.kind in {"initialize", "reset"}:
+                readout = self._active_reset_models().run_register(self.config.reset_model_id, ResetModelRequest(
+                    input_state=freeze_register(state), reset_count=1, victim_measurement=False,
+                    subsystem_count=len(snapshot.physical_qubit_ids), targets=operands,
+                ))
+                self.state_store.validate_state(readout.post_reset_state)
+                state = np.asarray(readout.post_reset_state, dtype=complex)
+                assignment.update(zip(instruction.qubits, readout.assignment_errors))
+                duration += self._active_service_durations()[0]
+            elif instruction.kind == "unitary":
+                if instruction.unitary is None:
+                    raise ValueError("compiled unitary is missing")
+                state = apply_operand_operator(state, instruction.unitary, operands)
+                if instruction.depolarizing_probability:
+                    state = apply_local_depolarizing_replacement(
+                        state, operands, instruction.depolarizing_probability,
+                    )
+                duration += instruction.duration_us
+            elif instruction.kind == "delay":
+                if instruction.wait_us > 0.0:
+                    state = self._idle_subset(state, operands, instruction.wait_us)
+                duration += instruction.duration_us
+            elif instruction.kind == "measure":
+                continue  # the final measurement block is sampled by the caller
+            else:
+                raise ValueError("unknown compiled circuit instruction")
+        state = np.array(state, dtype=complex)
+        state.flags.writeable = False
+        return state, assignment, duration
 
     def _idle_subset(self, state, slots: tuple[int, ...], elapsed_us: float):
         """Relax only the named register slots; the other qubits are left untouched."""
@@ -805,6 +834,34 @@ class SharedQpuRuntime:
         )
         self._next_event_sequence += 1
 
+
+
+def _entry_cache_size(state: np.ndarray) -> int:
+    """How many earlier shots to remember: at most 64, and at most 32 MB of states."""
+    return max(4, min(64, (32 << 20) // state.nbytes))
+
+
+def _find_reusable(cache, repeats: bool, entry_state: np.ndarray, tolerance: float):
+    """A cached shot result whose entry state is within ``tolerance`` in trace distance, or None.
+
+    Cheap bounds first: trace distance >= ||D||_F / 2 and <= sqrt(d) * ||D||_F / 2.
+    """
+    dimension = entry_state.shape[0]
+    for cached_repeats, cached_entry, result in reversed(cache):
+        if cached_repeats != repeats:
+            continue
+        delta = entry_state - cached_entry
+        norm = float(np.linalg.norm(delta))
+        if norm == 0.0:
+            return result
+        if tolerance <= 0.0 or 0.5 * norm > tolerance:
+            continue
+        if 0.5 * math.sqrt(dimension) * norm <= tolerance:
+            return result
+        eigenvalues = np.linalg.eigvalsh((delta + delta.conj().T) / 2.0)
+        if 0.5 * float(np.abs(eigenvalues).sum()) <= tolerance:
+            return result
+    return None
 
 def _one_probability(state: Matrix) -> float:
     value = float(state[1][1].real)

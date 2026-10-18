@@ -110,7 +110,9 @@ class ProgramInitializationTests(unittest.TestCase):
         self.assertEqual([i.kind for i in compiler.compile(default, sampling_seed=1).instructions],
                          ["initialize", "unitary", "unitary", "unitary", "measure", "measure"])
         store, runtime, service = build(ids=(3, 11), initial=initial_density_matrix(["1", "1"]), modes=None)
-        with patch.object(runtime.reset_models, "run_register", wraps=runtime.reset_models.run_register) as resets:
+        # Reusing an identical entry state is exact; this check counts the Reset applied to every shot.
+        with patch("core.attack_simulation.shared_qpu_runtime._find_reusable", return_value=None), \
+                patch.object(runtime.reset_models, "run_register", wraps=runtime.reset_models.run_register) as resets:
             job = service.submit_program("a", request(mode="prepare", shots=4))
             self.assertIs(runtime.run_next().status, JobStatus.SUCCEEDED)
             self.assertEqual(resets.call_count, 4)

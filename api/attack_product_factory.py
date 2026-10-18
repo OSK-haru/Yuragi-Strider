@@ -277,6 +277,7 @@ class ProductEnvironmentFactory:
             "qpu_service.runtime_execution.attacker_measurement_duration_us",
             "qpu_service.runtime_execution.program_measurement_duration_us",
             "qpu_service.runtime_execution.repetition_delay_us",
+            "qpu_service.runtime_execution.entry_reuse_tolerance",
             "qpu_service.declared_service_timing.processing_delay_us",
             "qpu_service.declared_service_timing.publication_delay_us",
             "qpu_service.declared_service_timing.denial_delay_us",
@@ -362,8 +363,8 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "reset_count", "reset_duration_us", "victim_operation_duration_us",
         "attacker_measurement_duration_us", "queue_policy_id", "cancellation_policy_id",
         "measure_input_state_before_transition", "placement_policy", "isolated_assignment_duration_us",
-        "program_measurement_duration_us", "repetition_delay_us", "resource_binding", "max_local_qubits",
-        "max_execution_work",
+        "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance", "resource_binding",
+        "max_local_qubits", "max_execution_work",
     })
     if runtime_raw["schema_version"] != "shared_qpu_runtime_v2":
         raise ValueError("unsupported frozen QPU runtime schema")
@@ -949,7 +950,7 @@ def _validate_runtime_profile(raw: Mapping[str, Any]) -> None:
         raise ValueError("runtime_execution.measure_input_state_before_transition must be explicit boolean")
     for name in ("reset_duration_us", "victim_operation_duration_us",
                  "attacker_measurement_duration_us", "isolated_assignment_duration_us",
-                 "program_measurement_duration_us", "repetition_delay_us"):
+                 "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance"):
         value = raw[name]
         if (type(value) not in (int, float) or not math.isfinite(float(value)) or value < 0):
             raise ValueError(f"runtime_execution.{name} must be finite and nonnegative")
