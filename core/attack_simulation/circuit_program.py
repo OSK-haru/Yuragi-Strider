@@ -15,6 +15,7 @@ from core.attack_simulation.program_request import (
 )
 from core.attack_simulation.resource_binding import PhysicalQubitLayout
 from core.circuit_model import CircuitConfig, GateOperation
+from core.attack_simulation.native_pulses import NativeStep, UnsupportedNativeSequence, solve_native_steps
 from core.gates import Matrix, gate_duration_us, gate_unitary
 
 if TYPE_CHECKING:
@@ -49,6 +50,11 @@ class CircuitInstruction:
     # A declared wait (delay instruction): the qubits idle for this long. ``duration_us`` is the
     # accounted time under the layer rule, so it can differ from the wait itself.
     wait_us: float = 0.0
+    # The gate's own duration, whatever the layer rule charged to this instruction: a layer's first
+    # instruction carries the layer's length and the others carry 0, so ``duration_us`` is accounting.
+    intrinsic_us: float = 0.0
+    # The native steps (virtual Z and pulses) of a calibrated single-qubit gate, in time order.
+    natives: tuple[NativeStep, ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind not in {"initialize", "reset", "unitary", "measure", "delay"}:
@@ -64,6 +70,15 @@ class CircuitInstruction:
         if not math.isfinite(wait) or wait < 0.0 or (self.kind != "delay" and wait != 0.0):
             raise ValueError("only delay instructions may carry a finite nonnegative wait")
         object.__setattr__(self, "wait_us", wait)
+        intrinsic = float(self.intrinsic_us)
+        if not math.isfinite(intrinsic) or intrinsic < 0.0:
+            raise ValueError("intrinsic duration must be finite and nonnegative")
+        object.__setattr__(self, "intrinsic_us", intrinsic)
+        natives = tuple(self.natives)
+        if natives and (self.kind != "unitary" or len(self.qubits) != 1
+                        or any(type(step) is not NativeStep for step in natives)):
+            raise ValueError("only single-qubit unitary instructions carry native steps")
+        object.__setattr__(self, "natives", natives)
         object.__setattr__(self, "depolarizing_probability", probability)
         qubits = tuple(self.qubits)
         classical = tuple(self.classical_targets)
@@ -380,7 +395,7 @@ class LocalCircuitCompiler:
             return calibration["duration_us"], calibration["depolarizing_probability"]
 
         def append_gate(gate: GateOperation, duration: float, group: int,
-                        depolarizing_probability: float = 0.0) -> None:
+                        depolarizing_probability: float = 0.0, intrinsic: float = 0.0) -> None:
             nonlocal unitary_elements
             if gate.type not in self.supported_gates or gate.conditions:
                 raise ProgramRequestError(f"gate or classical condition is not supported by this service: {gate.type}")
@@ -401,7 +416,7 @@ class LocalCircuitCompiler:
                 # A delay: the qubit idles; nothing is applied, and no gate error is charged.
                 instructions.append(CircuitInstruction(
                     "delay", duration, qubits=tuple(gate.targets), time_group=group,
-                    wait_us=_delay_us(gate)))
+                    wait_us=_delay_us(gate), intrinsic_us=_delay_us(gate)))
                 return
             operands = tuple((gate.controls or []) + gate.targets)
             local_indices = {q: i for i, q in enumerate(operands)}
@@ -411,9 +426,19 @@ class LocalCircuitCompiler:
             local_gate = GateOperation(gate.type, [local_indices[q] for q in gate.targets],
                                        [local_indices[q] for q in gate.controls or []], gate.params)
             matrix = gate_unitary(local_gate, len(operands))
+            natives: tuple[NativeStep, ...] = ()
+            if (self.single_qubit_gate_decompositions is not None and not gate.controls
+                    and len(gate.targets) == 1 and gate.type in self.single_qubit_gate_decompositions):
+                steps = self.single_qubit_native_gates[str(allocation[gate.targets[0]])]
+                try:
+                    natives = solve_native_steps(
+                        matrix, self.single_qubit_gate_decompositions[gate.type],
+                        {name: spec["duration_us"] for name, spec in steps.items()})
+                except UnsupportedNativeSequence:
+                    natives = ()  # an unusual declared sequence keeps no pulse data
             instructions.append(CircuitInstruction(
                 "unitary", duration, matrix, operands, time_group=group,
-                depolarizing_probability=depolarizing_probability,
+                depolarizing_probability=depolarizing_probability, intrinsic_us=intrinsic, natives=natives,
             ))
 
         def expand_service_gate(gate: GateOperation) -> tuple[GateOperation, ...]:
@@ -451,8 +476,8 @@ class LocalCircuitCompiler:
             prepared_gates = [GateOperation(kind, [q]) for q in prepared]
             calibrations = [gate_calibration(gate) for gate in prepared_gates]
             duration = max((value[0] for value in calibrations), default=0.0)
-            for index, (gate, (_, probability)) in enumerate(zip(prepared_gates, calibrations)):
-                append_gate(gate, duration if index == 0 else 0.0, group, probability)
+            for index, (gate, (own, probability)) in enumerate(zip(prepared_gates, calibrations)):
+                append_gate(gate, duration if index == 0 else 0.0, group, probability, own)
         for column in sorted(circuit.columns, key=lambda c: c.step):
             expanded = [expand_service_gate(gate) for gate in column.gates
                         if gate.type != "MEASURE"]
@@ -461,9 +486,9 @@ class LocalCircuitCompiler:
                 layer = [gates[layer_index] for gates in expanded if layer_index < len(gates)]
                 calibrated = [(gate, *gate_calibration(gate)) for gate in layer]
                 layer_duration = max((item[1] for item in calibrated), default=0.0)
-                for index, (gate, _, error_probability) in enumerate(calibrated):
+                for index, (gate, own, error_probability) in enumerate(calibrated):
                     append_gate(gate, layer_duration if index == 0 else 0.0,
-                                column.step, error_probability)
+                                column.step, error_probability, own)
             for gate in column.gates:
                 if gate.type == "MEASURE":
                     append_gate(gate, 0.0, column.step)
