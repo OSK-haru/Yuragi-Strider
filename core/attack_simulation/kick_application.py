@@ -33,6 +33,7 @@ from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
+import cmath
 import math
 
 import numpy as np
@@ -41,9 +42,12 @@ from core.attack_simulation.concurrent_windows import DriveLeak, DriveSchedule
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.shot_activity import instruction_starts
 
-SLICE_ANGLE_RAD = 0.4          # a slice turns the leak axis (relative to the target) by about this much
-MAX_SLICES = 128               # the cost knob: more slices are more exact for a leak that turns very fast
-SLICE_NODES = 6                # Gauss-Legendre nodes per slice
+# Accuracy against cost. These favour computation time (the decision of 2026-10-19): about 1% of the
+# leak's effect is lost for a far-detuned drive, and the cost hardly moves with them, because it is the
+# per-leak overhead that dominates (see the design document).
+SLICE_ANGLE_RAD = 0.8          # a slice turns the leak axis (relative to the target) by about this much
+MAX_SLICES = 32                # more slices are more exact for a leak that turns very fast
+SLICE_NODES = 4                # Gauss-Legendre nodes per slice
 
 _SIGMA = (np.array([[0, 1], [1, 0]], dtype=complex), np.array([[0, -1j], [1j, 0]], dtype=complex),
           np.array([[1, 0], [0, -1]], dtype=complex))
@@ -217,6 +221,9 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
 
     def plain(leak: DriveLeak, begin: float, end: float, frame: float) -> np.ndarray:
         """The leak's rotation vector over [begin, end) with the axis at a fixed frame (absolute times)."""
+        if leak.detuning_rad_per_us == 0.0:            # a fixed axis: the net rotation is a closed form
+            turned = leak.net_rotation(begin, end) * cmath.exp(1j * frame)
+            return np.array([turned.real, turned.imag, 0.0])
         t, w = _slices(begin, end, _slice_count(leak.detuning_rad_per_us, end - begin))
         v = leak.rate(t) * np.exp(1j * frame)
         return _magnus(np.stack([np.sum(w * v.real, axis=1), np.sum(w * v.imag, axis=1),

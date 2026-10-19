@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+import cmath
 import math
 
 import numpy as np
@@ -135,6 +136,20 @@ class DriveLeak:
                 * np.exp(1j * (self.drive_phase_rad + self.detuning_rad_per_us * time_us)))
 
 
+    def net_rotation(self, begin_us: float, end_us: float) -> complex:
+        """A resonant leak's net rotation over ``[begin_us, end_us)`` as one complex number (detuning must be 0).
+
+        Its modulus is the rotation angle and its argument the hardware phase of the axis: the coefficient and
+        the drive's phase times the angle and the fraction of the drive's area that lies in the interval.
+        """
+        if self.detuning_rad_per_us != 0.0:
+            raise ValueError("a closed form needs a resonant leak")
+        duration = self.drive_end_us - self.drive_start_us
+        low, high = self.shape.cumulative(
+            np.array([(begin_us - self.drive_start_us) / duration, (end_us - self.drive_start_us) / duration]))
+        return complex(self.coefficient * cmath.exp(1j * self.drive_phase_rad) * self.drive_angle_rad * (high - low))
+
+
 def _check_windows(*windows: ExecutionWindow) -> None:
     if any(type(w) is not ExecutionWindow for w in windows):
         raise TypeError("ExecutionWindow values are required")
@@ -242,6 +257,21 @@ def leaks_into(target: ExecutionWindow, sources: Sequence[ExecutionWindow],
               for leak in drive_crosstalk_leaks(source, target, transfers)]
     merged.sort(key=_leak_order)
     return tuple(merged)
+
+
+def gap_before(window: ExecutionWindow, previous: ExecutionWindow | None) -> tuple[float, float]:
+    """The gap that precedes ``window`` on its qubits, as ``(start, end)`` for ``gap_leaks``.
+
+    It runs from the finish of the previous job on the same region to the start of ``window``; with no
+    previous job it runs from time 0 of the world clock.
+    """
+    _check_windows(window)
+    if previous is None:
+        return 0.0, window.start.time_us
+    _check_windows(window, previous)
+    if previous.finish.time_us > window.start.time_us:
+        raise ValueError("the previous job must finish before this one starts")
+    return previous.finish.time_us, window.start.time_us
 
 
 def gap_leaks(sources: Sequence[ExecutionWindow], qubits: Sequence[int], gap_start_us: float,

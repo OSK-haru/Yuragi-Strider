@@ -32,7 +32,7 @@ if str(ROOT) not in sys.path:
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation, CircuitInstruction  # noqa: E402
 from core.attack_simulation.concurrent_windows import (  # noqa: E402
-    DriveSchedule, ExecutionWindow, gap_leaks, leaks_into,
+    DriveSchedule, ExecutionWindow, gap_before, gap_leaks, leaks_into,
 )
 from core.attack_simulation.event_commit_boundary import EventPosition  # noqa: E402
 from core.attack_simulation.kick_application import kick_unitary, place_kicks  # noqa: E402
@@ -168,9 +168,8 @@ def kick_model(qubits: tuple[Qubit, Qubit], transfers: tuple[DriveCrosstalkTrans
             leaks = ()
             if with_kicks:
                 leaks = tuple(leak for other in others for leak in leaks_into(window, [other], transfers))
-                if number:
-                    leaks += gap_leaks(others, (region.physical_id,), windows[index][number - 1].finish.time_us,
-                                       window.start.time_us, transfers)
+                previous = windows[index][number - 1] if number else None
+                leaks += gap_leaks(others, (region.physical_id,), *gap_before(window, previous), transfers)
             plan = place_kicks(leaks, operation, window.schedule, window_start_us=region.start_us,
                                reset_duration_us=0.0,
                                layout_qubit_ids=(region.physical_id,) if frame_aware else ())
@@ -234,7 +233,7 @@ def scenarios():
         cases.append((f"both directions, both windows cover the leaks, |c|={c}",
                       ((Region(10, 0.0, ((sx(),), (x(),), (sx(),))),), busy_victim), leak_transfer(c, back=c),
                       SQUARE_SHAPE, {}))
-    cases.append(("both directions, a leak before the first window (not modelled), |c|=0.1",
+    cases.append(("both directions, a leak before the first window (gap from time 0), |c|=0.1",
                   ((Region(10, 0.05, ((sx(),), (x(),))),), busy_victim), leak_transfer(0.1, back=0.1),
                   SQUARE_SHAPE, {}))
     cases.append(("detuned 100 rad/us, gaussian, victim pulsing, |c|=0.1",

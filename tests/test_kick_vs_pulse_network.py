@@ -9,6 +9,7 @@ import unittest
 
 import numpy as np
 
+from core.attack_simulation.concurrent_windows import gap_before
 from core.attack_simulation.pulse_shape import GAUSSIAN_SHAPE, SQUARE_SHAPE
 from scripts.experiment_kick_vs_pulse_network import Region, infidelities, leak_transfer, pulse_reference, rz, sx, x
 
@@ -104,14 +105,20 @@ class BothDirectionsTests(unittest.TestCase):
                 for error in infidelities((attacker, BUSY_VICTIM), leak_transfer(c, back=c)):
                     self.assertLess(error, 1e-6)                    # measured up to 1.3e-7
 
-    def test_a_leak_before_a_regions_first_window_is_not_in_the_kick_model(self):
-        """Recorded limit: with no earlier job there is no gap to leak into; the caller must supply it."""
+    def test_a_leak_before_a_regions_first_window_is_covered_by_the_gap_from_time_zero(self):
         attacker = (Region(10, 0.05, ((sx(),), (x(),))),)           # the victim's first pulse runs before 0.05
         error_attacker, _ = infidelities((attacker, BUSY_VICTIM), leak_transfer(0.1, back=0.1))
-        self.assertGreater(error_attacker, 3e-3)                    # measured 1.2e-2
+        self.assertLess(error_attacker, 1e-6)                       # measured 9e-8; without the gap it was 1.2e-2
 
 
 class GapTests(unittest.TestCase):
+    def test_the_gap_starts_at_the_previous_finish_or_at_time_zero(self):
+        first, second = (Region(21, 0.0, ((sx(),),)).window(), Region(21, 0.4, ((sx(),),)).window())
+        self.assertEqual(gap_before(first, None), (0.0, 0.0))
+        self.assertEqual(gap_before(second, first), (first.finish.time_us, 0.4))
+        with self.assertRaises(ValueError):
+            gap_before(first, second)
+
     def test_a_leak_between_two_jobs_acts_on_the_state_the_next_job_inherits(self):
         victim = (Region(21, 0.0, ((sx(),), (sx(),))), Region(21, 0.40, ((rz(0.6), sx(), rz(-0.2)),)))
         attacker = (Region(10, 0.20, ((x(),),)),)
