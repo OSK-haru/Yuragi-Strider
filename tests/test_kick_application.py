@@ -9,9 +9,11 @@ import numpy as np
 from core.attack_simulation.concurrent_windows import DriveSchedule, UnitaryKick
 from core.attack_simulation.jobs import JobStatus
 from core.attack_simulation.kick_application import EMPTY_PLAN, KickPlan, PlacedKick, kick_unitary, place_kicks
-from core.attack_simulation.shot_activity import instruction_starts, shot_activity
+from core.attack_simulation.shot_activity import frame_before, instruction_starts, shot_activity
 from core.experimental_isolation_physics import ImperfectResetSpec, PhenomenologicalResetModel
 from tests.test_local_program_runtime import program_json
+from tests.test_shot_activity import IDS as IDS_PRODUCT, compile_circuit
+from attack_client.circuit import Circuit
 from tests.test_program_initialization import build, request
 
 IDS = (3, 7, 11)
@@ -21,6 +23,10 @@ GATES = [[{"type": "H", "targets": [0]}], [{"type": "X", "targets": [0]}], [{"ty
 
 def kick(qubit, angle, time_us=0.0, phase=0.0):
     return UnitaryKick(qubit, time_us, angle, phase, "other", 99)
+
+
+def placed(position, k, axis=None):
+    return PlacedKick(position, k, k.phase_rad if axis is None else axis)
 
 
 def run(plan_for, *, gates=(), shots=4, measure=(0, 0)):
@@ -48,16 +54,16 @@ def at_end(*kicks):
     """Every shot gets these kicks just before sampling."""
     def plan(operation):
         n = len(operation.instructions)
-        return KickPlan(tuple(tuple(PlacedKick(n, k) for k in kicks) for _ in range(operation.shots)))
+        return KickPlan(tuple(tuple(placed(n, k) for k in kicks) for _ in range(operation.shots)))
     return plan
 
 
 class KickUnitaryTests(unittest.TestCase):
     def test_axis_and_angle(self):
-        np.testing.assert_allclose(kick_unitary(kick(0, math.pi)), [[0, -1j], [-1j, 0]], atol=1e-12)
-        np.testing.assert_allclose(kick_unitary(kick(0, math.pi, phase=math.pi / 2)), [[0, -1], [1, 0]], atol=1e-12)
-        np.testing.assert_allclose(kick_unitary(kick(0, 0.0)), np.eye(2), atol=1e-12)
-        u = kick_unitary(kick(0, 0.7, phase=0.4))
+        np.testing.assert_allclose(kick_unitary(placed(0, kick(0, math.pi))), [[0, -1j], [-1j, 0]], atol=1e-12)
+        np.testing.assert_allclose(kick_unitary(placed(0, kick(0, math.pi, phase=math.pi / 2))), [[0, -1], [1, 0]], atol=1e-12)
+        np.testing.assert_allclose(kick_unitary(placed(0, kick(0, 0.0))), np.eye(2), atol=1e-12)
+        u = kick_unitary(placed(0, kick(0, 0.7, phase=0.4)))
         np.testing.assert_allclose(u @ u.conj().T, np.eye(2), atol=1e-12)
 
 
@@ -79,7 +85,7 @@ class RuntimeKickTests(unittest.TestCase):
         # H X H = Z: the qubit stays |0>. Before the last H it is |+>, which an X kick leaves alone but a
         # Y kick sends to |->, so the last H ends in |1>.
         before_last_h = lambda op: KickPlan(tuple(
-            (PlacedKick(2, kick(3, math.pi, phase=math.pi / 2)),) for _ in range(op.shots)))
+            (placed(2, kick(3, math.pi, phase=math.pi / 2)),) for _ in range(op.shots)))
         counts, _, _, _ = run(before_last_h, gates=GATES)
         self.assertEqual(counts, {"0": 0, "1": 4})
         after_all = at_end(kick(3, math.pi))
@@ -89,7 +95,7 @@ class RuntimeKickTests(unittest.TestCase):
         self.assertEqual(counts, {"0": 4, "1": 0})
 
     def test_trailing_kicks_act_on_the_state_the_last_shot_leaves(self):
-        trailing = lambda op: KickPlan(((),) * op.shots, (kick(11, math.pi),))
+        trailing = lambda op: KickPlan(((),) * op.shots, (placed(len(op.instructions), kick(11, math.pi)),))
         counts, final, _, _ = run(trailing)
         self.assertEqual(counts, {"0": 4, "1": 0})
         self.assertAlmostEqual(final[1, 1].real, 1.0)       # |001>
@@ -97,7 +103,7 @@ class RuntimeKickTests(unittest.TestCase):
     def test_shots_with_kicks_do_not_reuse_or_feed_the_entry_cache(self):
         _, _, (computed, reused), _ = run(lambda op: EMPTY_PLAN, shots=6)
         self.assertGreater(reused, 0)
-        only_second = lambda op: KickPlan(((), (PlacedKick(len(op.instructions), kick(3, math.pi)),), (), (), (), ()))
+        only_second = lambda op: KickPlan(((), (placed(len(op.instructions), kick(3, math.pi)),), (), (), (), ()))
         counts, _, (computed, reused), _ = run(only_second, shots=6)
         self.assertEqual(counts, {"0": 5, "1": 1})
         self.assertEqual(computed + reused, 6)
@@ -115,7 +121,7 @@ class PlacementTests(unittest.TestCase):
 
     def place(self, time_us, window_start=10.0):
         plan = place_kicks([kick(3, 0.1, window_start + time_us)], self.operation, self.schedule,
-                           window_start_us=window_start, reset_duration_us=RESET_US)
+                           window_start_us=window_start, reset_duration_us=RESET_US, layout_qubit_ids=())
         return plan
 
     def shot_time(self, shot_index, local):
@@ -152,10 +158,60 @@ class PlacementTests(unittest.TestCase):
         duration = self.shot.duration_us
         late = kick(3, 0.1, 10.0 + self.shot_time(0, 0.6 * duration))
         early = kick(7, 0.1, 10.0 + self.shot_time(0, 0.2 * duration))
-        plan = place_kicks([late, early], self.operation, self.schedule, window_start_us=10.0, reset_duration_us=RESET_US)
+        plan = place_kicks([late, early], self.operation, self.schedule, window_start_us=10.0, reset_duration_us=RESET_US, layout_qubit_ids=())
         self.assertEqual([p.kick for p in plan.per_shot[0]], [early, late])
         positions = [p.position for p in plan.per_shot[0]]
         self.assertEqual(positions, sorted(positions))
+
+
+class FrameConversionTests(unittest.TestCase):
+    """The kick's axis is shifted by the target's virtual-Z frame at the kick's own position."""
+
+    @classmethod
+    def setUpClass(cls):
+        circuit = Circuit(3).rz(0, 0.5).h(0).rz(0, 0.25).x(1).measure_all()
+        cls.operation = compile_circuit(circuit)
+        cls.ids = IDS_PRODUCT
+        cls.shot = shot_activity(cls.operation, reset_duration_us=1.0, measurement_duration_us=1.0)
+        cls.schedule = DriveSchedule(cls.shot, 1)
+        cls.starts, _ = instruction_starts(cls.operation, reset_duration_us=1.0)
+
+    def kicks_at(self, qubit_id, time_us):
+        k = UnitaryKick(qubit_id, time_us, 0.1, 0.3, "other", 99)
+        plan = place_kicks([k], self.operation, self.schedule, window_start_us=0.0, reset_duration_us=1.0,
+                           layout_qubit_ids=self.ids)
+        return plan.per_shot[0] or plan.trailing
+
+    def test_frame_before_matches_the_activity_record(self):
+        frames = [i for i in self.shot.of_qubit(0) if i.kind == "frame"]
+        self.assertGreater(len(frames), 0)
+        total = sum(i.angle_rad for i in frames)
+        self.assertAlmostEqual(frame_before(self.operation, len(self.operation.instructions), 0), total)
+        self.assertEqual(frame_before(self.operation, 0, 0), 0.0)
+        self.assertEqual(frame_before(self.operation, len(self.operation.instructions), 5), 0.0)
+
+    def test_the_axis_adds_the_frame_accumulated_before_the_kick(self):
+        end = self.shot.duration_us - 0.5               # during the final measurements: after every gate
+        (placed_kick,) = self.kicks_at(self.ids[0], end)
+        total = frame_before(self.operation, len(self.operation.instructions), 0)
+        self.assertAlmostEqual(placed_kick.axis_rad, 0.3 + total)
+        (at_start,) = self.kicks_at(self.ids[0], 0.0)    # the reset has started, no gate has
+        self.assertEqual(at_start.position, 1 if self.operation.instructions[0].kind in {"initialize", "reset"} else 0)
+        self.assertAlmostEqual(at_start.axis_rad, 0.3)
+
+    def test_the_frame_is_per_qubit(self):
+        end = self.shot.duration_us - 0.5
+        (other,) = self.kicks_at(self.ids[2], end)       # a qubit with no virtual Z
+        self.assertAlmostEqual(other.axis_rad, 0.3)
+
+    def test_a_qubit_outside_the_program_keeps_its_phase(self):
+        (outside,) = self.kicks_at(999, self.shot.duration_us - 0.5)
+        self.assertAlmostEqual(outside.axis_rad, 0.3)
+
+    def test_the_frame_of_an_uncalibrated_gate_is_unknown(self):
+        *_, uncalibrated = run(lambda op: EMPTY_PLAN, gates=GATES, shots=1)
+        with self.assertRaises(ValueError):
+            frame_before(uncalibrated, len(uncalibrated.instructions), 0)
 
 
 if __name__ == "__main__":

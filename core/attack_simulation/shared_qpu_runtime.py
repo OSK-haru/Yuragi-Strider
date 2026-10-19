@@ -18,7 +18,6 @@ from core.attack_simulation.jobs import (
 )
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.interleaved_execution import derived_seed, interleaved_work
-from core.attack_simulation.concurrent_windows import UnitaryKick
 from core.attack_simulation.kick_application import EMPTY_PLAN, KickPlan, PlacedKick, kick_unitary
 from core.attack_simulation.program_request import STATE_INHERIT_OPERATION_ID, interleave_operation_id
 from core.attack_simulation.register_readout import register_assignment_errors
@@ -513,8 +512,8 @@ class SharedQpuRuntime:
                 classical[target] = int(generator.random() < p10) if bit == 0 else int(generator.random() >= p01)
             duration += measurement_duration
             if shot_index == operation.shots - 1:
-                for kick in kicks.trailing:
-                    state = self._apply_kick(state, kick)
+                for placed in kicks.trailing:
+                    state = self._apply_kick(state, placed)
             self._commit_event(
                 job=job, event_kind="program_shot", next_state=freeze_register(state),
                 duration_us=duration, next_owner_tenant_id=job.command.tenant_id,
@@ -549,7 +548,7 @@ class SharedQpuRuntime:
         pending = list(shot_kicks)
         for index, instruction in enumerate(operation.instructions):
             while pending and pending[0].position <= index:
-                state = self._apply_kick(state, pending.pop(0).kick)
+                state = self._apply_kick(state, pending.pop(0))
             operands = tuple(slots[q] for q in instruction.qubits)
             if instruction.kind in {"initialize", "reset"}:
                 readout = self._active_reset_models().run_register(self.config.reset_model_id, ResetModelRequest(
@@ -578,15 +577,15 @@ class SharedQpuRuntime:
             else:
                 raise ValueError("unknown compiled circuit instruction")
         for placed in pending:
-            state = self._apply_kick(state, placed.kick)
+            state = self._apply_kick(state, placed)
         state = np.array(state, dtype=complex)
         state.flags.writeable = False
         return state, assignment, duration
 
-    def _apply_kick(self, state: np.ndarray, kick: UnitaryKick) -> np.ndarray:
+    def _apply_kick(self, state: np.ndarray, placed: PlacedKick) -> np.ndarray:
         """A leaked rotation from another job's drive; it takes no time of its own."""
-        slot = self.state_store.read().physical_qubit_ids.index(kick.qubit)
-        return apply_operand_operator(state, kick_unitary(kick), (slot,))
+        slot = self.state_store.read().physical_qubit_ids.index(placed.kick.qubit)
+        return apply_operand_operator(state, kick_unitary(placed), (slot,))
 
     def _idle_subset(self, state, slots: tuple[int, ...], elapsed_us: float):
         """Relax only the named register slots; the other qubits are left untouched."""

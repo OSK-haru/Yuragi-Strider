@@ -93,6 +93,25 @@ def instruction_starts(operation: CircuitExecutionOperation, *,
     return tuple(starts), now
 
 
+def frame_before(operation: CircuitExecutionOperation, position: int, qubit: int) -> float:
+    """The virtual-Z shift program ``qubit`` has accumulated within a shot before instruction ``position``.
+
+    It sums the ``rz`` steps of the single-qubit gates that come earlier, the same bookkeeping that
+    ``shot_activity`` records as ``frame`` intervals. A single-qubit gate without native steps has an
+    unknown frame, so asking for it is an error rather than a guess.
+    """
+    if type(operation) is not CircuitExecutionOperation:
+        raise TypeError("a compiled Program is required")
+    total = 0.0
+    for item in operation.instructions[:position]:
+        if item.kind != "unitary" or item.qubits != (qubit,):
+            continue
+        if not item.natives:
+            raise ValueError("the virtual-Z frame is unknown: a single-qubit gate has no native steps")
+        total += sum(step.angle_rad for step in item.natives if step.name == "rz")
+    return total
+
+
 def shot_activity(operation: CircuitExecutionOperation, *, reset_duration_us: float,
                   measurement_duration_us: float) -> ShotActivity:
     """Read one shot of a compiled Program into activity records.
