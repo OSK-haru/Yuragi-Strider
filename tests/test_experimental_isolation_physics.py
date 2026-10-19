@@ -224,6 +224,36 @@ class CoherentExtensionTests(unittest.TestCase):
         expected = np.kron(np.eye(2), expected_local_y)
         self.assertTrue(np.allclose(difference, expected))
 
+    def test_a_detuned_transfer_turns_the_leaked_field_with_time(self) -> None:
+        base = _two_qubit_network((
+            ScheduledTransmonDrive(
+                target=0,
+                start_time_us=0.0,
+                envelope=SquarePulseEnvelope(10.0, 1.0),
+            ),
+        ))
+        detuning = 3.0
+        extended = ExtendedTransmonNetworkHamiltonian(
+            base,
+            drive_crosstalk=(DriveCrosstalkTransfer(0, 1, 0.2, 0.0, detuning),),
+        )
+        pauli_x = np.asarray(((0.0, 1.0), (1.0, 0.0)))
+        pauli_y = np.asarray(((0.0, -1.0j), (1.0j, 0.0)))
+
+        for time_us in (0.0, 0.25, 0.7):
+            with self.subTest(time_us=time_us):
+                difference = extended.evaluate_array(time_us) - base.evaluate_array(time_us)
+                leaked = 0.2 * 10.0 * np.exp(1j * detuning * time_us)    # transfer times the source amplitude
+                expected = 0.5 * (leaked.real * np.kron(np.eye(2), pauli_x) + leaked.imag * np.kron(
+                    np.eye(2), pauli_y
+                ))
+                self.assertTrue(np.allclose(difference, expected))
+
+    def test_zero_detuning_is_the_resonant_transfer_and_must_be_finite(self) -> None:
+        self.assertEqual(DriveCrosstalkTransfer(0, 1, 0.1).detuning_rad_per_us, 0.0)
+        with self.assertRaises(ValueError):
+            DriveCrosstalkTransfer(0, 1, 0.1, 0.0, float("inf"))
+
 
 def _two_qubit_network(
     drives: tuple[ScheduledTransmonDrive, ...],

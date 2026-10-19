@@ -19,6 +19,7 @@ import math
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.native_pulses import PULSE_ANGLES
+from core.attack_simulation.pulse_shape import SQUARE_SHAPE, PulseShape
 
 ACTIVITY_KINDS = ("drive", "frame", "two_qubit", "idle", "reset", "measure")
 
@@ -40,6 +41,7 @@ class ActivityInterval:
     end_us: float
     angle_rad: float = 0.0
     phase_rad: float = 0.0
+    shape: PulseShape = SQUARE_SHAPE        # how a ``drive`` is spread over its duration
 
     def __post_init__(self) -> None:
         if self.kind not in ACTIVITY_KINDS:
@@ -57,6 +59,7 @@ class ActivityInterval:
 class ShotActivity:
     duration_us: float
     intervals: tuple[ActivityInterval, ...]
+    pulse_shape: PulseShape = SQUARE_SHAPE   # the envelope of every drive in this shot
 
     def of_qubit(self, qubit: int) -> tuple[ActivityInterval, ...]:
         return tuple(item for item in self.intervals if item.qubit == qubit)
@@ -113,7 +116,7 @@ def frame_before(operation: CircuitExecutionOperation, position: int, qubit: int
 
 
 def shot_activity(operation: CircuitExecutionOperation, *, reset_duration_us: float,
-                  measurement_duration_us: float) -> ShotActivity:
+                  measurement_duration_us: float, pulse_shape: PulseShape = SQUARE_SHAPE) -> ShotActivity:
     """Read one shot of a compiled Program into activity records.
 
     ``duration_us`` equals the per-shot time the planner charges (reset, gates, measurements); the
@@ -146,7 +149,7 @@ def shot_activity(operation: CircuitExecutionOperation, *, reset_duration_us: fl
                 else:
                     intervals.append(ActivityInterval(
                         qubit, "drive", cursor, cursor + step.duration_us,
-                        angle_rad=PULSE_ANGLES[step.name], phase_rad=-frames.get(qubit, 0.0)))
+                        angle_rad=PULSE_ANGLES[step.name], phase_rad=-frames.get(qubit, 0.0), shape=pulse_shape))
                     cursor += step.duration_us
         elif len(item.qubits) == 2 and item.intrinsic_us > 0.0:
             intervals.extend(ActivityInterval(q, "two_qubit", start, start + item.intrinsic_us) for q in item.qubits)
@@ -157,4 +160,4 @@ def shot_activity(operation: CircuitExecutionOperation, *, reset_duration_us: fl
         intervals.extend(ActivityInterval(q, "measure", now, now + measurement_duration_us) for q in qubits)
         now += measurement_duration_us
     intervals.sort(key=lambda a: (a.start_us, a.qubit, a.kind))
-    return ShotActivity(now, tuple(intervals))
+    return ShotActivity(now, tuple(intervals), pulse_shape)

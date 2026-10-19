@@ -1,8 +1,8 @@
-"""Execution windows, their overlap, and the drive-crosstalk kicks one window puts on another.
+"""Execution windows, their overlap, and the drive leaks one window puts on another.
 
 Stage 1 of the concurrent-sharing design: pure functions only. Nothing here schedules jobs, reads or
-evolves QPU state, or decides how a kick is applied. The kicks are computed from declared activity
-records alone (never from results), so every window's kicks are fixed once the windows are fixed.
+evolves QPU state, or decides how a leak is applied. The leaks are computed from declared activity
+records alone (never from results), so every window's leaks are fixed once the windows are fixed.
 
 Times are microseconds in the window's clock domain. Windows are half-open ``[start, finish)`` on the
 event positions' ``time_us``: windows that only touch do not overlap, and tie order adds no duration.
@@ -14,10 +14,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-import cmath
 import math
 
+import numpy as np
+
 from core.attack_simulation.event_commit_boundary import EventPosition
+from core.attack_simulation.pulse_shape import PulseShape
 from core.attack_simulation.shot_activity import ActivityInterval, ShotActivity
 from core.experimental_isolation_physics.coherent_crosstalk import DriveCrosstalkTransfer
 
@@ -62,7 +64,7 @@ class DriveSchedule:
             for item in self.shot.intervals:
                 if kind is None or item.kind == kind:
                     yield ActivityInterval(item.qubit, item.kind, item.start_us + shift, item.end_us + shift,
-                                           item.angle_rad, item.phase_rad)
+                                           item.angle_rad, item.phase_rad, item.shape)
 
 
 @dataclass(frozen=True)
@@ -102,19 +104,35 @@ class ExecutionWindow:
 
 
 @dataclass(frozen=True)
-class UnitaryKick:
-    """A small rotation of ``qubit`` at ``time_us``, leaked from another job's drive.
+class DriveLeak:
+    """The part of one source drive that falls on ``qubit`` during ``[start_us, end_us)``.
 
-    ``phase_rad`` is the hardware carrier phase of the rotation axis (the target's own virtual-Z frame
-    is not applied here). ``time_us`` is the start of the leaking pulse inside the target window.
+    The source drive runs over ``[drive_start_us, drive_end_us)`` with rotation ``drive_angle_rad``, hardware
+    carrier phase ``drive_phase_rad`` and envelope ``shape``. Through the declared transfer
+    ``coefficient`` (and ``detuning_rad_per_us``) it turns the receiver at the complex rate
+    ``rate(t) = coefficient * Omega(t) * exp(i (phase + detuning * t))``: its modulus is the leak's rotation
+    rate in rad/us and its argument the hardware phase of the rotation axis at time ``t``.
     """
 
     qubit: int
-    time_us: float
-    angle_rad: float
-    phase_rad: float
+    start_us: float
+    end_us: float
     source_job_id: str
     source_qubit: int
+    coefficient: complex
+    detuning_rad_per_us: float
+    drive_start_us: float
+    drive_end_us: float
+    drive_angle_rad: float
+    drive_phase_rad: float
+    shape: PulseShape
+
+    def rate(self, time_us: np.ndarray) -> np.ndarray:
+        time_us = np.asarray(time_us, dtype=float)
+        duration = self.drive_end_us - self.drive_start_us
+        omega = self.drive_angle_rad / duration * self.shape.density((time_us - self.drive_start_us) / duration)
+        return (self.coefficient * omega
+                * np.exp(1j * (self.drive_phase_rad + self.detuning_rad_per_us * time_us)))
 
 
 def _check_windows(*windows: ExecutionWindow) -> None:
@@ -144,7 +162,7 @@ def overlap_groups(windows: Sequence[ExecutionWindow]) -> tuple[tuple[int, ...],
     """Indices of ``windows`` grouped into chains of time-overlapping windows, in start order.
 
     Overlap is transitive through a chain: A overlaps B and B overlaps C puts all three in one group
-    even if A and C never meet, because B's kicks depend on both. A window that overlaps nothing is a
+    even if A and C never meet, because B's leaks depend on both. A window that overlaps nothing is a
     group of one.
     """
     _check_windows(*windows)
@@ -162,54 +180,82 @@ def overlap_groups(windows: Sequence[ExecutionWindow]) -> tuple[tuple[int, ...],
     return tuple(tuple(group) for group in groups)
 
 
-def drive_crosstalk_kicks(source: ExecutionWindow, target: ExecutionWindow,
-                          transfers: Sequence[DriveCrosstalkTransfer]) -> tuple[UnitaryKick, ...]:
-    """Kicks that ``source``'s drives put on ``target`` through the declared transfers, in time order.
-
-    For a transfer ``c`` from physical qubit ``s`` to ``t``, a drive of ``s`` with angle ``theta`` and
-    carrier phase ``phi`` that runs inside the target window kicks ``t`` by ``|c| * theta`` about the
-    axis at phase ``arg(c) + phi``. A drive cut by the window edge counts for the part inside, so the
-    angle is scaled by that fraction and the kick sits at the start of the part. Virtual Z has no
-    drive and leaks nothing. Pairs without a declared transfer, zero coefficients, and windows that do
-    not overlap give no kicks. One direction only: call again with the windows swapped for the other.
-    """
-    _check_windows(source, target)
+def _leaks_onto(source: ExecutionWindow, receivers: Sequence[int], begin_us: float, end_us: float,
+                transfers: Sequence[DriveCrosstalkTransfer]) -> tuple[DriveLeak, ...]:
+    """Leaks of ``source``'s drives onto the receiving physical qubits during ``[begin_us, end_us)``."""
     if any(type(item) is not DriveCrosstalkTransfer for item in transfers):
         raise TypeError("transfers must contain DriveCrosstalkTransfer values")
-    if shares_qubits(source, target):
+    if not set(source.physical_qubits).isdisjoint(receivers):
         raise ValueError("crosstalk is defined between disjoint regions")
-    if overlap_span(source, target) is None:
+    if end_us <= begin_us:
         return ()
     index_of = {physical: index for index, physical in enumerate(source.physical_qubits)}
-    by_source: dict[int, list[tuple[int, complex]]] = {}
+    by_source: dict[int, list[DriveCrosstalkTransfer]] = {}
     for transfer in transfers:
-        if (transfer.coefficient != 0.0 and transfer.source in index_of
-                and transfer.target in target.physical_qubits):
-            by_source.setdefault(index_of[transfer.source], []).append((transfer.target, transfer.coefficient))
-    kicks: list[UnitaryKick] = []
+        if transfer.coefficient != 0.0 and transfer.source in index_of and transfer.target in receivers:
+            by_source.setdefault(index_of[transfer.source], []).append(transfer)
+    leaks: list[DriveLeak] = []
     for drive in source.schedule.intervals("drive"):
-        for target_qubit, coefficient in by_source.get(drive.qubit, ()):
-            begin = max(source.start.time_us + drive.start_us, target.start.time_us)
-            end = min(source.start.time_us + drive.end_us, target.finish.time_us)
-            if drive.end_us <= drive.start_us or end <= begin:
-                continue
-            fraction = (end - begin) / (drive.end_us - drive.start_us)
-            kicks.append(UnitaryKick(
-                target_qubit, begin, abs(coefficient) * drive.angle_rad * fraction,
-                cmath.phase(coefficient) + drive.phase_rad, source.job_id,
-                source.physical_qubits[drive.qubit]))
-    kicks.sort(key=lambda k: (k.time_us, k.qubit, k.source_job_id, k.source_qubit))
-    return tuple(kicks)
+        drive_start, drive_end = source.start.time_us + drive.start_us, source.start.time_us + drive.end_us
+        begin, end = max(drive_start, begin_us), min(drive_end, end_us)
+        if drive.end_us <= drive.start_us or end <= begin:
+            continue
+        for transfer in by_source.get(drive.qubit, ()):
+            leaks.append(DriveLeak(
+                transfer.target, begin, end, source.job_id, source.physical_qubits[drive.qubit],
+                transfer.coefficient, transfer.detuning_rad_per_us, drive_start, drive_end,
+                drive.angle_rad, drive.phase_rad, drive.shape))
+    leaks.sort(key=_leak_order)
+    return tuple(leaks)
 
 
-def kicks_into(target: ExecutionWindow, sources: Sequence[ExecutionWindow],
-               transfers: Sequence[DriveCrosstalkTransfer]) -> tuple[UnitaryKick, ...]:
-    """All kicks on ``target`` from the other windows, merged in time order.
+def _leak_order(leak: DriveLeak) -> tuple[float, int, str, int]:
+    return leak.start_us, leak.qubit, leak.source_job_id, leak.source_qubit
+
+
+def drive_crosstalk_leaks(source: ExecutionWindow, target: ExecutionWindow,
+                          transfers: Sequence[DriveCrosstalkTransfer]) -> tuple[DriveLeak, ...]:
+    """Leaks of ``source``'s drives onto ``target`` through the declared transfers, in time order.
+
+    A drive cut by the target window's edge leaks only for the part inside. Virtual Z has no drive and
+    leaks nothing. Pairs without a declared transfer, zero coefficients, and windows that do not overlap
+    give none. One direction only: call again with the windows swapped for the other.
+    """
+    _check_windows(source, target)
+    if shares_qubits(source, target):
+        raise ValueError("crosstalk is defined between disjoint regions")
+    span = overlap_span(source, target)
+    if span is None:
+        _leaks_onto(source, (), 0.0, 0.0, transfers)       # still validates the transfers
+        return ()
+    return _leaks_onto(source, target.physical_qubits, span[0], span[1], transfers)
+
+
+def leaks_into(target: ExecutionWindow, sources: Sequence[ExecutionWindow],
+               transfers: Sequence[DriveCrosstalkTransfer]) -> tuple[DriveLeak, ...]:
+    """All leaks onto ``target`` from the other windows, merged in time order.
 
     A window in ``sources`` that is ``target`` itself is ignored. Sources that share qubits with the
-    target are an error, as in ``drive_crosstalk_kicks``.
+    target are an error, as in ``drive_crosstalk_leaks``.
     """
-    merged = [kick for source in sources if source is not target
-              for kick in drive_crosstalk_kicks(source, target, transfers)]
-    merged.sort(key=lambda k: (k.time_us, k.qubit, k.source_job_id, k.source_qubit))
+    merged = [leak for source in sources if source is not target
+              for leak in drive_crosstalk_leaks(source, target, transfers)]
+    merged.sort(key=_leak_order)
+    return tuple(merged)
+
+
+def gap_leaks(sources: Sequence[ExecutionWindow], qubits: Sequence[int], gap_start_us: float,
+              gap_end_us: float, transfers: Sequence[DriveCrosstalkTransfer]) -> tuple[DriveLeak, ...]:
+    """Leaks onto ``qubits`` while no job of theirs runs, during ``[gap_start_us, gap_end_us)``.
+
+    The qubits keep their state between two jobs and the other windows' drives still leak onto them.
+    ``place_kicks`` puts leaks that start before the next job's window ahead of its first shot, where
+    they act on the state that job inherits.
+    """
+    _check_windows(*sources)
+    if any(type(q) is not int or q < 0 for q in qubits):
+        raise ValueError("qubits must be physical IDs")
+    merged = [leak for source in sources
+              for leak in _leaks_onto(source, tuple(qubits), gap_start_us, gap_end_us, transfers)]
+    merged.sort(key=_leak_order)
     return tuple(merged)

@@ -8,6 +8,7 @@ crosstalk is a sparse complex transfer between scheduled control lines.
 
 from __future__ import annotations
 
+import cmath
 import math
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -45,13 +46,18 @@ class DriveCrosstalkTransfer:
     """Complex control-line leakage from ``source`` to ``target``.
 
     If the intended source envelope is ``x + i y`` and the transfer is
-    ``real + i imag``, the unintended target envelope is their product.
+    ``real + i imag``, the unintended target envelope is their product, turned
+    by ``exp(i * detuning * t)``: the source drive and the target transition
+    differ in frequency, so in the target's rotating frame the leaked field keeps
+    turning at that difference (same sign convention as a drive's own detuning,
+    ``t`` the time of the evolution). Zero detuning is the resonant leak.
     """
 
     source: int
     target: int
     transfer_real: float
     transfer_imag: float = 0.0
+    detuning_rad_per_us: float = 0.0
 
     def __post_init__(self) -> None:
         if self.source < 0 or self.target < 0 or self.source == self.target:
@@ -62,6 +68,8 @@ class DriveCrosstalkTransfer:
             raise ValueError("drive-crosstalk transfer must be finite")
         if abs(complex(self.transfer_real, self.transfer_imag)) > 1.0 + 1e-12:
             raise ValueError("drive-crosstalk transfer magnitude must not exceed one")
+        if not math.isfinite(self.detuning_rad_per_us):
+            raise ValueError("drive-crosstalk detuning must be finite")
 
     @property
     def coefficient(self) -> complex:
@@ -253,8 +261,13 @@ def _evaluate(
             source_quadratures[drive.target] += complex(x_value, y_value)
         leaked = [0.0j for _ in drive_x_arrays]
         for transfer in drive_crosstalk:
+            turn = (
+                cmath.exp(1j * transfer.detuning_rad_per_us * local_time_us)
+                if transfer.detuning_rad_per_us != 0.0
+                else 1.0
+            )
             leaked[transfer.target] += (
-                transfer.coefficient * source_quadratures[transfer.source]
+                transfer.coefficient * turn * source_quadratures[transfer.source]
             )
         for target, amplitude in enumerate(leaked):
             if amplitude.real != 0.0:

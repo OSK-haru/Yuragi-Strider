@@ -584,7 +584,7 @@ class SharedQpuRuntime:
 
     def _apply_kick(self, state: np.ndarray, placed: PlacedKick) -> np.ndarray:
         """A leaked rotation from another job's drive; it takes no time of its own."""
-        slot = self.state_store.read().physical_qubit_ids.index(placed.kick.qubit)
+        slot = self.state_store.read().physical_qubit_ids.index(placed.qubit)
         return apply_operand_operator(state, kick_unitary(placed), (slot,))
 
     def _idle_subset(self, state, slots: tuple[int, ...], elapsed_us: float):
