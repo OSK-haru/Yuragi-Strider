@@ -18,6 +18,8 @@ from core.attack_simulation.jobs import (
 )
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.interleaved_execution import derived_seed, interleaved_work
+from core.attack_simulation.concurrent_windows import UnitaryKick
+from core.attack_simulation.kick_application import EMPTY_PLAN, KickPlan, PlacedKick, kick_unitary
 from core.attack_simulation.program_request import STATE_INHERIT_OPERATION_ID, interleave_operation_id
 from core.attack_simulation.register_readout import register_assignment_errors
 from core.attack_simulation.request_receipts import RequestReceipt
@@ -343,7 +345,7 @@ class SharedQpuRuntime:
                 return tuple(completed)
             completed.append(result)
 
-    def _execute(self, job: JobRecord) -> dict[str, object]:
+    def _execute(self, job: JobRecord, kicks: KickPlan = EMPTY_PLAN) -> dict[str, object]:
         if (self._job_authorization is not None
                 and isinstance(job.command.operation, VictimPrepareOperation)
                 and job.job_id not in self._scenario_workload_job_ids):
@@ -355,7 +357,7 @@ class SharedQpuRuntime:
             return self._execute_interleaved(job, operation)
         reset_outcome = self._prepare_job_context(job)
         snapshot = self.state_store.read()
-        return self._dispatch(job, operation, snapshot, reset_outcome)
+        return self._dispatch(job, operation, snapshot, reset_outcome, kicks)
 
     def _prepare_job_context(self, job: JobRecord) -> ResetModelResult | RegisterResetResult | None:
         """Region/resource assignment and the tenant-handover service reset."""
@@ -407,9 +409,9 @@ class SharedQpuRuntime:
                 counts[label] = counts.get(label, 0) + count
         return {"shots": operation.shots, "counts": counts}
 
-    def _dispatch(self, job, operation, snapshot, reset_outcome) -> dict[str, object]:
+    def _dispatch(self, job, operation, snapshot, reset_outcome, kicks: KickPlan = EMPTY_PLAN) -> dict[str, object]:
         if isinstance(operation, CircuitExecutionOperation):
-            return self._execute_circuit(job, operation)
+            return self._execute_circuit(job, operation, kicks)
         if isinstance(operation, VictimPrepareOperation):
             next_state = density_from_ket(
                 (1.0 + 0.0j, 0.0j)
@@ -470,7 +472,7 @@ class SharedQpuRuntime:
         raise TypeError("unsupported job operation")
 
     def _execute_circuit(
-        self, job: JobRecord, operation: CircuitExecutionOperation,
+        self, job: JobRecord, operation: CircuitExecutionOperation, kicks: KickPlan = EMPTY_PLAN,
     ) -> dict[str, object]:
         generator = random.Random(operation.sampling_seed)
         counts = {"0": 0, "1": 0} if operation.classical_bits == 1 else {}
@@ -488,13 +490,17 @@ class SharedQpuRuntime:
             # Everything before the final measurement is a deterministic channel of the entry
             # state. Channels never increase trace distance, so a shot whose entry state is within
             # the tolerance of an earlier one reuses its result; the random draws are unchanged.
-            cached = _find_reusable(cache, shot_index > 0, entry_state, self.config.entry_reuse_tolerance)
+            # A shot with kicks depends on more than its entry state, so it neither reuses nor is reused.
+            shot_kicks = kicks.of_shot(shot_index)
+            cached = None if shot_kicks else _find_reusable(
+                cache, shot_index > 0, entry_state, self.config.entry_reuse_tolerance)
             if cached is None:
-                cached = self._run_before_measurement(operation, slots, entry_state, shot_index)
+                cached = self._run_before_measurement(operation, slots, entry_state, shot_index, shot_kicks)
                 computed += 1
-                if len(cache) >= _entry_cache_size(entry_state):
-                    cache.pop(0)
-                cache.append((shot_index > 0, entry_state, cached))
+                if not shot_kicks:
+                    if len(cache) >= _entry_cache_size(entry_state):
+                        cache.pop(0)
+                    cache.append((shot_index > 0, entry_state, cached))
             else:
                 reused += 1
             state, assignment, duration = cached
@@ -506,6 +512,9 @@ class SharedQpuRuntime:
                 p10, p01 = assignment[q]
                 classical[target] = int(generator.random() < p10) if bit == 0 else int(generator.random() >= p01)
             duration += measurement_duration
+            if shot_index == operation.shots - 1:
+                for kick in kicks.trailing:
+                    state = self._apply_kick(state, kick)
             self._commit_event(
                 job=job, event_kind="program_shot", next_state=freeze_register(state),
                 duration_us=duration, next_owner_tenant_id=job.command.tenant_id,
@@ -518,8 +527,11 @@ class SharedQpuRuntime:
     last_entry_reuse: tuple[int, int] = (0, 0)
 
     def _run_before_measurement(self, operation: CircuitExecutionOperation, slots: tuple[int, ...],
-                                state: np.ndarray, shot_index: int):
-        """One shot up to, not including, the final measurement; returns (state, readout, time)."""
+                                state: np.ndarray, shot_index: int, shot_kicks: tuple[PlacedKick, ...] = ()):
+        """One shot up to, not including, the final measurement; returns (state, readout, time).
+
+        ``shot_kicks`` are rotations from other jobs, applied before the instruction they are placed at.
+        """
         snapshot = self.state_store.read()
         duration = 0.0
         if shot_index and self.config.repetition_delay_us > 0.0:
@@ -534,7 +546,10 @@ class SharedQpuRuntime:
                 subsystem_count=len(snapshot.physical_qubit_ids), targets=slots,
             )
             assignment.update(enumerate(errors))
-        for instruction in operation.instructions:
+        pending = list(shot_kicks)
+        for index, instruction in enumerate(operation.instructions):
+            while pending and pending[0].position <= index:
+                state = self._apply_kick(state, pending.pop(0).kick)
             operands = tuple(slots[q] for q in instruction.qubits)
             if instruction.kind in {"initialize", "reset"}:
                 readout = self._active_reset_models().run_register(self.config.reset_model_id, ResetModelRequest(
@@ -562,9 +577,16 @@ class SharedQpuRuntime:
                 continue  # the final measurement block is sampled by the caller
             else:
                 raise ValueError("unknown compiled circuit instruction")
+        for placed in pending:
+            state = self._apply_kick(state, placed.kick)
         state = np.array(state, dtype=complex)
         state.flags.writeable = False
         return state, assignment, duration
+
+    def _apply_kick(self, state: np.ndarray, kick: UnitaryKick) -> np.ndarray:
+        """A leaked rotation from another job's drive; it takes no time of its own."""
+        slot = self.state_store.read().physical_qubit_ids.index(kick.qubit)
+        return apply_operand_operator(state, kick_unitary(kick), (slot,))
 
     def _idle_subset(self, state, slots: tuple[int, ...], elapsed_us: float):
         """Relax only the named register slots; the other qubits are left untouched."""

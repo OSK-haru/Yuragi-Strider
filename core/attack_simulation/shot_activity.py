@@ -62,6 +62,37 @@ class ShotActivity:
         return tuple(item for item in self.intervals if item.qubit == qubit)
 
 
+def instruction_starts(operation: CircuitExecutionOperation, *,
+                       reset_duration_us: float) -> tuple[tuple[float | None, ...], float]:
+    """Start time of every instruction within a shot, and the time the final measurements begin.
+
+    A measurement has no start of its own (None): the final block runs after everything else.
+    """
+    if type(operation) is not CircuitExecutionOperation:
+        raise TypeError("a compiled Program is required")
+    starts: list[float | None] = []
+    now = 0.0
+    carrier_start = 0.0
+    carrier_group: int | None = None
+    for item in operation.instructions:
+        if item.kind in {"initialize", "reset"}:
+            starts.append(now)
+            now += reset_duration_us
+            carrier_start, carrier_group = now, None
+        elif item.kind == "measure":
+            starts.append(None)
+        # unitary or delay: the layer rule decides where the instruction starts.
+        elif item.duration_us > 0.0:
+            starts.append(now)
+            carrier_start, carrier_group = now, item.time_group
+            now += item.duration_us
+        elif item.intrinsic_us > 0.0 or item.time_group == carrier_group:
+            starts.append(carrier_start)      # a later instruction of the layer runs with its first one
+        else:
+            starts.append(now)
+    return tuple(starts), now
+
+
 def shot_activity(operation: CircuitExecutionOperation, *, reset_duration_us: float,
                   measurement_duration_us: float) -> ShotActivity:
     """Read one shot of a compiled Program into activity records.
@@ -69,34 +100,20 @@ def shot_activity(operation: CircuitExecutionOperation, *, reset_duration_us: fl
     ``duration_us`` equals the per-shot time the planner charges (reset, gates, measurements); the
     wait between shots belongs to the job, not to the shot.
     """
-    if type(operation) is not CircuitExecutionOperation:
-        raise TypeError("a compiled Program is required")
+    starts, now = instruction_starts(operation, reset_duration_us=reset_duration_us)
     intervals: list[ActivityInterval] = []
     frames: dict[int, float] = {}
-    now = 0.0
-    carrier_start = 0.0
-    carrier_group: int | None = None
     measured_groups: list[int] = []
 
-    for item in operation.instructions:
+    for item, start in zip(operation.instructions, starts):
         if item.kind in {"initialize", "reset"}:
-            intervals.extend(ActivityInterval(q, "reset", now, now + reset_duration_us) for q in item.qubits)
-            now += reset_duration_us
-            carrier_start, carrier_group = now, None
+            intervals.extend(ActivityInterval(q, "reset", start, start + reset_duration_us) for q in item.qubits)
             continue
         if item.kind == "measure":
             if item.time_group not in measured_groups:
                 measured_groups.append(item.time_group)
             continue
 
-        # unitary or delay: the layer rule decides where the instruction starts.
-        if item.duration_us > 0.0:
-            start, carrier_start, carrier_group = now, now, item.time_group
-            now += item.duration_us
-        elif item.intrinsic_us > 0.0 or item.time_group == carrier_group:
-            start = carrier_start      # a later instruction of the layer runs with its first one
-        else:
-            start = now
         if item.kind == "delay":
             if item.wait_us > 0.0:
                 intervals.extend(ActivityInterval(q, "idle", start, start + item.wait_us) for q in item.qubits)

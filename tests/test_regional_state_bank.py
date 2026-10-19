@@ -123,9 +123,9 @@ class RegionalStateBankTests(unittest.TestCase):
                 parked = store.inactive_region()
                 expected = math.exp(-(store.read().device_time_us - parked.updated_at_us) / 10.0)
                 original = runtime._execute_circuit
-                def capture(next_job, next_operation):
+                def capture(next_job, next_operation, *rest):
                     restored_probabilities.append(store.read().density_matrix[2][2].real)
-                    return original(next_job, next_operation)
+                    return original(next_job, next_operation, *rest)
                 with patch.object(runtime, "_execute_circuit", side_effect=capture):
                     self.assertIs(runtime.run_next().status, JobStatus.SUCCEEDED)
                 self.assertAlmostEqual(restored_probabilities[0], expected, places=10)
