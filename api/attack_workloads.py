@@ -117,7 +117,7 @@ class DeclaredWorkloadRunner:
         states = {}
         plans = []
         for role, config in (("attacker", manifest.attacker_config), ("victim", manifest.victim_config)):
-            if "workload" not in config:
+            if config.get("workload") is None:      # absent, or a free-mode slot the author left empty
                 continue
             plan = parse_workload_plan(config["workload"])
             if plan.clock_domain != settings.clock_domain or plan.plan_id in states:

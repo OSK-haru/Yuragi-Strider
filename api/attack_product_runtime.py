@@ -13,6 +13,7 @@ from api.attack_live_websocket import (
 from api.attack_product_factory import ProductAssemblyLimits, ProductEnvironmentFactory
 from api.attack_device_snapshot import load_ibm_kingston_snapshot
 from api.attack_challenge import reset_leakage_challenge, reset_leakage_message_challenge
+from api.attack_crosstalk_challenge import crosstalk_grover_challenge
 from api.attack_product_profiles import product_free_scenarios, standard_snapshot_initial_values
 from api.attack_sessions import SessionHostLimits
 from api.attack_settings_resolver import ScenarioSettingsResolver, create_settings_catalog_router
@@ -54,7 +55,8 @@ def build_attack_simulator_runtime(settings: WebOwnershipSettings) -> AttackSimu
     snapshot = load_ibm_kingston_snapshot()
     resolver = ScenarioSettingsResolver(
         free_scenarios=product_free_scenarios(snapshot),
-        challenges=(reset_leakage_message_challenge(snapshot), reset_leakage_challenge(snapshot)),
+        challenges=(reset_leakage_message_challenge(snapshot), reset_leakage_challenge(snapshot),
+                    crosstalk_grover_challenge(snapshot)),
         standard_initial_values=standard_snapshot_initial_values(snapshot),
     )
     factory = ProductEnvironmentFactory(limits)

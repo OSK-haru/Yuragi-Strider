@@ -12,12 +12,14 @@ from core.attack_simulation.qpu_topology import QpuTopology, TopologyLimits
 from core.attack_simulation.concurrency_policy import (
     CROSSTALK_DIRECTIONS, DEFAULT_CROSSTALK_STRENGTH, EXCLUSIVE_FIFO, OVERLAP_DISJOINT_REGIONS,
 )
+from core.attack_simulation.grover_workload import MAX_SHOTS_PER_RUN, periodic_grover_plan, plan_parameters
 from core.attack_simulation.placement import PlacementPolicy
 from core.attack_simulation.program_request import (
     INTERLEAVE_TRAINING_OPERATION_ID, INTERLEAVE_VICTIM_OPERATION_ID, STATE_INHERIT_OPERATION_ID,
     VICTIM_ACTIVITY_OPERATION_ID,
 )
 from core.attack_simulation.scenario_assumptions import AssumptionBasis, AssumptionRecord
+from core.attack_simulation.workload_config import serialize_workload_plan
 from core.attack_simulation.scenario_compiler import ScenarioOverride
 from core.attack_simulation.scenario_policy import ObservationBudget, ScenarioTemplate
 from core.attack_simulation.shared_qpu_runtime import SharedQpuRuntimeConfig
@@ -47,6 +49,11 @@ SUPPORTED_OPERATIONS_PATH = "qpu_service.supported_operations"
 INTERLEAVED_RUN_SECRET_BIT = "victim.interleaved_run.secret_bit"
 INTERLEAVED_MAX_ROUNDS = "attacker.interleaved_access.max_rounds_per_query"
 RESET_CONFIGURATION_ID = "qpu_service.runtime_execution.reset_model_configuration_id"
+PERIODIC_GROVER = "victim.periodic_grover"
+PERIODIC_GROVER_ENABLED = f"{PERIODIC_GROVER}.enabled"
+VICTIM_WORKLOAD = "victim.workload"
+PERIODIC_GROVER_DEFAULTS = {"enabled": False, "runs": 8, "shots_per_run": 50,
+                            "first_run_us": 30_000_000.0, "pause_between_runs_us": 10_000_000.0}
 # Host-protection bounds for the free-mode interleaved observation channel.
 FREE_INTERLEAVED_QUERY_LIMIT = 1000
 FREE_INTERLEAVED_DEFAULT_ROUNDS = 64
@@ -448,6 +455,14 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
     def derive_overrides(supplied: Mapping[str, object]) -> tuple[ScenarioOverride, ...]:
         prefix = "qpu_service.reset_model.qubits."
         derived: list[ScenarioOverride] = []
+        if supplied.get(PERIODIC_GROVER_ENABLED) is True:
+            schedule = plan_parameters({name: supplied.get(f"{PERIODIC_GROVER}.{name}", default)
+                                        for name, default in PERIODIC_GROVER_DEFAULTS.items()})
+            plan, _ = periodic_grover_plan(region=region, edges=topology.gate_edges, clock_domain="scenario-world",
+                                           device_id=snapshot.device_id, **schedule)
+            derived.append(ScenarioOverride(
+                VICTIM_WORKLOAD, serialize_workload_plan(plan),
+                "Server-derived: the author enabled the victim's periodic Grover search."))
         interleave_on = supplied.get(ABSTRACT_INTERLEAVE) is True
         activity_on = supplied.get(ABSTRACT_VICTIM_ACTIVITY) is True
         if interleave_on or activity_on:
@@ -551,14 +566,16 @@ def _template(template_id: str, qpu: Mapping[str, object], mode: str,
                           "qubit_frequency_ghz", "t1_max_us", "tphi_max_us")
         )
     editable.extend((INTERLEAVED_RUN_SECRET_BIT, INTERLEAVED_MAX_ROUNDS, RESET_CONFIGURATION_ID,
-                     ABSTRACT_INTERLEAVE, ABSTRACT_VICTIM_ACTIVITY, SUPPORTED_OPERATIONS_PATH))
+                     ABSTRACT_INTERLEAVE, ABSTRACT_VICTIM_ACTIVITY, SUPPORTED_OPERATIONS_PATH,
+                     VICTIM_WORKLOAD, *(f"{PERIODIC_GROVER}.{name}" for name in PERIODIC_GROVER_DEFAULTS)))
     editable.extend(f"qpu_service.reset_model.qubits.{qid}.success_probability" for qid in region)
     return ScenarioTemplate(
         template_id, "1",
         {"principal_id": "attacker", "tenant_id": "tenant-attacker", "operation_grants": list(OPERATIONS),
          "interleaved_access": {"max_rounds_per_query": FREE_INTERLEAVED_DEFAULT_ROUNDS}},
         {"principal_id": "victim", "tenant_id": "tenant-victim", "operation_grants": list(OPERATIONS),
-         "interleaved_run": {"program": "prepare_basis_state_then_measure", "secret_bit": 1}},
+         "interleaved_run": {"program": "prepare_basis_state_then_measure", "secret_bit": 1},
+         "periodic_grover": dict(PERIODIC_GROVER_DEFAULTS), "workload": None},
         dict(qpu), {"actor_tenants": {"attacker": "tenant-attacker", "victim": "tenant-victim"}},
         {"world_clock": {"clock_domain": "scenario-world", "rate": 1.0},
          "live_time_policy": {"mode": "host_clock", "pause_while_catching_up": False}},
@@ -759,6 +776,10 @@ def _interleaving_assumptions(region: tuple[int, ...]) -> list[AssumptionRecord]
                 "Assumes the attacker's job is scheduled directly after every victim job on the same qubit, one "
                 "attacker shot per victim run (the co-scheduling that the cited attack needs). It is a scenario "
                 "condition, not a guarantee of any real queue; the cap is also a host-protection limit."),
+        _record(PERIODIC_GROVER, AssumptionBasis.SIMULATOR_CHOICE,
+                "Schedule of the victim's repeated four-qubit, two-iteration Grover search (runs, shots, first-run time and pause). The search is routed onto the victim's region with relative-phase Toffoli gates and SWAPs because the service has no multi-controlled gate; the marked item is fixed. A scenario condition, not a model of any real user."),
+        _record(VICTIM_WORKLOAD, AssumptionBasis.SIMULATOR_CHOICE,
+                "Derived by the server from the periodic Grover settings; the victim submits it as an ordinary tenant."),
         _record("victim.interleaved_run.secret_bit", AssumptionBasis.PAPER_ASSUMPTION,
                 "The victim repeatedly prepares one classical bit on the shared qubit and measures it, which leaves "
                 "that bit as the state the service must reset.", evidence=paper),
@@ -801,6 +822,20 @@ def _fields(region: tuple[int, ...], mode: str, calibrations: Mapping[int, objec
                      "この設定は、論文の攻撃条件が成り立つ仕組み（被害者の直後にサービスのResetを挟んで攻撃者が"
                      "測る）を、画面で確かめて学ぶためのシミュレーター上の便宜です。読み出せるのは記録された"
                      "手順と時刻だけで、状態や被害者の測定値は含みません。"),
+        SettingField(PERIODIC_GROVER_ENABLED, "被害者の仕事量: 4 qubit Groverの周期実行", "boolean",
+                     "被害者が、4 qubit・2反復のGrover探索（16候補）を、結果を受け取るたびに一定の間隔をおいて繰り返します。"
+                     "初期値はオフです。",
+                     "被害者が実際に走らせる回路を持たせるための設定です。実サービスの利用者の動きではありません。"
+                     "被害者の領域の中で動き、別領域の攻撃者のジョブと同じ時刻に実行されうるのは、ジョブの同時実行が"
+                     "「重ねて実行」のときだけです。標識項目と反復数は固定です。"),
+        _integer(f"{PERIODIC_GROVER}.runs", "被害者のGrover: 実行回数", 1, 64,
+                 "被害者がGroverを実行する回数です。"),
+        _integer(f"{PERIODIC_GROVER}.shots_per_run", "被害者のGrover: 1回のshot数", 1, MAX_SHOTS_PER_RUN,
+                 "1回の実行のshot数です。上限は、ホストを守るための命令作業量の上限から決まります。"),
+        _number(f"{PERIODIC_GROVER}.first_run_us", "被害者のGrover: 最初の実行の時刻", 0.0, 1e9, "us",
+                "環境ができてから、最初の実行を送るまでの仮想時間です。繰り返しの間隔以上にしてください。"),
+        _number(f"{PERIODIC_GROVER}.pause_between_runs_us", "被害者のGrover: 結果を受け取ってから次の実行まで", 0.0, 1e9,
+                "us", "結果を受け取ってから、次の実行を送るまでの仮想時間です。"),
         SettingField(INTERLEAVED_RUN_SECRET_BIT, "被害者の秘密bit", "integer",
                      "被害者が毎回準備して測定する1 qubitの値です。自由モードでは見て変更できます。課題モードでは非公開になります。",
                      "共有qubitの交代を「被害者の実行 → サービスのReset → 攻撃者の測定」の繰り返しとして観測する実験で、"
