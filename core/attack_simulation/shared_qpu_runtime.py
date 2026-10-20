@@ -557,9 +557,23 @@ class SharedQpuRuntime:
         snapshot = self.state_store.read()
         duration = 0.0
         if shot_index and self.config.repetition_delay_us > 0.0:
-            # The declared wait between shots relaxes the inherited state before the next shot.
-            state = np.asarray(self._active_idle_model().evolve(
-                state, elapsed_us=self.config.repetition_delay_us), dtype=complex)
+            # A leak in the wait acts at its recorded time. Evolve in segments so later
+            # relaxation does not get moved ahead of that kick.
+            elapsed = 0.0
+            wait_kicks = sorted((kick for kick in shot_kicks if kick.wait_offset_us is not None),
+                                key=lambda kick: kick.wait_offset_us)
+            for placed in wait_kicks:
+                offset = placed.wait_offset_us
+                if offset > self.config.repetition_delay_us:
+                    raise ValueError("kick wait offset exceeds the repetition delay")
+                if offset > elapsed:
+                    state = np.asarray(self._active_idle_model().evolve(state, elapsed_us=offset - elapsed),
+                                       dtype=complex)
+                    elapsed = offset
+                state = self._apply_kick(state, placed)
+            if elapsed < self.config.repetition_delay_us:
+                state = np.asarray(self._active_idle_model().evolve(
+                    state, elapsed_us=self.config.repetition_delay_us - elapsed), dtype=complex)
             duration += self.config.repetition_delay_us
         assignment: dict[int, tuple[float, float]] = {}
         if operation.initialization == "inherit":
@@ -568,7 +582,7 @@ class SharedQpuRuntime:
                 subsystem_count=len(snapshot.physical_qubit_ids), targets=slots,
             )
             assignment.update(enumerate(errors))
-        pending = list(shot_kicks)
+        pending = [kick for kick in shot_kicks if kick.wait_offset_us is None]
         for index, instruction in enumerate(operation.instructions):
             while pending and pending[0].position <= index:
                 state = self._apply_kick(state, pending.pop(0))

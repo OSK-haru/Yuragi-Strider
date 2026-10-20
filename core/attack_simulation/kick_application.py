@@ -59,12 +59,14 @@ class PlacedKick:
 
     ``position == len(instructions)`` means at the end of the shot's instructions. ``rotation`` is the
     rotation vector (angle times axis) in the simulator's frame; ``sources`` are the job IDs it comes from.
+    ``wait_offset_us`` places it inside the wait before this shot, when present.
     """
 
     position: int
     qubit: int
     rotation: tuple[float, float, float]
     sources: tuple[str, ...] = ()
+    wait_offset_us: float | None = None
 
     def __post_init__(self) -> None:
         if type(self.position) is not int or self.position < 0:
@@ -75,6 +77,11 @@ class PlacedKick:
         if len(rotation) != 3 or not all(math.isfinite(value) for value in rotation):
             raise ValueError("kick rotation must be a finite 3-vector")
         object.__setattr__(self, "rotation", rotation)
+        if self.wait_offset_us is not None:
+            offset = float(self.wait_offset_us)
+            if not math.isfinite(offset) or offset < 0.0:
+                raise ValueError("kick wait offset must be finite and nonnegative")
+            object.__setattr__(self, "wait_offset_us", offset)
 
 
 @dataclass(frozen=True)
@@ -212,10 +219,13 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
             timelines[qubit] = _Timeline(operation, starts, qubit)
         return timelines[qubit]
 
-    accumulated: dict[tuple[int | None, int, int], list] = {}
+    # Keep distinct time intervals distinct even when they map to the same instruction.
+    # Contributions on the same interval still use the documented additive-source approximation.
+    accumulated: dict[tuple[int | None, int, int, float, float, float | None], list] = {}
 
-    def add(shot: int | None, position: int, leak: DriveLeak, vector: np.ndarray) -> None:
-        entry = accumulated.setdefault((shot, position, leak.qubit), [np.zeros(3), set()])
+    def add(shot: int | None, position: int, leak: DriveLeak, vector: np.ndarray,
+            begin: float, end: float, wait_offset: float | None = None) -> None:
+        entry = accumulated.setdefault((shot, position, leak.qubit, begin, end, wait_offset), [np.zeros(3), set()])
         entry[0] += vector
         entry[1].add(leak.source_job_id)
 
@@ -252,7 +262,8 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
         program = program_qubit.get(leak.qubit)
         frames = timeline(program).frames if program is not None else None
         if leak.start_us < first_shot:                 # the gap before the window, or the handover
-            add(0, 0, leak, plain(leak, leak.start_us, min(leak.end_us, first_shot), 0.0))
+            end = min(leak.end_us, first_shot)
+            add(0, 0, leak, plain(leak, leak.start_us, end, 0.0), leak.start_us, end)
         relative, stop = max(leak.start_us - first_shot, 0.0), leak.end_us - first_shot
         guard = 0
         while relative < stop:
@@ -268,10 +279,14 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
                 if shot + 1 < shots:
                     reach = min(stop, (shot + 1) * period)
                     if reach > relative:
-                        add(shot + 1, 0, leak, plain(leak, first_shot + relative, first_shot + reach, 0.0))
+                        begin_us, end_us = first_shot + relative, first_shot + reach
+                        wait_start = first_shot + (shot + 1) * period - schedule.repetition_delay_us
+                        add(shot + 1, 0, leak, plain(leak, begin_us, end_us, 0.0), begin_us, end_us,
+                            end_us - wait_start)
                 else:
                     frame = 0.0 if frames is None else frames[end_position]
-                    add(None, end_position, leak, plain(leak, first_shot + relative, first_shot + stop, frame))
+                    begin_us, end_us = first_shot + relative, first_shot + stop
+                    add(None, end_position, leak, plain(leak, begin_us, end_us, frame), begin_us, end_us)
                     reach = stop
                 relative = reach if reach > relative else math.nextafter(relative, math.inf)
                 continue
@@ -283,22 +298,26 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
                 if gate.start > cursor:                # not in a gate of its own: placed between instructions
                     position = bisect_right(keys, cursor)
                     frame = 0.0 if frames is None else frames[position]
-                    add(shot, position, leak, plain(leak, base + cursor, base + gate.start, frame))
+                    begin_us, end_us = base + cursor, base + gate.start
+                    add(shot, position, leak, plain(leak, begin_us, end_us, frame), begin_us, end_us)
                     cursor = gate.start
                 inside_end = min(end_local, gate.end)
-                add(shot, gate.index, leak, toggled(leak, gate, base, cursor, inside_end))
+                add(shot, gate.index, leak, toggled(leak, gate, base, cursor, inside_end),
+                    base + cursor, base + inside_end)
                 cursor = inside_end
             if cursor < end_local:
                 position = bisect_right(keys, cursor)
                 frame = 0.0 if frames is None else frames[position]
-                add(shot, position, leak, plain(leak, base + cursor, base + end_local, frame))
+                begin_us, end_us = base + cursor, base + end_local
+                add(shot, position, leak, plain(leak, begin_us, end_us, frame), begin_us, end_us)
             advanced = shot * period + end_local
             relative = advanced if advanced > relative else math.nextafter(relative, math.inf)
 
     per_shot: list[list[PlacedKick]] = [[] for _ in range(shots)]
     trailing: list[PlacedKick] = []
-    for (shot, position, qubit), (vector, sources) in sorted(
-            accumulated.items(), key=lambda item: (-1 if item[0][0] is None else item[0][0], item[0][1], item[0][2])):
-        placed = PlacedKick(position, qubit, tuple(vector), tuple(sorted(sources)))
+    for (shot, position, qubit, _begin, _end, wait_offset), (vector, sources) in sorted(
+            accumulated.items(), key=lambda item: (-1 if item[0][0] is None else item[0][0], item[0][1],
+                                                   item[0][2], item[0][3])):
+        placed = PlacedKick(position, qubit, tuple(vector), tuple(sorted(sources)), wait_offset)
         (trailing if shot is None else per_shot[shot]).append(placed)
     return KickPlan(tuple(tuple(shot) for shot in per_shot), tuple(trailing))

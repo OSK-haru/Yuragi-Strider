@@ -2,6 +2,7 @@
 
 import math
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 import numpy as np
@@ -13,6 +14,7 @@ from core.attack_simulation.kick_application import EMPTY_PLAN, KickPlan, Placed
 from core.attack_simulation.pulse_shape import SQUARE_SHAPE
 from core.attack_simulation.shot_activity import frame_before, instruction_starts, shot_activity
 from core.experimental_isolation_physics import ImperfectResetSpec, PhenomenologicalResetModel
+from core.experimental_isolation_physics.idle_evolution import IdleQubitSpec, IndependentIdleModel
 from tests.test_local_program_runtime import program_json
 from tests.test_program_initialization import build, request
 from tests.test_shot_activity import IDS as IDS_PRODUCT, compile_circuit
@@ -120,6 +122,26 @@ class RuntimeKickTests(unittest.TestCase):
         _, _, (_, reused_plain), _ = run(lambda op: EMPTY_PLAN, shots=6)
         self.assertLess(reused, reused_plain)
 
+    def test_wait_kick_is_followed_by_the_remaining_relaxation(self):
+        _, runtime, service = build(ids=IDS)
+        runtime.config = replace(runtime.config, repetition_delay_us=10.0)
+        runtime.idle_model = IndependentIdleModel(
+            (IdleQubitSpec(1.0, math.inf, 0.0),
+             IdleQubitSpec(math.inf, math.inf, 0.0),
+             IdleQubitSpec(math.inf, math.inf, 0.0)), 3,
+        )
+        text = program_json(3, [], measurements=[(0, 0)], classical_bits=1)
+        job = service.submit_program("a", request(text=text, mode="inherit"))
+        record = runtime.scheduler.get(job.job_id)
+        kick = placed(0, IDS[0], vector(math.pi))
+        kick = PlacedKick(kick.position, kick.qubit, kick.rotation, wait_offset_us=1.0)
+        state, _, _ = runtime._run_before_measurement(
+            record.command.operation, (0,), np.asarray(runtime.state_store.read().density_matrix, dtype=complex),
+            1, (kick,),
+        )
+        excited = sum(state[index, index].real for index in range(8) if index & 4)
+        self.assertAlmostEqual(excited, math.exp(-9.0), places=12)
+
 
 class PlacementTests(unittest.TestCase):
     """Positions and sizes, for a qubit outside the program (no frame, no own evolution)."""
@@ -176,6 +198,19 @@ class PlacementTests(unittest.TestCase):
         plan = self.place(self.short(self.shot_time(0, self.shot.duration_us + 1.0)))
         self.assertEqual([len(s) for s in plan.per_shot], [0, 1, 0])
         self.assertEqual(plan.per_shot[1][0].position, 0)
+        self.assertAlmostEqual(plan.per_shot[1][0].wait_offset_us, 1.0001)
+
+    def test_separate_same_source_leaks_keep_their_order_at_one_instruction_position(self):
+        first = leak(3, self.shot_time(0, 0.2), self.shot_time(0, 0.2001), angle=0.8, phase=0.0,
+                     job="same")
+        second = leak(3, self.shot_time(0, 0.5), self.shot_time(0, 0.5001), angle=0.8,
+                      phase=math.pi / 2, job="same")
+        (early, late) = self.place(first, second).per_shot[0]
+        self.assertEqual(early.position, late.position)
+        self.assertEqual(early.sources, ("same",))
+        self.assertEqual(late.sources, ("same",))
+        self.assertLess(early.rotation[1], 1e-12)
+        self.assertGreater(late.rotation[1], 0.79)
 
     def test_during_the_final_measurements_goes_just_before_sampling(self):
         plan = self.place(self.short(self.shot_time(2, self.shot.duration_us - 0.5)))
