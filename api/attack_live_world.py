@@ -429,22 +429,24 @@ class LiveWorkloadWorld:
             for _, _, event in waiting:
                 if event.job_id:
                     self._arrivals.setdefault(event.job_id, event.arrival)
-            previous = executor.frontier.snapshot().confirmed
-            tenant = executor.runtime.state_store.read().owner_tenant_id
-            if executor._active is not None:
-                active, window, _, _ = executor._active
-                previous, tenant = window.finish, active.command.tenant_id
+            # One chain per FIFO lane: the whole queue when exclusive, each region when concurrent.
+            anchors = {}
             for job_id in executor.runtime.scheduler.queued_job_ids():
                 job = executor.runtime.scheduler.get(job_id)
                 if job_id not in self._arrivals:
                     raise WorkloadInfrastructureError("unrecorded source reached live queue")
+                key = executor.lane_key(job_id)
+                if key not in anchors:
+                    anchors[key] = executor.plan_anchor(key)
+                previous, tenant = anchors[key]
                 window = self._timing.plan_job_window(job, executor.runtime.config,
-                    previous_finish=previous, previous_tenant_id=tenant, arrival=self._arrivals[job_id])
+                    previous_finish=previous, previous_tenant_id=tenant, arrival=self._arrivals[job_id],
+                    taken=executor.taken_keys(job_id))
                 if job_id not in executor._windows:
                     executor.register_job(job_id, window)
                 elif executor._windows[job_id] != window:
                     executor.replan_queued_job(job_id, window, owner=self._controls._owner)
-                previous, tenant = window.finish, job.command.tenant_id
+                anchors[key] = window.finish, job.command.tenant_id
 
     def _refine_dependencies(self, target):
         """Min(success, known cancellation, earliest FUTURE live cancellation).
@@ -511,13 +513,9 @@ class LiveWorkloadWorld:
                 continue
             if release.time_us < target.time_us:
                 actions.append((release.key, 0, producer, event.event_id, "workload_release", release))
-        head = executor._active
-        if head is None:
-            queued = executor.runtime.scheduler.queued_job_ids()
-            head = (executor.runtime.scheduler.get(queued[0]), executor._windows[queued[0]]) if queued else None
+        head = executor.next_physical()
         if head is not None:
-            job, window = head[:2]
-            kind = "finish" if job.status is JobStatus.RUNNING else "start"
+            kind, job, window = head
             position = window.finish if kind == "finish" else window.start
             # Every pending application also bars physics, after its arrival retires.
             controls = [op.window.application for op in self._operations.values()
@@ -719,7 +717,7 @@ class LiveWorkloadWorld:
             # Finite actors may finish; a live world remains receptive until discard.
             settled = (all(s.finished for s in self._runner.states().values())
                 and all(op.applied and op.release.key <= target.key for op in self._operations.values())
-                and not self._executor.runtime.scheduler.queued_job_ids() and self._executor._active is None)
+                and not self._executor.runtime.scheduler.queued_job_ids() and self._executor.physical_idle())
             confirmed = self._executor.frontier.snapshot().confirmed
             return WorldPumpReport(
                 target, count, settled, count == max_transitions and not settled,

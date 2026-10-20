@@ -102,6 +102,8 @@ class ClosedWorkloadWorld:
 
     def _head_window(self):
         executor = self._executor
+        if executor._concurrent is not None:
+            raise ValueError("the closed-world adapter runs one FIFO; concurrent sharing needs the live world")
         if executor._active is not None:
             job, window, _, _ = executor._active
             return job, window

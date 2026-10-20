@@ -86,6 +86,13 @@ def compiled_job_duration(
     return _duration(duration, "compiled job duration")
 
 
+def _distinct(position: EventPosition, taken: frozenset) -> EventPosition:
+    """The first position at this time whose full key is not in ``taken`` (tie order adds no duration)."""
+    while position.key in taken:
+        position = EventPosition(position.clock_domain, position.time_us, position.order + 1)
+    return position
+
+
 def _after(position: EventPosition, delay_us: float) -> EventPosition:
     time_us = _duration(position.time_us + delay_us, "planned event time")
     if delay_us > 0 and time_us == position.time_us:
@@ -125,13 +132,17 @@ class DeclaredServiceTiming:
         previous_finish: EventPosition | None,
         previous_tenant_id: str | None,
         arrival: EventPosition,
+        taken: frozenset = frozenset(),
     ) -> JobExecutionWindow:
         """Plan one supplied FIFO successor without reading or mutating owners.
 
         START is after arrival + processing and strictly after previous FINISH's
         full key, including ties with arbitrary ingress orders. FINISH and
         release advance causally even with zero durations; tie order does not
-        add physical microseconds. Publication never occupies the QPU. The
+        add physical microseconds. Publication never occupies the QPU. Under
+        concurrent sharing, ``taken`` holds the START/FINISH keys of the other
+        regions' windows: this window's own START and FINISH step past them in
+        tie order, so every physical event has a distinct key. The
         caller owns FIFO selection, cancellation, initial tenant evidence, and
         finite queue/history limits; this function cannot infer those inputs.
         """
@@ -144,7 +155,8 @@ class DeclaredServiceTiming:
         start = _after(arrival, self.processing_delay_us)
         if previous_finish is not None and start.key <= previous_finish.key:
             start = _after(previous_finish, 0.0)
-        finish = _after(start, duration)
+        start = _distinct(start, taken)
+        finish = _distinct(_after(start, duration), taken)
         release = _after(finish, self.publication_delay_us)
         return JobExecutionWindow(arrival, start, finish, release)
 

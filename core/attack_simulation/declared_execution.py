@@ -14,6 +14,10 @@ from threading import Lock, RLock
 import numpy as np
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
+from core.attack_simulation.concurrent_lanes import (
+    ConcurrentRegions, RegionLane, build_lane_stores, execution_window, kicks_for,
+)
+from core.attack_simulation.kick_application import EMPTY_PLAN
 from core.attack_simulation.declared_ingress import IngressReservation, _producer
 from core.attack_simulation.event_commit_boundary import EventOrderError, EventPosition
 from core.attack_simulation.interleaved_execution import interleaved_work
@@ -93,7 +97,8 @@ class DeclaredQpuExecutor:
 
     def __init__(self, *, runtime: SharedQpuRuntime, clock_domain: str,
                  max_jobs: int, max_events_per_job: int, max_unresolved: int,
-                 idle_model: IndependentIdleModel | None):
+                 idle_model: IndependentIdleModel | None,
+                 concurrent_regions: ConcurrentRegions | None = None):
         if type(runtime) is not SharedQpuRuntime:
             raise TypeError("the common runtime is required")
         for limit in (max_jobs, max_events_per_job, max_unresolved):
@@ -131,6 +136,21 @@ class DeclaredQpuExecutor:
         self._receipt_namespace: str | None = None
         self._cancellations = {}
         self._control_requests = {}
+        # Concurrent sharing: one lane (own store, clock, running job) per region, coupled only by leaks.
+        self._concurrent = concurrent_regions
+        self._lanes: dict[tuple[int, ...], RegionLane] = {}
+        self._job_lane: dict[str, RegionLane] = {}
+        self._xwindows: dict[str, object] = {}
+        if concurrent_regions is not None:
+            if type(concurrent_regions) is not ConcurrentRegions:
+                raise TypeError("a ConcurrentRegions choice is required")
+            if not runtime.tenant_regions or runtime.config.placement_policy.value != "tenant_dedicated_region":
+                raise ValueError("concurrent sharing needs tenant-dedicated regions")
+            stores = build_lane_stores(runtime.state_store)
+            for store in stores.values():
+                store.bind_transaction_lock(gate)
+            self._lanes = {region: RegionLane(region, store) for region, store in stores.items()}
+            runtime.scheduler.bind_lanes(lambda command: runtime.tenant_regions[command.tenant_id])
         runtime._declared_executor = self
         runtime._declared_event_limit = max_events_per_job
 
@@ -263,6 +283,7 @@ class DeclaredQpuExecutor:
             trace = DeclaredCancellationTrace(job_id, principal_id, request_id, window,
                                               arrival, application, release, ingress_reservation)
             previous_release = self._releases[job_id]
+            previous_lane_window = self._xwindows.get(job_id)
             cancelled = False
             try:
                 self.runtime.scheduler._cancel_declared(job_id)
@@ -271,6 +292,7 @@ class DeclaredQpuExecutor:
                     book.commit_barrier_replacement(replacement)
                 # Remove only the unexecuted window, never state/events/START.
                 del self._windows[job_id]
+                self._xwindows.pop(job_id, None)
                 self._releases[job_id] = release
                 self._cancellations[job_id] = trace
                 self._control_requests[key] = trace
@@ -278,6 +300,8 @@ class DeclaredQpuExecutor:
                 for replacement in reversed(replacements):
                     book._rollback_barrier_replacement(replacement)
                 self._windows[job_id] = window
+                if previous_lane_window is not None:
+                    self._xwindows[job_id] = previous_lane_window
                 self._releases[job_id] = previous_release
                 self._cancellations.pop(job_id, None)
                 self._control_requests.pop(key, None)
@@ -309,6 +333,8 @@ class DeclaredQpuExecutor:
                 raise EventOrderError("job would backinsert behind confirmed physics")
             if len(self._releases) >= self._max_jobs:
                 raise DeclaredExecutionCapacityError("declared job history is full")
+            if self._concurrent:
+                self._register_lane_window(job_id, window)
             self._windows[job_id] = window
             self._releases[job_id] = window.release
 
@@ -339,6 +365,8 @@ class DeclaredQpuExecutor:
             confirmed = self.frontier.snapshot().confirmed
             if confirmed is not None and window.start.key <= confirmed.key:
                 raise EventOrderError("queued replanning cannot backinsert behind confirmed physics")
+            if self._concurrent:
+                self._register_lane_window(job_id, window)
             self._windows[job_id] = window
             self._releases[job_id] = window.release
 
@@ -413,23 +441,158 @@ class DeclaredQpuExecutor:
         detached._job_authorization = self.runtime.job_authorization
         return detached
 
-    def _begin(self):
+    # A lane is one region's independent authority under concurrent sharing; ``None`` is the single
+    # shared authority of the exclusive FIFO, whose attributes keep their original names.
+    def _store(self, lane):
+        return self.runtime.state_store if lane is None else lane.store
+
+    def _get_active(self, lane):
+        return self._active if lane is None else lane.active
+
+    def _get_prepared(self, lane):
+        return self._prepared if lane is None else lane.prepared
+
+    def _get_end(self, lane):
+        return self._physical_end if lane is None else lane.end_us
+
+    def _idle_for(self, lane):
+        return (self._active_idle_model() if lane is None
+                else self.runtime.regional_idle_models[lane.region])
+
+    def _lane_head_id(self, lane):
+        queued = self.runtime.scheduler.queued_job_ids()
+        if lane is None:
+            return queued[0] if queued else None
+        for job_id in queued:
+            if self.runtime.tenant_regions[self.runtime.scheduler.get(job_id).command.tenant_id] == lane.region:
+                return job_id
+        return None
+
+    def _is_active(self, job_id: str) -> bool:
+        if self._concurrent:
+            return any(lane.active is not None and lane.active[0].job_id == job_id
+                       for lane in self._lanes.values())
+        return self._active is not None and self._active[0].job_id == job_id
+
+    def physical_idle(self) -> bool:
+        """No job is between its confirmed START and FINISH."""
+        if self._concurrent:
+            return all(lane.active is None for lane in self._lanes.values())
+        return self._active is None
+
+    def lane_key(self, job_id: str):
+        """The FIFO lane a job queues in: its region under concurrent sharing, else one shared lane."""
+        if not self._concurrent:
+            return None
+        return self.runtime.tenant_regions[self.runtime.scheduler.get(job_id).command.tenant_id]
+
+    def plan_anchor(self, key):
+        """``(previous_finish, previous_tenant_id)`` for planning the next job of a lane."""
+        if key is None:
+            previous = self.frontier.snapshot().confirmed
+            tenant = self.runtime.state_store.read().owner_tenant_id
+            if self._active is not None:
+                active, window, _, _ = self._active
+                previous, tenant = window.finish, active.command.tenant_id
+            return previous, tenant
+        lane = self._lanes[key]
+        if lane.active is not None:
+            return lane.active[1].finish, lane.active[0].command.tenant_id
+        return lane.last_finish, lane.store.read().owner_tenant_id
+
+    def taken_keys(self, exclude_job_id: str | None = None) -> frozenset:
+        """Event keys of every other registered window; a new window must not reuse one."""
+        if not self._concurrent:
+            return frozenset()
+        return frozenset(position.key for job_id, window in self._windows.items() if job_id != exclude_job_id
+                         for position in (window.start, window.finish))
+
+    def next_physical(self):
+        """The next START or FINISH to confirm as ``(kind, job, window)``, or None."""
+        found = self._next_lane_event()
+        if found is None:
+            return None
+        kind, _, job, window = found
+        return kind, job, window
+
+    def _next_lane_event(self):
+        if not self._concurrent:
+            if self._active is not None:
+                job, window = self._active[:2]
+            else:
+                queued = self.runtime.scheduler.queued_job_ids()
+                if not queued:
+                    return None
+                job, window = self.runtime.scheduler.get(queued[0]), self._windows[queued[0]]
+            return ("finish" if job.status is JobStatus.RUNNING else "start"), None, job, window
+        best = None
+        for lane in self._lanes.values():
+            if lane.active is not None:
+                job, window = lane.active[:2]
+                candidate = ("finish", lane, job, window, window.finish)
+            else:
+                job_id = self._lane_head_id(lane)
+                window = None if job_id is None else self._windows.get(job_id)
+                if window is None:
+                    continue
+                candidate = ("start", lane, self.runtime.scheduler.get(job_id), window, window.start)
+            if best is None or candidate[4].key < best[4].key:
+                best = candidate
+        return None if best is None else best[:4]
+
+    def _register_lane_window(self, job_id: str, window: JobExecutionWindow) -> None:
+        """Keep the job's drive schedule as an execution window for the other regions' leaks."""
+        job = self.runtime.scheduler.get(job_id)
+        region = self.runtime.tenant_regions[job.command.tenant_id]
+        taken = self.taken_keys(job_id)
+        if window.start.key in taken or window.finish.key in taken:
+            raise EventOrderError("physical event positions of concurrent regions must be distinct")
+        reset_us, measurement_us = self.runtime.regional_service_durations[region]
+        previous = self._xwindows.get(job_id)
+        self._xwindows[job_id] = execution_window(
+            job_id, job.command.tenant_id, job.command.operation, job.command.layout.physical_qubit_ids,
+            region, window.start, window.finish, reset_duration_us=reset_us,
+            measurement_duration_us=measurement_us,
+            repetition_delay_us=self.runtime.config.repetition_delay_us,
+            pulse_shape=self._concurrent.pulse_shape,
+            schedule=None if previous is None else previous.schedule)
+
+    def _kick_inputs(self, lane, job, window):
+        """Everything the kick assembly needs, read under the gate; the numerical work runs outside."""
+        target = self._xwindows[job.job_id]
+        others = tuple(item for item in self._xwindows.values() if item.physical_qubits[0] not in lane.region)
+        reset_us = self.runtime.regional_service_durations[lane.region][0]
+        return (target, lane.last_window, others, self._concurrent, job.command.operation,
+                job.command.layout.physical_qubit_ids, reset_us)
+
+    def _prune_windows(self) -> None:
+        """Drop windows that ended before every lane's computed time and so can never leak again."""
+        threshold = min((lane.last_finish.time_us if lane.last_finish is not None else 0.0)
+                        for lane in self._lanes.values())
+        keep = {id(lane.last_window) for lane in self._lanes.values() if lane.last_window is not None}
+        for job_id in [j for j, w in self._xwindows.items()
+                       if w.finish.time_us <= threshold and id(w) not in keep]:
+            del self._xwindows[job_id]
+
+    def _begin(self, lane=None):
+        store = self._store(lane)
         with self._gate:
             self._open()
-            if self._active is not None:
-                return self._active
-            queued = self.runtime.scheduler.queued_job_ids()
-            if not queued:
+            if self._get_active(lane) is not None:
+                return self._get_active(lane)
+            head_id = self._lane_head_id(lane)
+            if head_id is None:
                 return None
-            job = self.runtime.scheduler.get(queued[0])
+            job = self.runtime.scheduler.get(head_id)
             window = self._windows.get(job.job_id)
             if window is None:
                 raise ValueError("FIFO head has no declared physical window")
-            snapshot = self.runtime.state_store.read()
-            if window.start.time_us < self._physical_end:
+            snapshot = store.read()
+            if window.start.time_us < self._get_end(lane):
                 raise EventOrderError("single-region physical windows overlap")
-            gap = window.start.time_us - self._physical_end
-            if gap and self._active_idle_model() is None:
+            gap = window.start.time_us - self._get_end(lane)
+            idle_model = self._idle_for(lane)
+            if gap and idle_model is None:
                 raise ValueError("positive declared wait requires an explicit complete idle model")
             self.runtime._authorize(job.command)
             self.runtime._validate_job_target(job.command)
@@ -458,70 +621,92 @@ class DeclaredQpuExecutor:
                 try:
                     running = self.runtime.scheduler._start_declared(job.job_id)
                     if idle_batch is not None:
-                        self.runtime.state_store.commit_prepared(idle_batch)
+                        store.commit_prepared(idle_batch)
                 except BaseException:
                     self.runtime.scheduler._rollback_declared_start(job.job_id)
                     if idle_batch is not None:
-                        self.runtime.state_store._rollback_prepared_commit(idle_batch)
+                        store._rollback_prepared_commit(idle_batch)
                     raise
-                self.runtime._next_event_sequence = self.runtime.state_store.read().revision + 1
-                self._physical_end = window.start.time_us
-                self._active = (running, window, self.runtime.state_store.read(), 0.0)
-                return self._active
+                self.runtime._next_event_sequence = store.read().revision + 1
+                active = (running, window, store.read(), 0.0)
+                if lane is None:
+                    self._physical_end = window.start.time_us
+                    self._active = active
+                else:
+                    lane.end_us = window.start.time_us
+                    lane.active = active
+                    self._job_lane[job.job_id] = lane
+                return active
             self.frontier._validate_confirmation(window.start)
         # Idle physics must already be authoritative when START is confirmed.
         # Compute and validate outside the shared authority gate, then recheck
         # queue/state/closure before publishing idle + RUNNING + start together.
         idle_batch = None
         if gap:
-            scratch = self.runtime.state_store.clone_detached()
+            scratch = store.clone_detached()
             detached = self._detached_runtime(scratch)
-            state = self._active_idle_model().evolve(np.asarray(snapshot.density_matrix), elapsed_us=gap)
+            state = idle_model.evolve(np.asarray(snapshot.density_matrix), elapsed_us=gap)
             detached._commit_event(job=job, event_kind="declared_idle", next_state=freeze_register(state),
                 duration_us=gap, next_owner_tenant_id=snapshot.owner_tenant_id)
-            idle_batch = self.runtime.state_store.prepare_batch(snapshot, scratch.read(), scratch.events(),
-                                                              max_events=self._max_events,
-                                                              final_inactive_region=scratch.inactive_region())
+            idle_batch = store.prepare_batch(snapshot, scratch.read(), scratch.events(),
+                                             max_events=self._max_events,
+                                             final_inactive_region=scratch.inactive_region())
         with self._gate:
             self._open()
-            if (self._active is not None or self.runtime.state_store.read() is not snapshot
-                    or self.runtime.scheduler.queued_job_ids()[:1] != (job.job_id,)
+            if (self._get_active(lane) is not None or store.read() is not snapshot
+                    or self._lane_head_id(lane) != job.job_id
                     or self._windows.get(job.job_id) is not window
                     or self.runtime.scheduler.get(job.job_id).status is not JobStatus.QUEUED):
                 raise RuntimeError("physical start changed during idle preparation")
             if idle_batch is not None:
-                self.runtime.state_store.validate_prepared(idle_batch)
+                store.validate_prepared(idle_batch)
             return self.frontier.commit_with(window.start, begin)
+
+    def _lane_for_next(self, kind: str):
+        """The lane whose next event is ``kind`` (concurrent), or None for the shared authority."""
+        if not self._concurrent:
+            return None
+        found = self._next_lane_event()
+        if found is None or found[0] != kind:
+            raise RuntimeError(f"the next physical event is not a {kind}")
+        return found[1]
 
     def prepare_next(self) -> PreparedExecution | None:
         """Numerical work is detached; failure preserves authoritative start."""
         if not self._compute_gate.acquire(blocking=False):
             raise RuntimeError("a numerical preparation is already active")
         try:
-            active = self._begin()
+            lane = self._lane_for_next("finish")
+            store = self._store(lane)
+            active = self._begin(lane)
             if active is None:
                 return None
             with self._gate:
-                if self._prepared is not None:
-                    return self._prepared
+                if self._get_prepared(lane) is not None:
+                    return self._get_prepared(lane)
                 job, window, snapshot, gap = active
                 self.frontier._validate_confirmation(window.finish)
-            scratch = self.runtime.state_store.clone_detached()
+                inputs = self._kick_inputs(lane, job, window) if lane is not None else None
+            scratch = store.clone_detached()
             detached = self._detached_runtime(scratch)
-            result = detached._execute(job)
+            result = (detached._execute(job) if inputs is None
+                      else detached._execute(job, kicks_for(*inputs)))
             expected_time = snapshot.device_time_us + self._duration(job, snapshot)
             if not math.isclose(scratch.read().device_time_us, expected_time, rel_tol=1e-12, abs_tol=1e-10):
                 raise ValueError("computed event duration differs from the declared physical finish")
-            batch = self.runtime.state_store.prepare_batch(snapshot, scratch.read(), scratch.events(),
-                                                          max_events=self._max_events,
-                                                          final_inactive_region=scratch.inactive_region())
+            batch = store.prepare_batch(snapshot, scratch.read(), scratch.events(),
+                                        max_events=self._max_events,
+                                        final_inactive_region=scratch.inactive_region())
             success = self.runtime.scheduler.prepare_success(job.job_id, result)
             prepared = PreparedExecution(job.job_id, window, batch, success, detached._next_event_sequence)
             with self._gate:
                 self._open()
-                if self._active is not active:
+                if self._get_active(lane) is not active:
                     raise RuntimeError("physical start binding changed during computation")
-                self._prepared = prepared
+                if lane is None:
+                    self._prepared = prepared
+                else:
+                    lane.prepared = prepared
             return prepared
         finally:
             self._compute_gate.release()
@@ -536,7 +721,7 @@ class DeclaredQpuExecutor:
         if not self._compute_gate.acquire(blocking=False):
             raise RuntimeError("a numerical preparation is already active")
         try:
-            active = self._begin()
+            active = self._begin(self._lane_for_next("start"))
             return None if active is None else active[0]
         finally:
             self._compute_gate.release()
@@ -545,25 +730,34 @@ class DeclaredQpuExecutor:
         """Short shared-lock commit; no numeric kernel or host timestamp."""
         with self._gate:
             self._open()
-            if prepared is not self._prepared or prepared is None:
+            lane = self._job_lane.get(prepared.job_id) if prepared is not None else None
+            if prepared is None or prepared is not self._get_prepared(lane):
                 raise ValueError("prepared execution is foreign, copied or retired")
-            self.runtime.state_store.validate_prepared(prepared.state_batch)
+            store = self._store(lane)
+            store.validate_prepared(prepared.state_batch)
             self.runtime.scheduler.validate_prepared(prepared.job_success)
             def publish():
                 try:
-                    self.runtime.state_store.commit_prepared(prepared.state_batch)
+                    store.commit_prepared(prepared.state_batch)
                     result = self.runtime.scheduler.commit_prepared_success(prepared.job_success)
                 except BaseException:
                     # No reader can observe these candidate writes while the
                     # shared gate is held. Undo only this unpublished suffix,
                     # never an earlier confirmed START or externally seen event.
                     self.runtime.scheduler._rollback_prepared_success(prepared.job_success)
-                    self.runtime.state_store._rollback_prepared_commit(prepared.state_batch)
+                    store._rollback_prepared_commit(prepared.state_batch)
                     raise
                 self.runtime._next_event_sequence = prepared.next_event_sequence
-                self._physical_end = prepared.window.finish.time_us
                 self._finished.add(prepared.job_id)
-                self._active = self._prepared = None
+                if lane is None:
+                    self._physical_end = prepared.window.finish.time_us
+                    self._active = self._prepared = None
+                else:
+                    lane.end_us = prepared.window.finish.time_us
+                    lane.last_finish = prepared.window.finish
+                    lane.last_window = self._xwindows[prepared.job_id]
+                    lane.active = lane.prepared = None
+                    self._prune_windows()
                 return result
             return self.frontier.commit_with(prepared.window.finish, publish)
 
@@ -617,8 +811,7 @@ class DeclaredQpuExecutor:
             if position.key < window.start.key:
                 return JobStatus.QUEUED, False
             confirmed = frontier.confirmed
-            started = job_id in self._finished or (
-                self._active is not None and self._active[0].job_id == job_id)
+            started = job_id in self._finished or self._is_active(job_id)
             if not started or confirmed is None or confirmed.key < window.start.key:
                 raise DeclaredObservationNotReadyError("START is not confirmed for this observation")
             if position.key < window.finish.key:
@@ -640,9 +833,13 @@ class DeclaredQpuExecutor:
                 raise PermissionError("retention requires its exact control coordinator")
             if not self.result_is_available(job_id):
                 raise ValueError("only a released terminal job can be discarded")
-            if ((self._active is not None and self._active[0].job_id == job_id)
+            stores = ([lane.store for lane in self._lanes.values()] if self._concurrent
+                      else [self.runtime.state_store])
+            if (self._is_active(job_id)
                     or (self._prepared is not None and self._prepared.job_id == job_id)
-                    or self.runtime.state_store.read().last_job_id == job_id):
+                    or any(lane.prepared is not None and lane.prepared.job_id == job_id
+                           for lane in self._lanes.values())
+                    or any(store.read().last_job_id == job_id for store in stores)):
                 raise ValueError("the latest physical job is retained")
             self.runtime.scheduler._forget_terminal(job_id)
             self._windows.pop(job_id, None)
@@ -652,7 +849,9 @@ class DeclaredQpuExecutor:
                 for key in [k for k, t in self._control_requests.items() if t.job_id == job_id]:
                     del self._control_requests[key]
             # Diagnostic records last: a refusal here leaves job maps consistent.
-            self.runtime.state_store._forget_job_events(job_id)
+            for store in stores:
+                store._forget_job_events(job_id)
+            self._job_lane.pop(job_id, None)
 
     def release_position(self, job_id: str) -> EventPosition:
         """Trusted evidence, not a public timestamp field."""

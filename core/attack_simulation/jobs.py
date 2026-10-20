@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 from functools import wraps
 from threading import RLock
@@ -176,6 +176,7 @@ class _DeclaredStartCheckpoint:
     queue_version: int
     queue_length: int
     next_head: str | None
+    queue_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -222,6 +223,27 @@ class FifoJobScheduler:
         self._starting_declared: _DeclaredStartCheckpoint | None = None
         self._rollback_cancel: _DeclaredCancelCheckpoint | None = None
         self._cancelling_declared = False
+        self._lane_of: Callable[[JobCommand], object] | None = None
+
+    def bind_lanes(self, lane_of: Callable[[JobCommand], object]) -> None:
+        """Trusted assembly: FIFO is kept per lane, so one lane's wait never blocks another.
+
+        Acceptance order stays one global sequence; only the START rule changes.
+        Without lanes the whole queue is one lane (the original single FIFO).
+        """
+        with self._lock:
+            if self._lane_of is not None or self._jobs:
+                raise RuntimeError("lanes bind once on a fresh scheduler")
+            self._lane_of = lane_of
+
+    def _lane_head(self, job_id: str) -> bool:
+        if self._lane_of is None:
+            return bool(self._queue) and self._queue[0] == job_id
+        lane = self._lane_of(self._jobs[job_id].command)
+        for queued in self._queue:
+            if self._lane_of(self._jobs[queued].command) == lane:
+                return queued == job_id
+        return False
 
     def _retire_rollback_journals(self) -> None:
         self._rollback_success = None
@@ -285,19 +307,21 @@ class FifoJobScheduler:
         with self._lock:
             job = self._job(job_id)
             if (type(job_id) is not str or job.status is not JobStatus.QUEUED
-                    or not self._queue or self._queue[0] != job_id):
+                    or not self._lane_head(job_id)):
                 raise ValueError("declared START requires the exact QUEUED FIFO head")
+            index = self._queue.index(job_id)
             if self._starting_declared is not None:
                 raise RuntimeError("a declared START is already active")
             checkpoint = _DeclaredStartCheckpoint(
                 job, job.command, len(job.status_history), job.transition_version,
                 job.result, job.error_code, self._queue_version, len(self._queue),
-                self._queue[1] if len(self._queue) > 1 else None,
+                self._queue[index + 1] if index + 1 < len(self._queue) else None,
+                index,
             )
             self._rollback_success = None
             self._rollback_start = self._starting_declared = checkpoint
             try:
-                allocated = self.allocate_next()
+                allocated = self.allocate_next() if index == 0 else self.allocate_job(job_id)
                 if allocated is None or allocated.job_id != job_id:
                     raise RuntimeError("declared START FIFO head changed")
                 return self.mark_running(job_id)
@@ -317,7 +341,7 @@ class FifoJobScheduler:
             checkpoint = self._rollback_start
             if checkpoint is None:
                 if (job is not None and job.status is JobStatus.QUEUED
-                        and self._queue and self._queue[0] == job_id):
+                        and self._lane_head(job_id)):
                     return False
                 raise ValueError("no current declared START for this job")
             if (job is not checkpoint.job or job.command is not checkpoint.command
@@ -329,7 +353,8 @@ class FifoJobScheduler:
                     and len(job.status_history) == checkpoint.history_length
                     and self._queue_version == checkpoint.queue_version
                     and len(self._queue) == checkpoint.queue_length
-                    and self._queue and self._queue[0] == job_id):
+                    and checkpoint.queue_index < len(self._queue)
+                    and self._queue[checkpoint.queue_index] == job_id):
                 return False
             suffix = {
                 JobStatus.QUEUED: (),
@@ -343,9 +368,10 @@ class FifoJobScheduler:
                            for index, status in enumerate(suffix))
                     or self._queue_version != checkpoint.queue_version + 1
                     or len(self._queue) != checkpoint.queue_length - 1
-                    or (self._queue[0] if self._queue else None) != checkpoint.next_head):
+                    or (self._queue[checkpoint.queue_index]
+                        if checkpoint.queue_index < len(self._queue) else None) != checkpoint.next_head):
                 raise ValueError("declared START queue or generation is no longer current")
-            self._queue.appendleft(job_id)
+            self._queue.insert(checkpoint.queue_index, job_id)
             self._queue_version = checkpoint.queue_version
             del job.status_history[checkpoint.history_length:]
             job.status = JobStatus.QUEUED
@@ -550,6 +576,15 @@ class FifoJobScheduler:
             return None
         self._retire_rollback_journals()
         job = self._jobs[self._queue.popleft()]
+        self._queue_version += 1
+        self._transition(job, JobStatus.ALLOCATED)
+        return _snapshot(job)
+
+    @_synchronized
+    def allocate_job(self, job_id: str) -> JobRecord:
+        self._retire_rollback_journals()
+        self._queue.remove(job_id)
+        job = self._jobs[job_id]
         self._queue_version += 1
         self._transition(job, JobStatus.ALLOCATED)
         return _snapshot(job)
