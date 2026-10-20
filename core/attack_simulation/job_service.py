@@ -186,10 +186,22 @@ class JobApplicationService:
                 raise ValueError("interleaved victim program must belong to the scenario victim")
             victims[spec.reference] = spec
         self._interleave_victims = MappingProxyType(victims)
+        # Compile declared sequence alternatives during assembly, outside any
+        # admission/physical commit lock. Repeated bits share one immutable IR.
+        self._victim_sequences: dict[str, tuple[InterleavedVictim, ...]] = {}
+        for reference, spec in victims.items():
+            if spec.sequence:
+                if program_compiler is None:
+                    raise ValueError("interleaved sequences require a program compiler")
+                compiled = {
+                    program: self._compile_victim(program_compiler, spec, program,
+                                                   snapshot.qpu_id, snapshot.qpu_id, 0)
+                    for program in dict.fromkeys(spec.sequence)
+                }
+                self._victim_sequences[reference] = tuple(compiled[program] for program in spec.sequence)
         self._budget_ledger = None if observation_budget is None else ObservationBudgetLedger(observation_budget)
-        self._charged_runs: set[tuple[str, str]] = set()
         # Sequenced victims: run key -> position, fixed once at first acceptance.
-        self._victim_positions: dict[tuple[str, str], int] = {}
+        self._victim_positions: dict[tuple[str, str | None, str], int] = {}
         self._victim_next: dict[str, int] = {}
         self._scenario_manifest_id = scenario_manifest_id
         self._sampling_salt = secrets.token_bytes(32)
@@ -443,11 +455,11 @@ class JobApplicationService:
         spec = self._interleave_victims[victim.reference]
         if not spec.sequence:
             return command, None
-        run = (command.tenant_id, command.idempotency_key)
+        run = (command.tenant_id, command.created_by_principal_id, command.idempotency_key)
         position = self._victim_positions.get(run, self._victim_next.get(spec.reference, 0))
-        chosen = self._compile_victim(
-            self._program_compiler, spec, spec.sequence[position % len(spec.sequence)],
-            command.layout.qpu_id, command.layout.qpu_id, victim.operation.sampling_seed)
+        template = self._victim_sequences[victim.reference][position % len(spec.sequence)]
+        chosen = replace(template, operation=replace(
+            template.operation, sampling_seed=victim.operation.sampling_seed))
         if chosen.layout != victim.layout:
             raise ProgramRequestError("interleaved victim layout changed after preparation")
         operation = replace(command.operation, interleave=chosen)
@@ -468,10 +480,9 @@ class JobApplicationService:
         }
 
     def _charge_observation(self, command: JobCommand) -> None:
-        """Count one logical query per distinct request, never per resubmission."""
+        """Reserve one query at the scheduler's first-acceptance boundary."""
         operation = command.operation
-        run = (command.tenant_id, command.idempotency_key)
-        if self._budget_ledger is None or run in self._charged_runs:
+        if self._budget_ledger is None:
             return
         kind = (ObservationQueryKind.VICTIM if operation.interleave.reference == "victim"
                 else ObservationQueryKind.TRAINING)
@@ -479,7 +490,6 @@ class JobApplicationService:
             self._budget_ledger.reserve(kind=kind, shots=operation.shots)
         except ObservationBudgetExceeded as error:
             raise ProgramRequestError(f"observation budget: {error}") from error
-        self._charged_runs.add(run)
 
     def _admit_program(
         self, principal_id: str, command: JobCommand,
@@ -525,13 +535,15 @@ class JobApplicationService:
                 # Reject invalid commands before they consume observation budget.
                 self._runtime._authorize(command)
                 self._runtime._validate_job_target(command)
-                command, position = self._sequenced_victim(command)
-                self._charge_observation(command)
-                submitted = self._runtime.submit(command, receipt=receipt)
-                run = (command.tenant_id, command.idempotency_key)
-                if position is not None and run not in self._victim_positions:
-                    self._victim_positions[run] = position
-                    self._victim_next[command.operation.interleave.reference] = position + 1
+                with self._runtime.scheduler.admission_transaction():
+                    command, position = self._sequenced_victim(command)
+                    submitted = self._runtime.submit(
+                        command, receipt=receipt, before_accept=lambda: self._charge_observation(command),
+                    )
+                    run = (command.tenant_id, command.created_by_principal_id, command.idempotency_key)
+                    if position is not None and run not in self._victim_positions:
+                        self._victim_positions[run] = position
+                        self._victim_next[command.operation.interleave.reference] = position + 1
                 return _status(submitted)
             return _status(self._runtime.submit(command, receipt=receipt))
         except JobRetentionExpiredError:

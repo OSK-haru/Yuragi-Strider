@@ -246,6 +246,10 @@ class SubmissionRejected(ValueError):
     """The submitted estimator is malformed or no attempts remain."""
 
 
+class EvaluationUnavailable(RuntimeError):
+    """Internal evaluation failed without consuming a submission attempt."""
+
+
 class HiddenCaseEvaluator:
     """Grade a threshold estimator on hidden victims run through the shared physics.
 
@@ -286,12 +290,15 @@ class HiddenCaseEvaluator:
         with self._lock:
             if self._attempts >= self._max_submissions:
                 raise SubmissionRejected("no submissions remain")
+            try:
+                cases = self._cases if self._cases is not None else self._observe_cases()
+                rule = FrequencyThresholdEstimator(threshold, at_or_above, "submitted_threshold", "1")
+                correct = sum(int(rule.predict(case) == bit) for case, bit in zip(cases, self._bits, strict=True))
+            except Exception as error:
+                raise EvaluationUnavailable("hidden evaluation is unavailable") from error
+            self._cases = cases
             self._attempts += 1
             attempt = self._attempts
-            if self._cases is None:
-                self._cases = self._observe_cases()
-            rule = FrequencyThresholdEstimator(threshold, at_or_above, "submitted_threshold", "1")
-            correct = sum(int(rule.predict(case) == bit) for case, bit in zip(self._cases, self._bits, strict=True))
         return SubmissionResult(attempt, self._max_submissions - attempt, correct, self._total,
                                 self._required, correct >= self._required)
 

@@ -2,6 +2,53 @@
 
 設計の最終同期: 2026-10-08。実装の確認日: 2026-10-09。
 
+## 設計整合の点検と修正（2026-10-20）
+
+対象は、現行設計の共通状態・時刻・主体境界と、それに接続する共通Program受付・観測予算・提出評価。
+根拠は[共通操作契約](common-command-observation-contract.md)の§2・§4、
+[実行境界](runtime-boundaries-and-resolutions.md)の§3・§4と、
+[仮定・過程変化・基盤](assumption-process-model.md)の§3・§4。
+新しい製品要件や物理係数は決めていない。
+
+根本で維持すべき注意点:
+
+- 物理状態・サービス状態・観測状態の所有者と確定境界をそろえる。物理計算だけ正しくても、
+  受付・予算・再送の意味が違えば同じ実験にはならない。
+- ホストの計算時間を装置時間や攻撃失敗へ混入させない。公開時刻と確定位置の分離が必要であり、
+  永続化・再起動復元・複数processでの復旧は既知の未完了事項のまま。
+- 校正由来の値、サンプル値、近似モデル、抽象コマンドの条件を混同しない。
+  内部モデルの数値検証を、実機妥当性や実サービス上の攻撃成立の証明には広げない。
+
+再現して修正した矛盾（確信度: 高）:
+
+1. `job_service.py`の観測予算と被害者列の再送識別が`tenant + key`で、
+   schedulerの`tenant + principal + key`と不一致だった。同じtenantの別principalが同じkeyを使うと、
+   別jobなのに観測予算が計上されず、被害者列の位置も重複した。
+   予算計上をschedulerの初回受理に結び付け、位置の識別もschedulerと同じscopeへそろえた。
+2. 通常Programで使用済みのkeyを交互観測で再使用すると、schedulerが衝突を拒否する前に
+   観測予算を消費した。予算検査は、認可・入力・receipt・再送衝突の検査後、queue変更直前に実施する。
+   受理・予算・列位置はschedulerの同じ短いlockで確定する。
+   被害者列の回路は成立準備時に重複を除いてcompileし、受理lock内にはcompileを持ち込まない。
+3. `HiddenCaseEvaluator.submit()`は内部計算の失敗でも提出回数を消費し、
+   内部`ValueError`はHTTPで利用者の入力不正と扱われた。
+   採点成功後だけ回数を確定し、内部障害は秘密を含まないHTTP 503
+   `EVALUATION_UNAVAILABLE`として分離した。成功済みのhidden観測は再提出でも再利用する。
+
+検証: 修正前に4本の回帰テストの失敗を確認。修正後は以下の232件がすべて成功した。
+新規6件は別principalの同一key、拒否時の無消費、受理時compileの禁止、内部採点障害とHTTP再提出を検証する。
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest tests.test_interleaved_service tests.test_reset_challenge tests.test_message_challenge tests.test_shared_qpu_runtime tests.test_job_application_service
+# 54件 PASS
+.\.venv\Scripts\python.exe -B -m unittest tests.test_declared_transaction_stores tests.test_attack_sessions tests.test_live_program_admission tests.test_common_command_pipeline tests.test_attack_product_runtime tests.test_attack_web_ownership tests.test_interleaved_product tests.test_interleaved_execution tests.test_victim_activity tests.test_attack_public_profile
+# 109件 PASS
+.\.venv\Scripts\python.exe -B scripts/run_tests.py fast
+# 69件 PASS
+```
+
+`git diff --check`も成功。外部文献との再照合、全物理validation、ブラウザでの動作確認は今回の検証範囲に含めない。
+既存の未コミット変更`docs/validation/performance_notes.md`は変更していない。
+
 ## 進行中: メッセージ課題（2026-10-14 着手）
 
 利用者の決定: 旧1 bit 課題（id `reset-leakage`）は題名を "Presumption of reset bits" に変えて残す（変更済み）。新課題のメッセージは固定の `WhatIcannotcreateIdonotunderstand`（33文字、ASCII 8 bit・上位ビットから、264 bit）。被害者の観測上限はビット数×5（1320回）、採点は完全一致、提出は3回まで。待ち行列8本の上限も承認済み。

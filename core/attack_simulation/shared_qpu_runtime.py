@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from threading import Lock
 import math
 import random
+from typing import Callable
 from core.attack_simulation.concurrency_policy import (
     CONCURRENCY_POLICIES, CROSSTALK_DIRECTIONS, OVERLAP_DISJOINT_REGIONS,
 )
@@ -315,12 +316,15 @@ class SharedQpuRuntime:
 
     def submit(
         self, command: JobCommand, *, receipt: RequestReceipt | None = None,
+        before_accept: Callable[[], None] | None = None,
     ) -> JobRecord:
         if (self._job_authorization is not None
                 and isinstance(command.operation, VictimPrepareOperation)):
             raise PermissionError("victim workload jobs are scenario controlled")
         self._authorize(command)
         self._validate_job_target(command)
+        if before_accept is not None:
+            return self.scheduler.submit(command, receipt=receipt, before_accept=before_accept)
         return self.scheduler.submit(command, receipt=receipt)
 
     def _submit_scenario_workload(self, command: JobCommand) -> JobRecord:

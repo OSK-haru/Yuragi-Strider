@@ -649,6 +649,8 @@ class BrowserEnvironmentManager:
 
     async def submit_solution(self, request: Request, environment_id: str) -> dict[str, object]:
         """Grade an estimator for the proven owner; hidden cases never leave the server."""
+        from api.attack_challenge import EvaluationUnavailable, SubmissionRejected
+
         _request_origin_and_host(request, self.settings)
         _require_csrf_header(request)
         context, expired = self._resolve_cookie(environment_id, dict(request.cookies))
@@ -670,9 +672,14 @@ class BrowserEnvironmentManager:
                                     headers={"Retry-After": "5"})
             self._evaluations_running += 1
         try:
-            document = json.loads(body.decode("utf-8"), parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+            try:
+                document = json.loads(body.decode("utf-8"), parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+            except (ValueError, UnicodeError):
+                raise HTTPException(status_code=422, detail={"code": "INVALID_SUBMISSION"}) from None
             result = await asyncio.to_thread(evaluator.submit, document)
-        except (ValueError, UnicodeError) as error:
+        except EvaluationUnavailable:
+            raise HTTPException(status_code=503, detail={"code": "EVALUATION_UNAVAILABLE"}) from None
+        except SubmissionRejected as error:
             code = "SUBMISSIONS_EXHAUSTED" if "no submissions remain" in str(error) else "INVALID_SUBMISSION"
             raise HTTPException(status_code=422 if code == "INVALID_SUBMISSION" else 409,
                                 detail={"code": code}) from None

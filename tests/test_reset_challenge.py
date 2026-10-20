@@ -3,9 +3,11 @@
 from dataclasses import replace
 import json
 import unittest
+from unittest.mock import patch
 
 from api.attack_challenge import (
-    EVALUATOR_ID, MAX_SUBMISSIONS, HiddenCaseEvaluator, SubmissionRejected, reset_leakage_challenge,
+    EVALUATOR_ID, MAX_SUBMISSIONS, EvaluationUnavailable, HiddenCaseEvaluator, SubmissionRejected,
+    reset_leakage_challenge,
 )
 from api.attack_product_factory import ProductEnvironmentFactory
 from api.attack_product_profiles import product_free_scenarios
@@ -52,6 +54,20 @@ def trained_rule(evaluator_manifest, per_label=10, rounds=32):
 
 
 class ResetChallengeTests(unittest.TestCase):
+    def test_internal_evaluation_failure_preserves_attempts_and_can_be_retried(self):
+        evaluator = HiddenCaseEvaluator(manifest_of(), HOST_LIMITS, case_seed=1)
+        rule = {"threshold": 0.1, "direction": "ge"}
+        for error in (RuntimeError("worker failed"), ValueError("private internal detail")):
+            with patch.object(evaluator, "_observe_cases", side_effect=error):
+                with self.assertRaises(EvaluationUnavailable):
+                    evaluator.submit(rule)
+        self.assertEqual(evaluator.attempts_remaining, MAX_SUBMISSIONS)
+        first = evaluator.submit(rule)
+        self.assertEqual((first.attempt, first.attempts_remaining), (1, MAX_SUBMISSIONS - 1))
+        with patch.object(evaluator, "_observe_cases", side_effect=AssertionError("must reuse cases")):
+            second = evaluator.submit(rule)
+        self.assertEqual((second.correct, second.total), (first.correct, first.total))
+
     def test_the_catalog_publishes_the_card_but_no_private_value(self):
         catalog = resolver().catalog()
         card = next(item for item in catalog["challenges"] if item["id"] == "reset-leakage")
@@ -136,6 +152,38 @@ if __name__ == "__main__":
 
 
 class ResetChallengeHttpTests(unittest.IsolatedAsyncioTestCase):
+    async def test_internal_grading_failure_is_unavailable_and_preserves_the_attempt(self):
+        from fastapi import FastAPI
+        from api.attack_product_runtime import build_attack_simulator_runtime
+        from api.attack_web_ownership import WebOwnershipSettings
+        from tests.test_attack_web_ownership import DirectHttp
+
+        runtime = build_attack_simulator_runtime(WebOwnershipSettings.local_development())
+        app = FastAPI()
+        app.include_router(runtime.router)
+        http = DirectHttp(app)
+        status, headers, body = await http.request(
+            "POST", "/api/attack/environments",
+            body={"mode": "challenge", "preset_id": "reset-leakage", "settings": {}},
+            content_type="application/json")
+        self.assertEqual(status, 201, body)
+        environment_id = body["environment_id"]
+        cookie = headers["set-cookie"].split(";", 1)[0]
+        try:
+            path = f"/api/attack/environments/{environment_id}/submission"
+            rule = {"threshold": 0.1, "direction": "ge"}
+            for error in (RuntimeError("private runtime detail"), ValueError("private model detail")):
+                with patch.object(HiddenCaseEvaluator, "_observe_cases", side_effect=error):
+                    status, _, body = await http.request(
+                        "POST", path, body=rule, content_type="application/json", cookie=cookie)
+                self.assertEqual((status, body), (503, {"detail": {"code": "EVALUATION_UNAVAILABLE"}}))
+            status, _, body = await http.request(
+                "POST", path, body=rule, content_type="application/json", cookie=cookie)
+            self.assertEqual(status, 200, body)
+            self.assertEqual((body["attempt"], body["attempts_remaining"]), (1, MAX_SUBMISSIONS - 1))
+        finally:
+            await http.request("DELETE", f"/api/attack/environments/{environment_id}", cookie=cookie)
+
     async def test_owner_submits_over_http_and_only_aggregates_come_back(self):
         from fastapi import FastAPI
         from api.attack_product_runtime import build_attack_simulator_runtime

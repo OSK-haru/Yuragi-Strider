@@ -1,6 +1,7 @@
 """Service-level interleaving: scenario-owned victims, grants and observation budget."""
 
 import unittest
+from unittest.mock import patch
 
 from core.attack_simulation.circuit_program import LocalCircuitCompiler
 from core.attack_simulation.job_service import InterleaveVictimSpec, JobApplicationService, PrincipalGrant
@@ -39,14 +40,15 @@ def counts_of(runtime, svc, reference, rounds, key):
     return svc.get_result("a", job.job_id).result["counts"]
 
 
-def sequenced_service(bits, *, budget=None):
+def sequenced_service(bits, *, budget=None, attacker_principals=("a",)):
     store, runtime, compiler, manifest = build(0.90)
     sequence = tuple(CircuitProgram.from_editor_json(program_json(1, initial=[bit])) for bit in bits)
     victims = (InterleaveVictimSpec("victim", "v", sequence[0], sequence),)
     return runtime, JobApplicationService(
         runtime=runtime, program_compiler=compiler, scenario_manifest_id=manifest.manifest_id,
-        principals=(PrincipalGrant("a", ATTACKER, frozenset(ALL)),
-                    PrincipalGrant("v", VICTIM, frozenset(ALL))),
+        principals=tuple(PrincipalGrant(principal, ATTACKER, frozenset(ALL))
+                         for principal in attacker_principals)
+                   + (PrincipalGrant("v", VICTIM, frozenset(ALL)),),
         interleave_victims=victims, observation_budget=budget,
     )
 
@@ -58,6 +60,40 @@ def victim_bit(runtime, job_id):
 
 
 class InterleavedServiceTests(unittest.TestCase):
+    def test_sequence_selection_does_not_compile_under_the_admission_lock(self):
+        runtime, svc = sequenced_service((1, 0))
+        commands = [svc._prepare_program("a", request("victim", 1, f"k{i}")) for i in range(2)]
+        with patch.object(svc, "_compile_victim", side_effect=AssertionError("compile during admission")):
+            jobs = [svc._admit_program("a", command).job_id for command in commands]
+        self.assertEqual([victim_bit(runtime, job) for job in jobs], [1, 0])
+
+    def test_same_key_from_two_principals_consumes_two_observations(self):
+        budget = ObservationBudget(shots_per_query=1, training_query_limit=0, victim_observation_limit=1)
+        runtime, svc = sequenced_service((1, 0), budget=budget, attacker_principals=("a", "b"))
+        first = svc.submit_program("a", request("victim", 1, "same"))
+        with self.assertRaisesRegex(ProgramRequestError, "observation budget"):
+            svc.submit_program("b", request("victim", 1, "same"))
+        self.assertEqual(runtime.scheduler.queued_job_ids(), (first.job_id,))
+
+    def test_same_key_from_two_principals_keeps_distinct_sequence_positions(self):
+        runtime, svc = sequenced_service((1, 0), attacker_principals=("a", "b"))
+        first = svc.submit_program("a", request("victim", 1, "same"))
+        second = svc.submit_program("b", request("victim", 1, "same"))
+        self.assertEqual((victim_bit(runtime, first.job_id), victim_bit(runtime, second.job_id)), (1, 0))
+        self.assertEqual(svc.submit_program("b", request("victim", 1, "same")).job_id, second.job_id)
+
+    def test_idempotency_conflict_does_not_consume_an_observation_or_position(self):
+        budget = ObservationBudget(shots_per_query=1, training_query_limit=0, victim_observation_limit=1)
+        runtime, svc = sequenced_service((1, 0), budget=budget)
+        plain = ProgramSubmitRequest(CircuitProgram.from_editor_json(program_json(1)), "qpu-1", 1, "used")
+        first = svc.submit_program("a", plain)
+        with self.assertRaisesRegex(ProgramRequestError, "idempotency"):
+            svc.submit_program("a", request("victim", 1, "used"))
+        self.assertEqual(svc.observation_budget_view("a")["victim_observations"], 0)
+        self.assertEqual(runtime.scheduler.queued_job_ids(), (first.job_id,))
+        accepted = svc.submit_program("a", request("victim", 1, "fresh"))
+        self.assertEqual(victim_bit(runtime, accepted.job_id), 1)
+
     def test_sequenced_victim_advances_by_acceptance_and_wraps(self):
         runtime, svc = sequenced_service((1, 0, 1))
         jobs = [svc.submit_program("a", request("victim", 1, f"k{index}")).job_id for index in range(5)]

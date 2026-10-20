@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
+from contextlib import contextmanager
 from typing import Any, Callable
 from uuid import uuid4
 from functools import wraps
@@ -490,9 +491,20 @@ class FifoJobScheduler:
             self._rollback_success = None
             return True
 
+    @contextmanager
+    def admission_transaction(self):
+        """Trusted service boundary for short, atomic acceptance bookkeeping.
+
+        Use the same lock as queue admission (and coordinated world commits).
+        Compilation and physical execution must remain outside this boundary.
+        """
+        with self._lock:
+            yield
+
     @_synchronized
     def submit(
         self, command: JobCommand, *, receipt: RequestReceipt | None = None,
+        before_accept: Callable[[], None] | None = None,
     ) -> JobRecord:
         # Supervisor metadata is separate from command equality/idempotency.
         # Validate even on replay, but never replace the first arrival record.
@@ -513,6 +525,10 @@ class FifoJobScheduler:
                 raise ValueError("idempotency key was reused for a different command")
             return _snapshot(existing)
 
+        # Trusted accounting runs only for a new, valid acceptance. A refusal
+        # leaves the queue and its idempotency/rollback records unchanged.
+        if before_accept is not None:
+            before_accept()
         self._retire_rollback_journals()
         sequence = self._next_sequence
         self._next_sequence += 1
