@@ -9,6 +9,9 @@ from api.attack_device_snapshot import DeviceSnapshot, deterministic_connected_r
 from api.attack_product_factory import IDLE_INPUT_CALIBRATION, IDLE_INPUT_PHYSICAL
 from api.attack_settings_resolver import FreeScenarioDefinition, SettingField
 from core.attack_simulation.qpu_topology import QpuTopology, TopologyLimits
+from core.attack_simulation.concurrency_policy import (
+    CROSSTALK_DIRECTIONS, DEFAULT_CROSSTALK_STRENGTH, EXCLUSIVE_FIFO, OVERLAP_DISJOINT_REGIONS,
+)
 from core.attack_simulation.placement import PlacementPolicy
 from core.attack_simulation.program_request import (
     INTERLEAVE_TRAINING_OPERATION_ID, INTERLEAVE_VICTIM_OPERATION_ID, STATE_INHERIT_OPERATION_ID,
@@ -334,6 +337,7 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
         attacker_measurement_duration_us=measurement_duration,
         program_measurement_duration_us=measurement_duration,
         entry_reuse_tolerance=1e-5,
+        drive_crosstalk_strength=DEFAULT_CROSSTALK_STRENGTH,
         max_local_qubits=len(region),
         max_execution_work=2_147_483_648,
     )
@@ -523,6 +527,9 @@ def _template(template_id: str, qpu: Mapping[str, object], mode: str,
         "qpu_service.runtime_execution.victim_operation_duration_us",
         "qpu_service.runtime_execution.repetition_delay_us",
         "qpu_service.runtime_execution.entry_reuse_tolerance",
+        "qpu_service.runtime_execution.concurrency_policy",
+        "qpu_service.runtime_execution.drive_crosstalk_strength",
+        "qpu_service.runtime_execution.drive_crosstalk_direction",
         "qpu_service.declared_service_timing.processing_delay_us",
         "qpu_service.declared_service_timing.publication_delay_us",
         "qpu_service.declared_service_timing.denial_delay_us",
@@ -627,6 +634,12 @@ def _assumptions(snapshot: DeviceSnapshot, region: tuple[int, ...], mode: str,
                 "Declared wait between consecutive shots of one Program, imitating the repetition delay of cloud QPUs. The initial 0 means no gap (the previous behavior); the public documentation gives no value that could be adopted. A positive value relaxes the inherited state with the idle model between shots."),
         _record("qpu_service.runtime_execution.entry_reuse_tolerance", AssumptionBasis.SIMULATOR_CHOICE,
                 "A simulation accuracy setting, not a property of the service. A shot may reuse the computation of an earlier shot of the same job when its entry state is within this trace distance (channels never increase it), so the total-variation error of the counts is at most the shot count times this value. 0 reuses only identical entry states and is exact."),
+        _record("qpu_service.runtime_execution.concurrency_policy", AssumptionBasis.SIMULATOR_CHOICE,
+                "How jobs of different tenants share the QPU in time. exclusive_fifo runs one job at a time. overlap_disjoint_regions lets jobs on the two dedicated regions run at the same time, coupled only by the declared drive crosstalk. The physics of drive crosstalk is established, but no public material confirms that a cloud service runs different users' jobs on one QPU at the same time; this is a declared scenario condition."),
+        _record("qpu_service.runtime_execution.drive_crosstalk_strength", AssumptionBasis.SIMULATOR_CHOICE,
+                "Complex transfer magnitude of the control-line leak, one value for every coupling edge that joins the two regions; it acts only when jobs overlap. The calibration snapshot gives no such value, so it is a declared sample, not a measurement of any device."),
+        _record("qpu_service.runtime_execution.drive_crosstalk_direction", AssumptionBasis.SIMULATOR_CHOICE,
+                "Which tenant's drives leak onto which tenant's qubits. Both directions let the attacker read the victim's drive activity from its own qubits."),
         _record("qpu_service.runtime_execution.attacker_measurement_duration_us", AssumptionBasis.SIMULATOR_CHOICE,
                 "Uses the same conservative register-level maximum of per-qubit snapshot measurement durations.", evidence=evidence),
         _record("qpu_service.runtime_execution.victim_operation_duration_us", AssumptionBasis.SIMULATOR_CHOICE,
@@ -801,7 +814,7 @@ def _fields(region: tuple[int, ...], mode: str, calibrations: Mapping[int, objec
             "シナリオが決める配置の条件です。現実のクラウドの配置保証ではありません。",
             "同じ領域: 両利用者が同じ6 qubitを順番に使用し、交代時のResetをモデル化。"
             "別領域: 各利用者に重ならない6 qubitを割り当て、未使用側の状態も保持。"
-            "ジョブはどちらも共通FIFOで処理し、同時実行はしません。",
+            "ジョブの同時実行は別の設定で決めます。",
             choices=(PlacementPolicy.GUARANTEED_SAME_PHYSICAL_QUBIT.value,
                      PlacementPolicy.TENANT_DEDICATED_REGION.value),
         ),
@@ -811,6 +824,24 @@ def _fields(region: tuple[int, ...], mode: str, calibrations: Mapping[int, objec
                 0.001, 1000.0, "us", "シミュレーターが仮定した時間です。スナップショットの較正値ではありません。"),
         _number("qpu_service.runtime_execution.entry_reuse_tolerance", "計算の再利用の許容誤差", 0.0, 1e-3, None,
                 "計算を速くするための近似の精度です。前のshotと入口の状態がこの距離以内なら、その計算を再利用します。0は厳密（同じ状態のときだけ再利用）で、この値は実サービスの性質ではありません。"),
+        SettingField(
+            "qpu_service.runtime_execution.concurrency_policy", "ジョブの同時実行", "choice",
+            "異なる利用者のジョブを同じ時刻に実行するかどうかです。現実のクラウドの方式ではありません。",
+            "順番に実行: ジョブは1つずつ実行します。"
+            "重ねて実行: 別領域のジョブを同じ時刻に実行します。領域の間には、下の漏れだけが働きます。"
+            "重ねて実行は、配置の方針が別領域のときだけ選べます。",
+            choices=(EXCLUSIVE_FIFO, OVERLAP_DISJOINT_REGIONS),
+        ),
+        _number("qpu_service.runtime_execution.drive_crosstalk_strength", "制御線の漏れの強さ", 0.0, 1.0, None,
+                "別領域の隣り合う量子ビットの間で、駆動パルスが相手に漏れる割合です。重ねて実行のときだけ働きます。"
+                "較正データにない仮の値で、実機の測定値ではありません。"),
+        SettingField(
+            "qpu_service.runtime_execution.drive_crosstalk_direction", "漏れの向き", "choice",
+            "どちらの利用者の駆動が、どちらの利用者の量子ビットに漏れるかです。重ねて実行のときだけ働きます。",
+            "両方向: 被害者の駆動が攻撃者へ、攻撃者の駆動が被害者へ漏れます。"
+            "被害者から攻撃者: 被害者の駆動だけが攻撃者へ漏れます。攻撃者から被害者: その逆です。",
+            choices=CROSSTALK_DIRECTIONS,
+        ),
         _number("qpu_service.runtime_execution.repetition_delay_us", "shot間の待機", 0.0, 1e6, "us",
                 "回路を繰り返すとき、前のshotと次のshotの間に置く待機です。初期値は0（待機なし）で、実サービスの値ではありません。"),
         _number("qpu_service.declared_service_timing.processing_delay_us", "サービスの処理遅延", 0.0, 1e6,

@@ -7,6 +7,9 @@ from collections.abc import Mapping
 from threading import Lock
 import math
 import random
+from core.attack_simulation.concurrency_policy import (
+    CONCURRENCY_POLICIES, CROSSTALK_DIRECTIONS, OVERLAP_DISJOINT_REGIONS,
+)
 import numpy as np
 
 from core.attack_simulation.jobs import (
@@ -70,6 +73,12 @@ class SharedQpuRuntimeConfig:
     # shot of the same job whose entry state is within this trace distance. 0 reuses only identical
     # entry states, which is exact. The total-variation error of the counts is at most shots * this.
     entry_reuse_tolerance: float = 0.0
+    # How jobs of different tenants share the QPU in time. With overlap_disjoint_regions the jobs of the
+    # two dedicated regions run side by side, coupled only by the declared drive crosstalk: one strength
+    # for every coupling edge that joins the regions, in the chosen direction(s).
+    concurrency_policy: str = "exclusive_fifo"
+    drive_crosstalk_strength: float = 0.0
+    drive_crosstalk_direction: str = "both"
     max_local_qubits: int = 8
     max_execution_work: int = 536870912
 
@@ -77,7 +86,7 @@ class SharedQpuRuntimeConfig:
         """Return every behavior-changing runtime value for pre-start freezing."""
         binding = self.resource_binding
         return {
-            "schema_version": "shared_qpu_runtime_v2",
+            "schema_version": "shared_qpu_runtime_v3",
             "reset_model_id": self.reset_model_id,
             "reset_model_configuration_id": self.reset_model_configuration_id,
             "reset_model_mode": self.reset_model_mode.value,
@@ -93,6 +102,9 @@ class SharedQpuRuntimeConfig:
             "program_measurement_duration_us": self.program_measurement_duration_us,
             "repetition_delay_us": self.repetition_delay_us,
             "entry_reuse_tolerance": self.entry_reuse_tolerance,
+            "concurrency_policy": self.concurrency_policy,
+            "drive_crosstalk_strength": self.drive_crosstalk_strength,
+            "drive_crosstalk_direction": self.drive_crosstalk_direction,
             "resource_binding": None if binding is None else {
                 "victim": {"qpu_id": binding.victim.qpu_id,
                            "physical_qubit_id": binding.victim.physical_qubit_id},
@@ -150,6 +162,17 @@ class SharedQpuRuntimeConfig:
                 "the initial runtime does not support scheduler-dependent placement"
             )
         object.__setattr__(self, "placement_policy", placement)
+        if self.concurrency_policy not in CONCURRENCY_POLICIES:
+            raise ValueError("unknown concurrency policy")
+        if self.drive_crosstalk_direction not in CROSSTALK_DIRECTIONS:
+            raise ValueError("unknown drive-crosstalk direction")
+        strength = float(self.drive_crosstalk_strength)
+        if not math.isfinite(strength) or not 0.0 <= strength <= 1.0:
+            raise ValueError("drive_crosstalk_strength must be in [0, 1]")
+        object.__setattr__(self, "drive_crosstalk_strength", strength)
+        if (self.concurrency_policy == OVERLAP_DISJOINT_REGIONS
+                and placement is not PlacementPolicy.TENANT_DEDICATED_REGION):
+            raise ValueError("overlapping jobs need tenant-dedicated regions")
         if self.resource_binding is not None:
             if not isinstance(self.resource_binding, ResetResourceBinding):
                 raise TypeError("resource_binding must be a ResetResourceBinding")

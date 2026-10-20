@@ -392,6 +392,7 @@ class ScenarioSettingsResolver:
             definition.assumptions,
         ))
         _apply_settings(environment, supplied, fields)
+        _check_concurrency_placement(definition, supplied)
         if definition.derive_overrides is not None:
             for derived in definition.derive_overrides(supplied):
                 environment.set_assumption(derived)
@@ -545,6 +546,18 @@ def _public_challenge_regions(session: ScenarioSession) -> dict[str, object] | N
             return None
         result["dedicated_physical_qubit_ids"] = list(ids)
     return result
+
+
+def _check_concurrency_placement(definition, supplied: Mapping[str, object]) -> None:
+    """Overlapping jobs run on the two dedicated regions, so they need dedicated placement."""
+    prefix = "qpu_service.runtime_execution."
+    try:
+        policy = supplied.get(prefix + "concurrency_policy", _read_path(definition.template, prefix + "concurrency_policy"))
+        placement = supplied.get(prefix + "placement_policy", _read_path(definition.template, prefix + "placement_policy"))
+    except ValueError:
+        return                      # a template without these fields has no concurrency choice
+    if policy == "overlap_disjoint_regions" and placement != "tenant_dedicated_region":
+        raise ValueError("overlapping jobs need tenant-dedicated regions")
 
 
 def _reject_unknown(values: Mapping[str, object], allowed: set[str]) -> None:

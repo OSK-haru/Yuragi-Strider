@@ -23,6 +23,9 @@ from api.attack_sessions import AttackSession, SessionHostLimits, WebOwnerContex
 from api.attack_workloads import DeclaredWorkloadRunner
 from core.attack_simulation.circuit_program import LocalCircuitCompiler
 from core.attack_simulation.declared_execution import DeclaredQpuExecutor
+from core.attack_simulation.concurrency_policy import OVERLAP_DISJOINT_REGIONS, cross_region_transfers
+from core.attack_simulation.concurrent_lanes import ConcurrentRegions
+from core.attack_simulation.crosstalk_samples import SAMPLE_PULSE_SHAPE
 from core.attack_simulation.declared_service_timing import DeclaredServiceTiming
 from core.attack_simulation.job_authorization import JobAuthorizationPolicy
 from core.attack_simulation.job_service import InterleaveVictimSpec, JobApplicationService, PrincipalGrant
@@ -214,6 +217,7 @@ class ProductEnvironmentFactory:
                 max_events_per_job=self._limits.max_events_per_job,
                 max_unresolved=self._limits.max_unresolved_events,
                 idle_model=parsed["idle_model"],
+                concurrent_regions=concurrent_regions_for(parsed),
             )
             world = LiveWorkloadWorld(
                 runner=runner, executor=executor,
@@ -278,6 +282,9 @@ class ProductEnvironmentFactory:
             "qpu_service.runtime_execution.program_measurement_duration_us",
             "qpu_service.runtime_execution.repetition_delay_us",
             "qpu_service.runtime_execution.entry_reuse_tolerance",
+            "qpu_service.runtime_execution.concurrency_policy",
+            "qpu_service.runtime_execution.drive_crosstalk_strength",
+            "qpu_service.runtime_execution.drive_crosstalk_direction",
             "qpu_service.declared_service_timing.processing_delay_us",
             "qpu_service.declared_service_timing.publication_delay_us",
             "qpu_service.declared_service_timing.denial_delay_us",
@@ -363,10 +370,11 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "reset_count", "reset_duration_us", "victim_operation_duration_us",
         "attacker_measurement_duration_us", "queue_policy_id", "cancellation_policy_id",
         "measure_input_state_before_transition", "placement_policy", "isolated_assignment_duration_us",
-        "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance", "resource_binding",
+        "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
+        "concurrency_policy", "drive_crosstalk_strength", "drive_crosstalk_direction", "resource_binding",
         "max_local_qubits", "max_execution_work",
     })
-    if runtime_raw["schema_version"] != "shared_qpu_runtime_v2":
+    if runtime_raw["schema_version"] != "shared_qpu_runtime_v3":
         raise ValueError("unsupported frozen QPU runtime schema")
     _validate_runtime_profile(runtime_raw)
     runtime_fields = dict(runtime_raw)
@@ -595,6 +603,18 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "compiler": compiler, "experiment_policy": experiment_policy,
         "interleave_victims": _interleave_victims(manifest),
     }
+
+
+def concurrent_regions_for(parsed: Mapping[str, Any]) -> ConcurrentRegions | None:
+    """The frozen concurrent-sharing choice as the executor's input, or None for the exclusive FIFO."""
+    config = parsed["runtime_config"]
+    if config.concurrency_policy != OVERLAP_DISJOINT_REGIONS:
+        return None
+    transfers = cross_region_transfers(
+        parsed["region"].topology.gate_edges, parsed["region"].physical_qubit_ids,
+        parsed["alternate_region"].physical_qubit_ids,
+        config.drive_crosstalk_strength, config.drive_crosstalk_direction)
+    return ConcurrentRegions(transfers, SAMPLE_PULSE_SHAPE)
 
 
 def build_service_stack(parsed: Mapping[str, Any], manifest: ResolvedScenarioManifest,
@@ -938,7 +958,8 @@ def _object(parent: Mapping[str, Any], key: str, required: set[str], optional: s
 
 def _validate_runtime_profile(raw: Mapping[str, Any]) -> None:
     for name in ("reset_model_id", "reset_model_configuration_id", "reset_model_mode",
-                 "queue_policy_id", "cancellation_policy_id", "placement_policy"):
+                 "queue_policy_id", "cancellation_policy_id", "placement_policy",
+                 "concurrency_policy", "drive_crosstalk_direction"):
         if type(raw[name]) is not str or not raw[name].strip():
             raise ValueError(f"runtime_execution.{name} must be explicit text")
     if type(raw["reset_count"]) is not int or raw["reset_count"] < 0:
@@ -950,7 +971,8 @@ def _validate_runtime_profile(raw: Mapping[str, Any]) -> None:
         raise ValueError("runtime_execution.measure_input_state_before_transition must be explicit boolean")
     for name in ("reset_duration_us", "victim_operation_duration_us",
                  "attacker_measurement_duration_us", "isolated_assignment_duration_us",
-                 "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance"):
+                 "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
+                 "drive_crosstalk_strength"):
         value = raw[name]
         if (type(value) not in (int, float) or not math.isfinite(float(value)) or value < 0):
             raise ValueError(f"runtime_execution.{name} must be finite and nonnegative")
