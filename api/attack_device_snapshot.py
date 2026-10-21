@@ -87,6 +87,15 @@ def load_ibm_kingston_snapshot(directory: Path | str | None = None) -> DeviceSna
                                 device_id=DEFAULT_DEVICE_ID, backend_declaration=KINGSTON_BACKEND)
 
 
+def default_device_snapshot() -> DeviceSnapshot:
+    """The one place that decides which device a caller gets when it passes no snapshot.
+
+    Challenge builders, profiles and the runtime call this instead of naming a device,
+    so adding a second device changes this function, not four call sites.
+    """
+    return load_ibm_kingston_snapshot()
+
+
 def load_device_snapshot(directory: Path | str, *, device_id: str,
                          backend_declaration: BackendDeclaration) -> DeviceSnapshot:
     """Read immutable source files only after matching their SOURCE.md digests."""

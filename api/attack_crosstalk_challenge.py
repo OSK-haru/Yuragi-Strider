@@ -17,8 +17,8 @@ import json
 import math
 from typing import Any
 
-from api.attack_challenge import _thaw, _unique
-from api.attack_device_snapshot import DeviceSnapshot, deterministic_connected_region, load_ibm_kingston_snapshot
+from api.attack_challenge_common import thaw, unique_by_assumption_id
+from api.attack_device_snapshot import DeviceSnapshot, deterministic_connected_region, default_device_snapshot
 from api.attack_product_factory import (
     IDLE_INPUT_CALIBRATION, ProductAssemblyLimits, _parse_frozen_inputs, build_service_stack,
 )
@@ -62,7 +62,7 @@ class CrosstalkGroverSettings:
 
 def crosstalk_grover_challenge(snapshot: DeviceSnapshot | None = None,
                                settings: CrosstalkGroverSettings = CrosstalkGroverSettings()) -> ChallengeDefinition:
-    snapshot = load_ibm_kingston_snapshot() if snapshot is None else snapshot
+    snapshot = default_device_snapshot() if snapshot is None else snapshot
     region = tuple(sorted(deterministic_connected_region(snapshot, MAX_RETAINED_QUBITS)))
     alternate = tuple(sorted(deterministic_connected_region(
         snapshot, MAX_RETAINED_QUBITS, excluded_qubit_ids=frozenset(region))))
@@ -91,7 +91,7 @@ def crosstalk_grover_challenge(snapshot: DeviceSnapshot | None = None,
 
 def _preset(base, region: tuple[int, ...], snapshot: DeviceSnapshot, settings: CrosstalkGroverSettings) -> ScenarioPreset:
     template = base.template
-    qpu = _thaw(template.qpu_service_config)
+    qpu = thaw(template.qpu_service_config)
     qpu["abstract_commands"] = {"interleaved_observation": False, "victim_activity": False}
     qpu["supported_operations"] = list(SERVICE_OPERATIONS)
     execution = qpu["runtime_execution"]
@@ -99,29 +99,29 @@ def _preset(base, region: tuple[int, ...], snapshot: DeviceSnapshot, settings: C
     execution["drive_crosstalk_strength"] = settings.drive_crosstalk_strength
     execution["drive_crosstalk_direction"] = BOTH
     edges = qpu["topology"]["gate_edges"]
-    clock_domain = _thaw(template.experiment_config)["world_clock"]["clock_domain"]
+    clock_domain = thaw(template.experiment_config)["world_clock"]["clock_domain"]
     # The same victim a free-mode author gets by enabling the periodic Grover setting with these values.
     schedule = {"enabled": True, "runs": settings.victim_visits, "shots_per_run": settings.victim_shots,
                 "first_run_us": settings.first_run_us, "pause_between_runs_us": settings.pause_between_runs_us}
     plan, expected = periodic_grover_plan(
         region=region, edges=edges, clock_domain=clock_domain, device_id=snapshot.device_id,
         **plan_parameters(schedule))
-    attacker = _thaw(template.attacker_config)
+    attacker = thaw(template.attacker_config)
     attacker.pop("interleaved_access", None)
     attacker["operation_grants"] = list(SERVICE_OPERATIONS)
-    victim = _thaw(template.victim_config)
+    victim = thaw(template.victim_config)
     victim.pop("interleaved_run", None)
     victim["operation_grants"] = list(SERVICE_OPERATIONS)
     victim["periodic_grover"] = schedule
     victim["workload"] = serialize_workload_plan(plan)
-    experiment = _thaw(template.experiment_config)
+    experiment = thaw(template.experiment_config)
     experiment[EVALUATION_KEY] = {
         "expected_bitstring": expected, "max_submissions": settings.max_submissions,
         "baseline_shots": settings.baseline_shots, "significance_z": settings.significance_z,
         "minimum_drop": settings.minimum_drop,
     }
     challenge_template = ScenarioTemplate(
-        TEMPLATE_ID, "1", attacker, victim, qpu, _thaw(template.relation_config), experiment)
+        TEMPLATE_ID, "1", attacker, victim, qpu, thaw(template.relation_config), experiment)
     locked = tuple(
         f"{root}.{key}"
         for root, section in (("attacker", attacker), ("victim", victim), ("qpu_service", qpu),
@@ -163,7 +163,7 @@ def _preset(base, region: tuple[int, ...], snapshot: DeviceSnapshot, settings: C
             f"attacker by at least {settings.minimum_drop} and by more than {settings.significance_z} standard "
             "deviations; both values were set from the measured spread of the baseline."),
     )
-    return ScenarioPreset(challenge_template, policy, _unique(records))
+    return ScenarioPreset(challenge_template, policy, unique_by_assumption_id(records))
 
 
 class DisruptionResult:

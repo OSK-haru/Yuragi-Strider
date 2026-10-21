@@ -275,6 +275,8 @@ class ProductEnvironmentFactory:
 
     @staticmethod
     def _has_provenance(manifest: ResolvedScenarioManifest) -> bool:
+        # SCAFFOLD (Reset-leakage slice): the required paths below are the Reset slice's, applied to every
+        # environment. They should come from the mechanisms an environment declares.
         required = {
             "qpu_service.reset_model.success_probability",
             "qpu_service.reset_model.target_populations",
@@ -379,6 +381,10 @@ class ProductEnvironmentFactory:
 
 
 def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAssemblyLimits) -> dict[str, Any]:
+    # SCAFFOLD (Reset-leakage slice): this parser accepts one runtime schema, requires a reset_model
+    # in every environment, and takes the victim's program from one name. A mechanism without a reset
+    # model, or a second schema, needs the required paths composed from a mechanism declaration here,
+    # not a copy of this parser. Do not treat these requirements as a public contract.
     qpu = manifest.qpu_service_config
     topology = QpuTopology.from_config(qpu.get("topology"), limits=limits.topology)
     runtime_raw = _object(qpu, "runtime_execution", {
@@ -698,7 +704,11 @@ def build_service_stack(parsed: Mapping[str, Any], manifest: ResolvedScenarioMan
 
 
 def _interleave_victims(manifest: ResolvedScenarioManifest) -> tuple[InterleaveVictimSpec, ...]:
-    """Victim programs an attacker may name; the secret bit never leaves the manifest."""
+    """Victim programs an attacker may name; the secret bit never leaves the manifest.
+
+    SCAFFOLD (Reset-leakage slice): one program name and a bit or message secret. A different
+    interleaved victim needs a program table here.
+    """
     run = manifest.victim_config.get("interleaved_run")
     if run is None:
         return ()

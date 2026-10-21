@@ -20,7 +20,8 @@ import random
 import secrets
 from typing import Any
 
-from api.attack_device_snapshot import DeviceSnapshot, deterministic_connected_region, load_ibm_kingston_snapshot
+from api.attack_challenge_common import thaw, unique_by_assumption_id
+from api.attack_device_snapshot import DeviceSnapshot, deterministic_connected_region, default_device_snapshot
 from api.attack_product_factory import (
     IDLE_INPUT_CALIBRATION, ProductAssemblyLimits, _interleave_victims, _parse_frozen_inputs,
     build_service_stack, message_bits,
@@ -69,7 +70,7 @@ def reset_leakage_challenge(snapshot: DeviceSnapshot | None = None,
                             settings: ResetLeakageV0Settings = RESET_LEAKAGE_V0_SETTINGS,
                             ) -> ChallengeDefinition:
     """The approved v0 challenge on the qubit the hidden tenant shares."""
-    snapshot = load_ibm_kingston_snapshot() if snapshot is None else snapshot
+    snapshot = default_device_snapshot() if snapshot is None else snapshot
     region = challenge_region(snapshot)
     topology = _topology(snapshot)
     base = _profile(snapshot, topology, region, IDLE_INPUT_CALIBRATION, None,
@@ -100,7 +101,7 @@ def reset_leakage_message_challenge(snapshot: DeviceSnapshot | None = None,
                                     settings: ResetLeakageV0Settings = RESET_LEAKAGE_V0_SETTINGS,
                                     message: str = SECRET_MESSAGE) -> ChallengeDefinition:
     """The same reset leakage, read out as a whole message one bit per observation."""
-    snapshot = load_ibm_kingston_snapshot() if snapshot is None else snapshot
+    snapshot = default_device_snapshot() if snapshot is None else snapshot
     region = challenge_region(snapshot)
     base = _profile(snapshot, _topology(snapshot), region, IDLE_INPUT_CALIBRATION, None,
                     PlacementPolicy.GUARANTEED_SAME_PHYSICAL_QUBIT.value)
@@ -130,7 +131,7 @@ def _preset(base, region: tuple[int, ...], settings: ResetLeakageV0Settings, tem
             evaluator_id: str, secret: dict[str, object], evaluation: dict[str, object],
             victim_observation_limit: int) -> ScenarioPreset:
     template = base.template
-    qpu = _thaw(template.qpu_service_config)
+    qpu = thaw(template.qpu_service_config)
     # This challenge is built on the abstract interleaved observation, so the preset turns it on.
     # Explicitly off: a challenge never reveals the victim's runs, whatever the author sets in free mode.
     qpu["abstract_commands"] = {"interleaved_observation": True, "victim_activity": False}
@@ -147,16 +148,16 @@ def _preset(base, region: tuple[int, ...], settings: ResetLeakageV0Settings, tem
     )
     qpu["runtime_execution"]["reset_model_configuration_id"] = model.configuration_id
     qpu["runtime_execution"]["reset_count"] = settings.reset_count
-    attacker = _thaw(template.attacker_config)
+    attacker = thaw(template.attacker_config)
     attacker["interleaved_access"] = {"max_rounds_per_query": settings.shots_per_case}
     attacker["operation_grants"] = list(CHALLENGE_OPERATIONS)
-    victim = _thaw(template.victim_config)
+    victim = thaw(template.victim_config)
     victim["operation_grants"] = list(CHALLENGE_OPERATIONS)
     victim["interleaved_run"] = {"program": "prepare_basis_state_then_measure", **secret}
-    experiment = _thaw(template.experiment_config)
+    experiment = thaw(template.experiment_config)
     experiment[EVALUATION_KEY] = dict(evaluation)
     challenge_template = ScenarioTemplate(
-        template_id, "1", attacker, victim, qpu, _thaw(template.relation_config), experiment,
+        template_id, "1", attacker, victim, qpu, thaw(template.relation_config), experiment,
     )
     # Every configured section is locked: a challenge exposes no editable input.
     locked = tuple(
@@ -205,24 +206,7 @@ def _preset(base, region: tuple[int, ...], settings: ResetLeakageV0Settings, tem
             "shots per case are the owner-approved reset_leakage_v0 profile values for this challenge only.",
             evidence_ref="docs_for_develop/development/attack-simulation/reset-leakage-calibration-2026-09-28.md"),
     )
-    return ScenarioPreset(challenge_template, policy, _unique(records))
-
-
-def _unique(records):
-    seen, kept = set(), []
-    for record in records:
-        if record.assumption_id not in seen:
-            seen.add(record.assumption_id)
-            kept.append(record)
-    return tuple(kept)
-
-
-def _thaw(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {key: _thaw(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_thaw(item) for item in value]
-    return value
+    return ScenarioPreset(challenge_template, policy, unique_by_assumption_id(records))
 
 
 @dataclass(frozen=True)

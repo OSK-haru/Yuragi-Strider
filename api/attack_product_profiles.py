@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 import math
 
-from api.attack_device_snapshot import DeviceSnapshot, deterministic_connected_region, load_ibm_kingston_snapshot
+from api.attack_device_snapshot import DeviceSnapshot, deterministic_connected_region, default_device_snapshot
 from api.attack_product_factory import IDLE_INPUT_CALIBRATION, IDLE_INPUT_PHYSICAL
 from api.attack_settings_resolver import FreeScenarioDefinition, SettingField
 from core.attack_simulation.qpu_topology import QpuTopology, TopologyLimits
@@ -71,7 +71,7 @@ def product_free_scenarios(snapshot: DeviceSnapshot | None = None) -> dict[str, 
     snapshot T1/T2 values. Device topology, readout/reset calibration, and CZ
     service metadata remain the declared device profile in both modes.
     """
-    snapshot = load_ibm_kingston_snapshot() if snapshot is None else snapshot
+    snapshot = default_device_snapshot() if snapshot is None else snapshot
     region = tuple(sorted(deterministic_connected_region(snapshot, MAX_RETAINED_QUBITS)))
     alternate = tuple(sorted(deterministic_connected_region(
         snapshot, MAX_RETAINED_QUBITS, excluded_qubit_ids=frozenset(region),
