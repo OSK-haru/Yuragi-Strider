@@ -237,17 +237,13 @@ class ProductEnvironmentFactory:
             )
             evaluator = None
             if manifest.submission_enabled:
-                from api.attack_challenge import challenge_evaluator
-                from api.attack_crosstalk_challenge import (
-                    EVALUATOR_ID as CROSSTALK_EVALUATOR_ID, CrosstalkGroverEvaluator, victim_counts,
-                )
-                if manifest.evaluator_id == CROSSTALK_EVALUATOR_ID:
-                    # Graded on the live world's victim runs, read by the supervisor, never by the participant.
-                    victim_tenant = parsed["victim_tenant_id"]
-                    evaluator = CrosstalkGroverEvaluator(
-                        manifest, self._limits, lambda: victim_counts(runtime, victim_tenant))
-                else:
-                    evaluator = challenge_evaluator(manifest, self._limits)
+                from api.attack_evaluators import EvaluatorContext, build_evaluator, tenant_run_counts
+                victim_tenant = parsed["victim_tenant_id"]
+                evaluator = build_evaluator(EvaluatorContext(
+                    manifest, self._limits,
+                    # Read by the supervisor from the live world, never by the participant.
+                    lambda: tenant_run_counts(runtime, victim_tenant),
+                ))
             return ProductAttackEnvironment(
                 controller=controller, attacker_credential=credentials[attacker_id],
                 manifest_id=manifest.manifest_id, mode=manifest.mode,

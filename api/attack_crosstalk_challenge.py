@@ -261,12 +261,3 @@ class CrosstalkGroverEvaluator:
             shots += step.shots
             index += 1
         return successes, shots
-
-
-def victim_counts(runtime, victim_tenant_id: str) -> tuple[Mapping[str, int], ...]:
-    """The victim's finished runs, in submission order (supervisor-side read of the live scheduler)."""
-    from core.attack_simulation.jobs import JobStatus
-    jobs = sorted((job for job in runtime.scheduler._jobs.values()
-                   if job.command.tenant_id == victim_tenant_id and job.status is JobStatus.SUCCEEDED
-                   and job.result is not None), key=lambda job: job.acceptance_sequence)
-    return tuple(dict(job.result["counts"]) for job in jobs)
