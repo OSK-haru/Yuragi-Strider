@@ -184,7 +184,7 @@ export function AttackQpuTopology({ standard, regionCatalog, placement, noiseMod
     return regionSelectionRequest(placement, regions)
   }
   return <section className="attack-live__panel attack-live__topology" aria-label="仮想QPU topology">
-    <div className="attack-live__topology-heading"><div><h2>仮想QPU · ibm_kingston</h2>
+    <div className="attack-live__topology-heading"><div><h2>仮想QPU · {standard.device}</h2>
       <p>{standard.qubit_count} qubit / {standard.undirected_edge_count} CZ結合 · 保持領域上限 {regionCatalog?.max_qubits ?? standard.active_region_limit} qubit</p></div>
       <span className="attack-live__layout-notice">{regionCatalog?.display_layout_notice ?? IBM_KINGSTON_LAYOUT_NOTICE}</span></div>
     <p className="attack-live__muted">{regionCatalog?.region_notice ?? '作成時にサーバーが領域を検査します。'}</p>

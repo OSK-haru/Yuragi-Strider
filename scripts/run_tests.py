@@ -39,13 +39,18 @@ PROFILE_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_pulse_api_transmon_network",
     ),
 }
+# Profiles selected by file-name pattern, so a new test file in the area joins the
+# profile without editing this list.
+PROFILE_GLOBS: dict[str, tuple[str, ...]] = {
+    "attack": ("test_attack*.py", "test_*challenge*.py", "test_crosstalk*.py", "test_concurrent*.py"),
+}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "profile",
-        choices=[*PROFILE_MODULES, "full-audit"],
+        choices=[*PROFILE_MODULES, *PROFILE_GLOBS, "full-audit"],
         help="Focused profile, or the complete unittest discovery run.",
     )
     args = parser.parse_args(argv)
@@ -53,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
     loader = unittest.TestLoader()
     if args.profile == "full-audit":
         suite = loader.discover(str(ROOT / "tests"))
+    elif args.profile in PROFILE_GLOBS:
+        files = sorted({path.stem for pattern in PROFILE_GLOBS[args.profile]
+                        for path in (ROOT / "tests").glob(pattern)})
+        suite = unittest.TestSuite(loader.loadTestsFromName(f"tests.{name}") for name in files)
     else:
         suite = unittest.TestSuite(
             loader.loadTestsFromName(module)

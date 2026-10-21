@@ -41,11 +41,12 @@ design review contract is in `MONITOR_REVIEW.md`.
   .\.venv\Scripts\python.exe scripts/run_tests.py fast
   .\.venv\Scripts\python.exe scripts/run_tests.py gate-aware
   .\.venv\Scripts\python.exe scripts/run_tests.py pulse
+  .\.venv\Scripts\python.exe scripts/run_tests.py attack
   .\.venv\Scripts\python.exe scripts/run_tests.py full-audit
   ```
 
   `fast` is the short core/API check. Use `gate-aware` for circuit and gate-aware
-  simulation changes, `pulse` for pulse API changes, and `full-audit` for a
+  simulation changes, `pulse` for pulse API changes, `attack` for the attack simulator (selected by file-name pattern), and `full-audit` for a
   release-level check; it includes long validation runs. For a narrow change,
   run its relevant `tests.test_*` module directly with
   `.\.venv\Scripts\python.exe -m unittest tests.test_example` (replace the module).
