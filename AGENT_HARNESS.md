@@ -29,6 +29,9 @@ design review contract is in `MONITOR_REVIEW.md`.
   in `api/`, UI behavior in `frontend/`, and independent physics validation in
   `validation_*`. QuTiP, SciPy, and Matplotlib are validation tools, not the
   production compute path.
+- When working as a vertical slice, keep `DEVELOPMENT_PROTOCOL.md` item 11 in
+  view throughout: do not let the slice's needs shrink extensibility or
+  flexibility of the production design, and report any such trade-off at handoff.
 - Choose checks from the affected behavior. A passing check supports only the
   behavior it exercises. Record the command and result; do not report a design
   review or documentation edit as runtime validation.
@@ -68,7 +71,8 @@ design review contract is in `MONITOR_REVIEW.md`.
 ## Finish and hand off
 
 Report the outcome, changed files, checks run with pass/fail/skip status, and
-remaining risks or decisions. Keep the report short. When handing work between
+remaining risks or decisions, including any generality given up for a vertical
+slice. Keep the report short. When handing work between
 Codex and Claude, the receiving agent checks the diff and evidence itself;
 neither agent treats the other's summary as a source of truth.
 

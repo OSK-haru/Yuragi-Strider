@@ -46,6 +46,7 @@
 | [不完全Reset論文再現シナリオ契約](reset-leakage-paper-reproduction-contract.md) | CCS 2022の同一量子ビット・順次再利用によるReset越し漏洩を最初の縦切りへ落とした暫定契約 |
 | [不完全Reset論文再現契約の欠陥監査](reset-leakage-paper-reproduction-audit.md) | 論文・契約・既存物理model・現行APIを突き合わせた実装前監査 |
 | [Reset漏洩の利用者学習校正](reset-leakage-visible-training-calibration-2026-09-29.md) | 公開training結果だけからの推定器学習、必要な観測予算、確率的graderの残る判断 |
+| [縦切り由来の一般性喪失の点検](vertical-slice-generality-audit-2026-10-21.md) | 7区間に分けた点検所見（未検証のレビュー統合）と、Codexへの申し送り候補 |
 | [進捗と根拠](progress.md) | コードで確認した実装範囲、検証履歴、未実装範囲 |
 | [未決定事項](open-questions.md) | 次に決める仕様と決定順序 |
 | [2026-09-19の変更内容](changes-2026-09-19.md) | 今回の変更前後、維持した方針、未決定の範囲 |
