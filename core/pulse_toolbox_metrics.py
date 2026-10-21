@@ -28,6 +28,8 @@ from typing import Any
 
 import numpy as np
 
+# MIN/MAX_TRANSMON_COUNT come from the network model that defines what can be simulated.
+from core.pulse_transmon_network import MAX_TRANSMON_COUNT, MIN_TRANSMON_COUNT
 from core.state_metrics import (
     PAULI_MATRICES,
     concurrence,
@@ -35,8 +37,6 @@ from core.state_metrics import (
 )
 
 PULSE_TOOLBOX_SCHEMA_VERSION = "pulse-toolbox-v1"
-MIN_TRANSMON_COUNT = 1
-MAX_TRANSMON_COUNT = 4
 SUPPORTED_LOCAL_LEVELS = (2, 3)
 MAX_PULSE_TOOLBOX_OBSERVABLES = 8
 
