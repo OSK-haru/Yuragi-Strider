@@ -11,7 +11,7 @@ from api.attack_live_websocket import (
     create_live_attack_websocket_router,
 )
 from api.attack_product_factory import ProductAssemblyLimits, ProductEnvironmentFactory
-from api.attack_device_snapshot import load_ibm_kingston_snapshot
+from api.attack_device_snapshot import DeviceSnapshot, load_ibm_kingston_snapshot
 from api.attack_challenge import reset_leakage_challenge, reset_leakage_message_challenge
 from api.attack_crosstalk_challenge import crosstalk_grover_challenge
 from api.attack_product_profiles import product_free_scenarios, standard_snapshot_initial_values
@@ -35,7 +35,8 @@ class AttackSimulatorRuntime:
     owner_manager: BrowserEnvironmentManager
 
 
-def build_attack_simulator_runtime(settings: WebOwnershipSettings) -> AttackSimulatorRuntime:
+def build_attack_simulator_runtime(settings: WebOwnershipSettings,
+                                   snapshot: DeviceSnapshot | None = None) -> AttackSimulatorRuntime:
     """Build all dependencies before returning one router for atomic mounting."""
     if type(settings) is not WebOwnershipSettings:
         raise TypeError("explicit web ownership settings are required")
@@ -52,7 +53,7 @@ def build_attack_simulator_runtime(settings: WebOwnershipSettings) -> AttackSimu
         max_workload_history=64,
         retained_jobs=128,
     )
-    snapshot = load_ibm_kingston_snapshot()
+    snapshot = load_ibm_kingston_snapshot() if snapshot is None else snapshot
     resolver = ScenarioSettingsResolver(
         free_scenarios=product_free_scenarios(snapshot),
         challenges=(reset_leakage_message_challenge(snapshot), reset_leakage_challenge(snapshot),

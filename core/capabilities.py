@@ -44,7 +44,7 @@ PULSE_MODEL_STATUSES = {
 }
 SUPPORTED_GATES = frozenset({
     "I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ",
-    "CNOT", "CZ", "CP", "CCX", "SWAP", "QFT", "ORACLE", "MEASURE", "MESSAGE",
+    "CNOT", "CZ", "ECR", "CP", "CCX", "SWAP", "QFT", "ORACLE", "MEASURE", "MESSAGE",
 })
 MAX_LOGICAL_QUBITS = 18
 MAX_DENSITY_MATRIX_QUBITS = 8

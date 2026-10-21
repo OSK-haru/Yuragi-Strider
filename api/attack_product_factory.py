@@ -348,6 +348,8 @@ class ProductEnvironmentFactory:
         if isinstance(circuit, Mapping) and "single_qubit_native_gates" in circuit:
             required.update({"qpu_service.circuit_execution.single_qubit_native_gates",
                              "qpu_service.circuit_execution.single_qubit_gate_decompositions"})
+            if "backend_declaration" in circuit:
+                required.add("qpu_service.circuit_execution.backend_declaration")
         if isinstance(circuit, Mapping) and isinstance(circuit.get("gate_durations_us"), Mapping):
             for gate in circuit["gate_durations_us"]:
                 required.add(f"qpu_service.circuit_execution.gate_durations_us.{gate}")
@@ -357,6 +359,15 @@ class ProductEnvironmentFactory:
                 if isinstance(calibration, Mapping):
                     for field in calibration:
                         required.add(f"qpu_service.circuit_execution.cz_gate_calibrations.{edge}.{field}")
+        if isinstance(circuit, Mapping) and isinstance(circuit.get("two_qubit_gate_calibrations"), Mapping):
+            required.add("qpu_service.circuit_execution.two_qubit_gate_calibrations")
+            for gate, edges in circuit["two_qubit_gate_calibrations"].items():
+                if isinstance(edges, Mapping):
+                    for edge, calibration in edges.items():
+                        if isinstance(calibration, Mapping):
+                            for field in calibration:
+                                required.add(
+                                    f"qpu_service.circuit_execution.two_qubit_gate_calibrations.{gate}.{edge}.{field}")
         if manifest.qpu_service_config.get("dedicated_region") is not None:
             required.update({
                 "qpu_service.dedicated_region.physical_qubit_ids",
@@ -409,7 +420,9 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
     region = RetainedRegionBinding(topology, tuple(retained), runtime_config.max_local_qubits)
     device_snapshot = qpu.get("device_snapshot")
     if device_snapshot is not None:
-        _validate_device_snapshot_binding(device_snapshot, topology, region)
+        execution_config = qpu.get("circuit_execution", {})
+        declaration = execution_config.get("backend_declaration") if isinstance(execution_config, Mapping) else None
+        _validate_device_snapshot_binding(device_snapshot, topology, region, declaration)
     reset_raw = _object(qpu, "reset_model", {
         "model_id", "target_populations", "applies_to_physical_qubit_ids",
     }, optional={
@@ -541,7 +554,8 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "compiler_id", "supported_gates", "max_program_qubits", "max_shots",
         "max_instruction_executions", "gate_durations_us",
     }, optional={"max_unitary_elements", "supported_initializations", "cz_gate_calibrations",
-                 "single_qubit_native_gates", "single_qubit_gate_decompositions"})
+                 "two_qubit_gate_calibrations", "single_qubit_native_gates",
+                 "single_qubit_gate_decompositions", "backend_declaration"})
     _basis_values(circuit["gate_durations_us"], "gate durations")
     if not isinstance(circuit["gate_durations_us"], Mapping):
         raise ValueError("all circuit gate durations must be explicit")
@@ -865,20 +879,32 @@ def _build_idle_model(
 
 
 def _validate_device_snapshot_binding(snapshot: object, topology: QpuTopology,
-                                      region: RetainedRegionBinding) -> None:
+                                      region: RetainedRegionBinding, declaration: object = None) -> None:
     required = {
         "snapshot_id", "source", "props_sha256", "conf_sha256", "qubit_count",
         "directed_coupling_count", "active_region_physical_qubit_ids", "eligibility_policy",
         "qubits", "cz_calibrations", "qubit_calibration_basis", "cz_calibration_basis",
     }
+    custom = declaration is not None
+    if custom:
+        required |= {"directed_coupling_map", "two_qubit_calibrations"}
     if not isinstance(snapshot, Mapping) or set(snapshot) != required:
         raise ValueError("device snapshot provenance record is incomplete")
     ids = tuple(topology.physical_qubit_ids)
     if (type(snapshot["qubit_count"]) is not int or snapshot["qubit_count"] != len(ids)
             or type(snapshot["directed_coupling_count"]) is not int
-            or snapshot["directed_coupling_count"] != 2 * len(topology.gate_edges)
+            or (not custom and snapshot["directed_coupling_count"] != 2 * len(topology.gate_edges))
             or tuple(snapshot["active_region_physical_qubit_ids"]) != region.physical_qubit_ids):
         raise ValueError("device snapshot dimensions do not match the frozen QPU topology")
+    if custom:
+        raw_map = snapshot["directed_coupling_map"]
+        if (type(raw_map) not in (list, tuple) or len(raw_map) != snapshot["directed_coupling_count"]
+                or any(type(edge) not in (list, tuple) or len(edge) != 2
+                       or any(type(qid) is not int for qid in edge) for edge in raw_map)):
+            raise ValueError("directed coupling map does not match its declared count")
+        undirected = {tuple(sorted(edge)) for edge in raw_map}
+        if undirected != set(topology.gate_edges):
+            raise ValueError("directed coupling map differs from frozen topology")
     for field in ("props_sha256", "conf_sha256"):
         digest = snapshot[field]
         if type(digest) is not str or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
@@ -895,13 +921,44 @@ def _validate_device_snapshot_binding(snapshot: object, topology: QpuTopology,
             raise ValueError("retained region includes a qubit marked unusable")
     cz = snapshot["cz_calibrations"]
     expected_edges = {f"{left}:{right}" for left, right in topology.gate_edges}
-    if not isinstance(cz, Mapping) or set(cz) != expected_edges:
+    declared_two = declaration.get("two_qubit_gates") if isinstance(declaration, Mapping) else {"cz": False}
+    cz_expected_edges = expected_edges if "cz" in declared_two else set()
+    if not isinstance(cz, Mapping) or set(cz) != cz_expected_edges:
         raise ValueError("device snapshot CZ inventory differs from topology edges")
     for edge, entry in cz.items():
         if (type(entry) not in (list, tuple) or len(entry) != 2
                 or any(type(value) not in (int, float) or not math.isfinite(float(value)) or value < 0
                        for value in entry)):
             raise ValueError("device snapshot CZ calibration record is invalid")
+    if custom:
+        generic = snapshot["two_qubit_calibrations"]
+        raw_directions = {tuple(edge) for edge in snapshot["directed_coupling_map"]}
+        if not isinstance(generic, Mapping) or set(generic) != set(declared_two):
+            raise ValueError("device snapshot two-qubit calibration inventory differs from declaration")
+        for gate, entries in generic.items():
+            directed = declared_two[gate]
+            if type(directed) is not bool or not isinstance(entries, Mapping) or not entries:
+                raise ValueError("device snapshot two-qubit declaration is invalid")
+            parsed = set()
+            for edge, entry in entries.items():
+                try:
+                    pair = tuple(int(part) for part in edge.split(":"))
+                except (AttributeError, ValueError):
+                    raise ValueError("two-qubit calibration edge has invalid directed form") from None
+                if (len(pair) != 2 or pair[0] == pair[1] or pair not in raw_directions
+                        or not directed and pair[0] > pair[1]):
+                    raise ValueError("two-qubit calibration direction is outside backend coupling map")
+                parsed.add(pair)
+                if (type(entry) not in (list, tuple) or len(entry) != 2
+                        or any(type(value) not in (int, float) or not math.isfinite(float(value))
+                               or value < 0 for value in entry)):
+                    raise ValueError("two-qubit snapshot calibration record is invalid")
+            if not directed:
+                expected_symmetric = {tuple(sorted(edge)) for edge in raw_directions}
+                if parsed != expected_symmetric:
+                    raise ValueError("symmetric gate calibration does not cover backend coupling edges")
+            elif parsed != raw_directions:
+                raise ValueError("directed gate calibration does not cover backend coupling directions")
     for field in ("qubit_calibration_basis", "cz_calibration_basis"):
         if type(snapshot[field]) is not str or not snapshot[field].strip():
             raise ValueError("device snapshot calibration basis is missing")

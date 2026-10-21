@@ -18,7 +18,6 @@ from dataclasses import dataclass
 import math
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
-from core.attack_simulation.native_pulses import PULSE_ANGLES
 from core.attack_simulation.pulse_shape import SQUARE_SHAPE, PulseShape
 
 ACTIVITY_KINDS = ("drive", "frame", "two_qubit", "idle", "reset", "measure")
@@ -99,7 +98,7 @@ def instruction_starts(operation: CircuitExecutionOperation, *,
 def frame_before(operation: CircuitExecutionOperation, position: int, qubit: int) -> float:
     """The virtual-Z shift program ``qubit`` has accumulated within a shot before instruction ``position``.
 
-    It sums the ``rz`` steps of the single-qubit gates that come earlier, the same bookkeeping that
+    It sums the declared virtual-frame steps of the single-qubit gates that come earlier, the same bookkeeping that
     ``shot_activity`` records as ``frame`` intervals. A single-qubit gate without native steps has an
     unknown frame, so asking for it is an error rather than a guess.
     """
@@ -111,7 +110,7 @@ def frame_before(operation: CircuitExecutionOperation, position: int, qubit: int
             continue
         if not item.natives:
             raise ValueError("the virtual-Z frame is unknown: a single-qubit gate has no native steps")
-        total += sum(step.angle_rad for step in item.natives if step.name == "rz")
+        total += sum(step.angle_rad for step in item.natives if step.is_virtual)
     return total
 
 
@@ -143,13 +142,13 @@ def shot_activity(operation: CircuitExecutionOperation, *, reset_duration_us: fl
             qubit = item.qubits[0]
             cursor = start
             for step in item.natives:
-                if step.name == "rz":
+                if step.is_virtual:
                     intervals.append(ActivityInterval(qubit, "frame", cursor, cursor, angle_rad=step.angle_rad))
                     frames[qubit] = frames.get(qubit, 0.0) + step.angle_rad
                 else:
                     intervals.append(ActivityInterval(
                         qubit, "drive", cursor, cursor + step.duration_us,
-                        angle_rad=PULSE_ANGLES[step.name], phase_rad=-frames.get(qubit, 0.0), shape=pulse_shape))
+                        angle_rad=step.angle_rad, phase_rad=-frames.get(qubit, 0.0), shape=pulse_shape))
                     cursor += step.duration_us
         elif len(item.qubits) == 2 and item.intrinsic_us > 0.0:
             intervals.extend(ActivityInterval(q, "two_qubit", start, start + item.intrinsic_us) for q in item.qubits)

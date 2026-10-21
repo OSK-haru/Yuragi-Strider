@@ -1,7 +1,7 @@
 {
   "validation": "PHYSICAL-MODEL-BASELINE-V1",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-13T15:51:32.545111+00:00",
+  "generated_at_utc": "2026-10-20T13:40:24.265986+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -70,13 +70,13 @@
     }
   },
   "source_revision": {
-    "git_head": "b101cbfd4c8975174302cee29a350c6c9d12a1e0",
-    "critical_source_tree_sha256": "4338d7e7671133e8255b4423c6bb6eb65d5209e4dfca466c507cca9250ac0d61",
+    "git_head": "48d0711bd6b0f1b083e40f1cd09dbbffaca00821",
+    "critical_source_tree_sha256": "f5f010300102fe4b19fc45d8a5ff38ffdea0ccbd95e2fb58e5c73190465a4c85",
     "files": [
       {
         "file": "core/capabilities.py",
         "exists": true,
-        "sha256": "7a7104dbc873162db06f40b4f28e6b1247a0d844efff64009732f3e400d2e631"
+        "sha256": "22330a9cd13d48fa05db367018a68d426a6b243015090d701ceb58f9d128eb88"
       },
       {
         "file": "core/classical_branching.py",
@@ -86,7 +86,7 @@
       {
         "file": "core/gates.py",
         "exists": true,
-        "sha256": "46263cbc80a7e123ad637c740d6b54be84a4c5b5391135b45b2f1eb237955819"
+        "sha256": "d35258c34765b81e99eb1d8e849c42384c10aa64f8153a623b03582cf86cbb11"
       },
       {
         "file": "core/physical_environment.py",

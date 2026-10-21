@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+import math
 
 from api.attack_device_snapshot import DeviceSnapshot, deterministic_connected_region, load_ibm_kingston_snapshot
 from api.attack_product_factory import IDLE_INPUT_CALIBRATION, IDLE_INPUT_PHYSICAL
 from api.attack_settings_resolver import FreeScenarioDefinition, SettingField
 from core.attack_simulation.qpu_topology import QpuTopology, TopologyLimits
+from core.attack_simulation.backend_declaration import KINGSTON_BACKEND
 from core.attack_simulation.concurrency_policy import (
     CROSSTALK_DIRECTIONS, DEFAULT_CROSSTALK_STRENGTH, EXCLUSIVE_FIFO, OVERLAP_DISJOINT_REGIONS,
 )
@@ -59,13 +61,7 @@ FREE_INTERLEAVED_QUERY_LIMIT = 1000
 FREE_INTERLEAVED_DEFAULT_ROUNDS = 64
 FREE_INTERLEAVED_ROUNDS_CEILING = 256
 MAX_RETAINED_QUBITS = 6
-_GATE_NAMES = ("I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ", "CNOT", "CZ")
-_SINGLE_QUBIT_DECOMPOSITIONS = {
-    "Z": ("rz",), "S": ("rz",), "T": ("rz",), "RZ": ("rz",),
-    "X": ("x",), "H": ("rz", "sx", "rz"), "Y": ("x", "rz"),
-    "RX": ("rz", "sx", "rz", "sx", "rz"),
-    "RY": ("rz", "sx", "rz", "sx", "rz"),
-}
+_LOGICAL_GATE_ORDER = ("I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ", "CNOT", "CZ", "ECR")
 
 
 def product_free_scenarios(snapshot: DeviceSnapshot | None = None) -> dict[str, FreeScenarioDefinition]:
@@ -89,7 +85,7 @@ def product_free_scenarios(snapshot: DeviceSnapshot | None = None) -> dict[str, 
         "active_region_initial": list(region),
         "alternate_region_initial": list(alternate),
         "display_layout_notice": "表示用の配置であり、実機の物理的な位置ではありません。",
-        "region_notice": "使用領域はCZ結合で連結している必要があります。作成時にサーバーが再検査します。",
+        "region_notice": "使用領域はスナップショットの結合辺で連結している必要があります。作成時にサーバーが再検査します。",
         "qubit_noise_fields": {
             "primary": _qubit_noise_field_templates("qpu_service.idle_dynamics.qubits"),
             "dedicated": _qubit_noise_field_templates("qpu_service.dedicated_region.idle_dynamics.qubits"),
@@ -177,7 +173,7 @@ def _validate_connected_region(snapshot: DeviceSnapshot, raw: object) -> tuple[i
         reached.add(qid)
         stack.extend(adjacency[qid] - reached)
     if reached != selected:
-        raise ValueError("selected region is not connected by snapshot CZ edges")
+        raise ValueError("selected region is not connected by snapshot coupling edges")
     return tuple(sorted(selected))
 
 
@@ -215,7 +211,7 @@ def standard_snapshot_initial_values(snapshot: DeviceSnapshot) -> dict[str, obje
             "basis": "Per-qubit historical calibration from the hash-verified 2026-04-15 device snapshot; not current device guarantee.",
         }
     return {
-        "source": "data/device_snapshots/ibm_kingston_2026-04-15/SOURCE.md",
+        "source": snapshot.source_path,
         "device": snapshot.device_id,
         "snapshot_date": snapshot.snapshot_date,
         "props_sha256": snapshot.props_sha256,
@@ -246,7 +242,7 @@ def standard_snapshot_initial_values(snapshot: DeviceSnapshot) -> dict[str, obje
 def _topology(snapshot: DeviceSnapshot) -> QpuTopology:
     return QpuTopology(
         snapshot.device_id,
-        f"ibm_kingston_snapshot_{snapshot.snapshot_date}",
+        f"{snapshot.device_id}_snapshot_{snapshot.snapshot_date}",
         tuple(range(snapshot.n_qubits)),
         TopologyLimits(256, 2048, 4096),
         gate_edges=snapshot.undirected_coupling_edges,
@@ -300,38 +296,56 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
             {"model_id": "independent_constant_rate_v1", "input_mode": mode,
              "physical_inputs": physical_inputs})
 
-    cz = {}
-    for pair, item in snapshot.cz_calibrations.items():
-        if pair[0] in region and pair[1] in region:
-            cz[f"{pair[0]}:{pair[1]}"] = {
-                "duration_us": item.duration_us,
-                # Convert average infidelity r to the probability p of a
-                # two-qubit replacement channel: r = p(d-1)/d, d=4.
-                "depolarizing_probability": _cz_replacement_probability(item.error),
-            }
+    declaration = snapshot.backend_declaration
+    two_qubit = {}
+    for gate, gate_calibrations in snapshot.two_qubit_calibrations.items():
+        gate_entries = {}
+        for edge, item in gate_calibrations.items():
+            if edge[0] in region and edge[1] in region:
+                gate_entries[f"{edge[0]}:{edge[1]}"] = {
+                    "duration_us": item.duration_us,
+                    "depolarizing_probability": _two_qubit_replacement_probability(item.error),
+                }
+        two_qubit[gate] = gate_entries
+    cz = two_qubit.get("cz", {})
+    decompositions = _single_qubit_decompositions(declaration)
+    logical_gates = [gate for gate in _LOGICAL_GATE_ORDER
+                     if gate in {"I", "MEASURE"} or gate in decompositions
+                     or gate.upper() in {name.upper() for name in declaration.two_qubit_gates}
+                     or gate == "CNOT" and (
+                         "cz" in declaration.two_qubit_gates and "H" in decompositions
+                         or "ecr" in declaration.two_qubit_gates
+                         and {"S", "X", "RX"} <= set(decompositions))]
     native_gates = {}
     for qid in region:
         values = {}
-        for native in ("rz", "sx", "x"):
+        for native in declaration.native_single_qubit_gates:
             item = snapshot.single_qubit_calibrations.get((native, qid))
             if item is None:
                 raise ValueError("active qubit is missing native single-qubit calibration")
-            if native != "rz" and item.error > 0.5:
+            if native not in declaration.virtual_single_qubit_gates and item.error > 0.5:
                 raise ValueError("single-qubit average infidelity cannot be represented by the replacement channel")
             values[native] = {"duration_us": item.duration_us, "gate_error": item.error}
         native_gates[str(qid)] = values
-    # Two-qubit schema fallbacks exist only to satisfy the manifest contract.
-    # Actual CZ and CNOT instructions are lowered against per-edge/per-qubit data.
-    max_cz_duration = max((entry["duration_us"] for entry in cz.values()), default=0.0)
-    max_h_duration = max(
-        sum(native_gates[str(qid)][native]["duration_us"]
-            for native in _SINGLE_QUBIT_DECOMPOSITIONS["H"])
-        for qid in region
-    )
+    # Aggregate durations are fallbacks; execution selects a calibration by physical edge.
     gate_durations = {
-        "CZ": max_cz_duration,
-        "CNOT": 2.0 * max_h_duration + max_cz_duration,
+        gate.upper(): max((entry["duration_us"] for entry in entries.values()), default=0.0)
+        for gate, entries in two_qubit.items()
     }
+    if "cz" in declaration.two_qubit_gates and "H" in decompositions:
+        max_h_duration = max(
+            sum(native_gates[str(qid)][native]["duration_us"]
+                for native in decompositions["H"])
+            for qid in region
+        )
+        gate_durations["CNOT"] = 2.0 * max_h_duration + gate_durations["CZ"]
+    elif "ecr" in declaration.two_qubit_gates and {"S", "X", "RX"} <= set(decompositions):
+        max_single_durations = {
+            gate: max(sum(native_gates[str(qid)][native]["duration_us"]
+                          for native in decompositions[gate]) for qid in region)
+            for gate in ("S", "X", "RX")
+        }
+        gate_durations["CNOT"] = sum(max_single_durations.values()) + gate_durations["ECR"]
 
     runtime = SharedQpuRuntimeConfig(
         reset_model_id=reset.model_id,
@@ -355,13 +369,12 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
         "runtime_execution": runtime.to_manifest_config(),
         "circuit_execution": {
             "compiler_id": "local_sampling_v1",
-            "supported_gates": [*_GATE_NAMES, "MEASURE"],
+            "supported_gates": [*logical_gates, "MEASURE"],
             "max_program_qubits": len(region), "max_shots": 1024,
             "max_instruction_executions": 32768, "gate_durations_us": gate_durations,
             "supported_initializations": ["prepare", "inherit"],
-            "cz_gate_calibrations": cz,
             "single_qubit_native_gates": native_gates,
-            "single_qubit_gate_decompositions": dict(_SINGLE_QUBIT_DECOMPOSITIONS),
+            "single_qubit_gate_decompositions": decompositions,
         },
         "topology": topology.to_config(),
         "retained_region": {"physical_qubit_ids": list(region)},
@@ -394,6 +407,12 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
             "basis": "Explicit deterministic profile choice.", "cancellation_policy": "queued_only",
         },
     }
+    if declaration.two_qubit_gates.keys() == {"cz"}:
+        qpu["circuit_execution"]["cz_gate_calibrations"] = cz
+    else:
+        qpu["circuit_execution"]["two_qubit_gate_calibrations"] = two_qubit
+    if declaration != KINGSTON_BACKEND:
+        qpu["circuit_execution"]["backend_declaration"] = declaration.to_config()
     if alternate_region is not None:
         alternate_qpu = _profile(snapshot, topology, alternate_region, mode).template.qpu_service_config
         alternate_runtime = alternate_qpu["runtime_execution"]
@@ -407,25 +426,32 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
             "reset_duration_us": alternate_runtime["reset_duration_us"],
             "program_measurement_duration_us": alternate_runtime["program_measurement_duration_us"],
         }
-        qpu["circuit_execution"]["cz_gate_calibrations"].update(
-            alternate_qpu["circuit_execution"]["cz_gate_calibrations"])
+        calibration_field = ("cz_gate_calibrations" if "cz_gate_calibrations" in qpu["circuit_execution"]
+                             else "two_qubit_gate_calibrations")
+        alternate_calibrations = alternate_qpu["circuit_execution"].get(calibration_field, {})
+        if calibration_field == "cz_gate_calibrations":
+            qpu["circuit_execution"][calibration_field].update(alternate_calibrations)
+        else:
+            for gate, entries in alternate_calibrations.items():
+                qpu["circuit_execution"][calibration_field].setdefault(gate, {}).update(entries)
         qpu["circuit_execution"]["single_qubit_native_gates"].update(
             alternate_qpu["circuit_execution"]["single_qubit_native_gates"])
-        qpu["circuit_execution"]["gate_durations_us"]["CZ"] = max(
-            item["duration_us"] for item in qpu["circuit_execution"]["cz_gate_calibrations"].values())
-        qpu["circuit_execution"]["gate_durations_us"]["CNOT"] = max(
-            2.0 * sum(qpu["circuit_execution"]["single_qubit_native_gates"][qid][native]["duration_us"]
-                     for native in _SINGLE_QUBIT_DECOMPOSITIONS["H"])
-            + qpu["circuit_execution"]["gate_durations_us"]["CZ"]
-            for qid in qpu["circuit_execution"]["single_qubit_native_gates"])
-    template = _template(f"attack-free-kingston-{mode}", qpu, mode, region,
+        if calibration_field == "cz_gate_calibrations" and "H" in decompositions:
+            qpu["circuit_execution"]["gate_durations_us"]["CZ"] = max(
+                item["duration_us"] for item in qpu["circuit_execution"][calibration_field].values())
+            qpu["circuit_execution"]["gate_durations_us"]["CNOT"] = max(
+                2.0 * sum(qpu["circuit_execution"]["single_qubit_native_gates"][qid][native]["duration_us"]
+                         for native in decompositions["H"])
+                + qpu["circuit_execution"]["gate_durations_us"]["CZ"]
+                for qid in qpu["circuit_execution"]["single_qubit_native_gates"])
+    template = _template(f"attack-free-{snapshot.device_id.removeprefix('ibm_')}-{mode}", qpu, mode, region,
                          alternate_region if placement_policy == PlacementPolicy.TENANT_DEDICATED_REGION.value else None)
     assumptions = _assumptions(
         snapshot, region, mode, reset_duration, measurement_duration,
-        qpu["circuit_execution"]["cz_gate_calibrations"],
+        cz, two_qubit, gate_durations,
     )
     if alternate_region is not None:
-        evidence = "data/device_snapshots/ibm_kingston_2026-04-15/SOURCE.md"
+        evidence = snapshot.source_path
         assumptions.extend((
             _record("qpu_service.dedicated_region.physical_qubit_ids", AssumptionBasis.SIMULATOR_CHOICE,
                     "Deterministic disjoint connected six-qubit region for tenant separation."),
@@ -496,9 +522,9 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
 
 
 def _manifest_snapshot(snapshot: DeviceSnapshot, region: tuple[int, ...]) -> dict[str, object]:
-    return {
+    result = {
         "snapshot_id": f"{snapshot.device_id}-{snapshot.snapshot_date}",
-        "source": "data/device_snapshots/ibm_kingston_2026-04-15/SOURCE.md",
+        "source": snapshot.source_path,
         "props_sha256": snapshot.props_sha256, "conf_sha256": snapshot.conf_sha256,
         "qubit_count": snapshot.n_qubits,
         "directed_coupling_count": len(snapshot.directed_coupling_map),
@@ -524,6 +550,14 @@ def _manifest_snapshot(snapshot: DeviceSnapshot, region: tuple[int, ...]) -> dic
             for (left, right), item in snapshot.cz_calibrations.items()
         },
     }
+    if snapshot.backend_declaration != KINGSTON_BACKEND:
+        result["directed_coupling_map"] = [list(edge) for edge in snapshot.directed_coupling_map]
+        result["two_qubit_calibrations"] = {
+            gate: {f"{left}:{right}": [item.error, item.duration_us]
+                   for (left, right), item in calibrations.items()}
+            for gate, calibrations in snapshot.two_qubit_calibrations.items()
+        }
+    return result
 
 
 def _cz_replacement_probability(gate_error: float) -> float:
@@ -531,6 +565,13 @@ def _cz_replacement_probability(gate_error: float) -> float:
     probability = gate_error * 4.0 / 3.0
     if not 0.0 <= probability <= 1.0:
         raise ValueError("CZ average infidelity cannot be represented by the replacement channel")
+    return probability
+
+
+def _two_qubit_replacement_probability(gate_error: float) -> float:
+    probability = gate_error * 4.0 / 3.0
+    if not 0.0 <= probability <= 1.0:
+        raise ValueError("two-qubit average infidelity cannot be represented by the replacement channel")
     return probability
 
 
@@ -620,18 +661,52 @@ def _qubit_noise_paths(region: tuple[int, ...], prefix: str) -> tuple[str, ...]:
                  for field in ("t1_us", "t2_us", "equilibrium_excited_population"))
 
 
+def _single_qubit_decompositions(declaration) -> dict[str, tuple[str, ...]]:
+    """Return logical operations representable by this backend's declared basis."""
+    native = set(declaration.native_single_qubit_gates)
+    virtual = next(iter(declaration.virtual_single_qubit_gates), None)
+    half_turn = next((name for name, angle in declaration.native_pulse_angles_rad.items()
+                      if abs(angle - math.pi / 2.0) < 1e-7), None)
+    full_turn = next((name for name, angle in declaration.native_pulse_angles_rad.items()
+                      if abs(angle - math.pi) < 1e-7), None)
+    universal = ((virtual, half_turn, virtual, half_turn, virtual)
+                 if virtual is not None and half_turn is not None else None)
+    result: dict[str, tuple[str, ...]] = {}
+    if virtual is not None:
+        result.update({"Z": (virtual,), "S": (virtual,), "T": (virtual,), "RZ": (virtual,)})
+    if full_turn is not None:
+        result["X"] = (full_turn,)
+    elif universal is not None:
+        result["X"] = universal
+    if virtual is not None and half_turn is not None:
+        result["H"] = (virtual, half_turn, virtual)
+        result["RX"] = universal
+        result["RY"] = universal
+    if virtual is not None and full_turn is not None:
+        result["Y"] = (full_turn, virtual)
+    elif universal is not None:
+        result["Y"] = universal
+    # Keep the historical public manifest's key order for Kingston. The order is
+    # part of the canonical product configuration even though mappings are
+    # semantically unordered.
+    order = ("Z", "S", "T", "RZ", "X", "H", "Y", "RX", "RY")
+    return {name: result[name] for name in order if name in result}
+
+
 def _assumptions(snapshot: DeviceSnapshot, region: tuple[int, ...], mode: str,
                  reset_duration: float, measurement_duration: float,
-                 cz: Mapping[str, Mapping[str, float]]) -> list[AssumptionRecord]:
-    evidence = "data/device_snapshots/ibm_kingston_2026-04-15/SOURCE.md"
+                 cz: Mapping[str, Mapping[str, float]],
+                 two_qubit: Mapping[str, Mapping[str, Mapping[str, float]]],
+                 gate_durations: Mapping[str, float]) -> list[AssumptionRecord]:
+    evidence = snapshot.source_path
     assumptions = [
         _record("qpu_service.idle_dynamics.input_mode", AssumptionBasis.SIMULATOR_CHOICE,
                 f"Mutually exclusive idle input mode selected for this profile: {mode}."),
         _record("qpu_service.device_snapshot", AssumptionBasis.MEASURED,
-                "Hash-verified historical IBM Kingston calibration snapshot; raw qubit and gate values are frozen in manifest.",
+                f"Hash-verified historical {snapshot.device_id} calibration snapshot; raw qubit and gate values are frozen in manifest.",
                 evidence=evidence),
         _record("qpu_service.topology", AssumptionBasis.MEASURED,
-                "156 physical qubits and the snapshot coupling map; topology is not synthesized.", evidence=evidence),
+                f"{snapshot.n_qubits} physical qubits and the snapshot coupling map; topology is not synthesized.", evidence=evidence),
         _record("qpu_service.retained_region.physical_qubit_ids", AssumptionBasis.SIMULATOR_CHOICE,
                 "Deterministic connected usable region, capped at six qubits for dense-state memory.",
                 applicability={"active_physical_qubit_ids": ",".join(map(str, region))}),
@@ -750,6 +825,42 @@ def _assumptions(snapshot: DeviceSnapshot, region: tuple[int, ...], mode: str,
         _record("qpu_service.circuit_execution.supported_gates", AssumptionBasis.SIMULATOR_CHOICE,
                 "Logical CNOT is implemented by calibrated H-CZ-H decomposition; CZ calibration is selected by the unordered physical edge."),
     ))
+    if snapshot.backend_declaration != KINGSTON_BACKEND:
+        generic_two_qubit = set(snapshot.backend_declaration.two_qubit_gates) != {"cz"}
+        assumptions = [item for item in assumptions if not any(
+            generic_two_qubit and path.startswith("qpu_service.circuit_execution.cz_gate_calibrations")
+            or path.startswith("qpu_service.circuit_execution.gate_durations_us.")
+            or path in {
+                "qpu_service.circuit_execution.single_qubit_native_gates",
+                "qpu_service.circuit_execution.single_qubit_gate_decompositions",
+                "qpu_service.circuit_execution.supported_gates",
+            } for path in item.target_paths)]
+        assumptions.extend((
+            _record("qpu_service.circuit_execution.backend_declaration", AssumptionBasis.SIMULATOR_CHOICE,
+                    "Native single-qubit, virtual-gate, and directed two-qubit capabilities declared for this backend."),
+            _record("qpu_service.circuit_execution.single_qubit_native_gates", AssumptionBasis.MEASURED,
+                    "Native single-qubit calibrations from the verified backend snapshot.", evidence=evidence),
+            _record("qpu_service.circuit_execution.single_qubit_gate_decompositions", AssumptionBasis.SIMULATOR_CHOICE,
+                    "Logical single-qubit operations use declared native gates."),
+            _record("qpu_service.circuit_execution.supported_gates", AssumptionBasis.SIMULATOR_CHOICE,
+                    "Exposed gates have declared native implementations or validated decompositions."),
+        ))
+        if generic_two_qubit:
+            assumptions.append(_record(
+                "qpu_service.circuit_execution.two_qubit_gate_calibrations", AssumptionBasis.MEASURED,
+                "Directed per-edge two-qubit calibrations copied from the verified backend snapshot.", evidence=evidence))
+            for gate, entries in two_qubit.items():
+                for edge in entries:
+                    for field in ("duration_us", "depolarizing_probability"):
+                        path = f"qpu_service.circuit_execution.two_qubit_gate_calibrations.{gate}.{edge}.{field}"
+                        basis = AssumptionBasis.MEASURED if field == "duration_us" else AssumptionBasis.SIMULATOR_CHOICE
+                        assumptions.append(_record(path, basis,
+                                                   f"Per-edge {gate.upper()} calibration from the verified snapshot.",
+                                                   evidence=evidence))
+        for gate in gate_durations:
+            assumptions.append(_record(
+                f"qpu_service.circuit_execution.gate_durations_us.{gate}", AssumptionBasis.SIMULATOR_CHOICE,
+                f"Fallback duration for {gate}; calibrated gates use edge-specific snapshot durations."))
     return assumptions
 
 

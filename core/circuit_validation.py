@@ -45,7 +45,7 @@ def validate_gate_for_circuit(
             "INVALID_GATE_TYPE",
             "Gate type is not supported by the circuit editor.",
             f"Received gate type={gate.type!r}.",
-            "Use one of I, H, X, Y, Z, S, T, RX, RY, RZ, CNOT, CZ, CP, CCX, SWAP, QFT, ORACLE, or Measure.",
+            "Use one of I, H, X, Y, Z, S, T, RX, RY, RZ, CNOT, CZ, ECR, CP, CCX, SWAP, QFT, ORACLE, or Measure.",
         ))
 
     if gate.classical_targets and gate_type != "MEASURE":
@@ -174,6 +174,11 @@ def validate_gate_for_circuit(
                     f"Received control={control}, targets={gate.targets!r}.",
                     f"Choose different qubits for {gate_type} control and target.",
                 ))
+    elif gate_type == "ECR":
+        if gate.controls or len(gate.targets) != 2 or len(set(gate.targets)) != 2:
+            issues.append(_error("INVALID_ECR_OPERANDS", "ECR requires two ordered target qubits.",
+                                 f"Received targets={gate.targets!r}.",
+                                 "Choose two different qubits in the backend-declared direction."))
     elif gate_type == "CCX":
         controls = list(gate.controls or [])
         if len(controls) != 2:

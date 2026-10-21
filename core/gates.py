@@ -76,6 +76,7 @@ DEFAULT_GATE_DURATIONS_US = {
     "RZ": 0.02,
     "CNOT": 0.20,
     "CZ": 0.20,
+    "ECR": 0.20,
     "SWAP": 0.20,
     "CP": 0.20,
     "CCX": 0.40,
@@ -152,6 +153,17 @@ def expand_cz(control: int, target: int, n_qubits: int) -> Matrix:
             else 1.0 + 0.0j
         )
     return _freeze(rows)
+
+
+def ecr_matrix() -> Matrix:
+    """Return the standard two-qubit echoed cross-resonance unitary."""
+    scale = 1.0 / sqrt(2.0)
+    return (
+        (0j, 0j, scale, 1j * scale),
+        (0j, 0j, 1j * scale, scale),
+        (scale, -1j * scale, 0j, 0j),
+        (-1j * scale, scale, 0j, 0j),
+    )
 
 
 def expand_swap(first: int, second: int, n_qubits: int) -> Matrix:
@@ -584,6 +596,10 @@ def gate_unitary(gate: GateOperation, n_qubits: int) -> Matrix:
         if len(gate.controls or []) != 1 or len(gate.targets) != 1:
             raise ValueError("CZ requires exactly one control and one target")
         return expand_cz(gate.controls[0], gate.targets[0], n_qubits)
+    if gate_type == "ECR":
+        if gate.controls or len(gate.targets) != 2 or gate.targets[0] == gate.targets[1]:
+            raise ValueError("ECR requires exactly two distinct ordered targets and no controls")
+        return ecr_matrix()
     if gate_type == "CP":
         if len(gate.controls or []) != 1 or len(gate.targets) != 1:
             raise ValueError("CP requires exactly one control and one target")

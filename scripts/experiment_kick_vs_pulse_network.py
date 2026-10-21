@@ -50,7 +50,7 @@ STEP_TOLERANCE = 0.004                # the largest rotation of any term in one 
 
 
 def rz(angle: float) -> NativeStep:
-    return NativeStep("rz", angle, 0.0)
+    return NativeStep("rz", angle, 0.0, is_virtual=True)
 
 
 def sx() -> NativeStep:

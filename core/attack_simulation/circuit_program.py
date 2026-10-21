@@ -16,6 +16,7 @@ from core.attack_simulation.program_request import (
 from core.attack_simulation.resource_binding import PhysicalQubitLayout
 from core.circuit_model import CircuitConfig, GateOperation
 from core.attack_simulation.native_pulses import NativeStep, UnsupportedNativeSequence, solve_native_steps
+from core.attack_simulation.backend_declaration import BackendDeclaration, KINGSTON_BACKEND
 from core.gates import Matrix, gate_duration_us, gate_unitary
 
 if TYPE_CHECKING:
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 
 
 NATIVE_GATES = ("I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ",
-                "CNOT", "CZ", "CP", "CCX", "SWAP", "QFT", "ORACLE", "MEASURE")
+                "CNOT", "CZ", "ECR", "CP", "CCX", "SWAP", "QFT", "ORACLE", "MEASURE")
 
 
 MAX_DELAY_US = 10_000.0
@@ -212,6 +213,8 @@ class LocalCircuitCompiler:
     single_qubit_native_gates: Mapping[str, Mapping[str, Mapping[str, float]]] | None = None
     single_qubit_gate_decompositions: Mapping[str, tuple[str, ...]] | None = None
     additional_physical_qubit_ids: tuple[int, ...] = ()
+    backend_declaration: BackendDeclaration = KINGSTON_BACKEND
+    two_qubit_gate_calibrations: Mapping[str, Mapping[str, Mapping[str, float]]] | None = None
 
     @classmethod
     def from_manifest(cls, manifest: ResolvedScenarioManifest) -> LocalCircuitCompiler:
@@ -220,7 +223,8 @@ class LocalCircuitCompiler:
         config = manifest.qpu_service_config.get("circuit_execution")
         required = {"compiler_id", "supported_gates", "max_shots", "max_instruction_executions", "max_program_qubits"}
         optional = {"max_unitary_elements", "supported_initializations", "gate_durations_us"}
-        optional |= {"cz_gate_calibrations", "single_qubit_native_gates", "single_qubit_gate_decompositions"}
+        optional |= {"cz_gate_calibrations", "single_qubit_native_gates", "single_qubit_gate_decompositions",
+                     "backend_declaration", "two_qubit_gate_calibrations"}
         if not isinstance(config, Mapping) or not required <= set(config) or set(config) - required - optional:
             raise ProgramRequestError("circuit_execution requires an explicit local service profile")
         if config["compiler_id"] != "local_sampling_v1":
@@ -237,9 +241,15 @@ class LocalCircuitCompiler:
                    config.get("supported_initializations", ("prepare",)),
                    config.get("gate_durations_us"), tuple(physical_ids or ()),
                    config.get("cz_gate_calibrations"), config.get("single_qubit_native_gates"),
-                   config.get("single_qubit_gate_decompositions"), tuple(additional))
+                   config.get("single_qubit_gate_decompositions"), tuple(additional),
+                   BackendDeclaration.from_config(config["backend_declaration"])
+                   if "backend_declaration" in config else KINGSTON_BACKEND,
+                   config.get("two_qubit_gate_calibrations"))
 
     def __post_init__(self) -> None:
+        declaration = self.backend_declaration
+        if not isinstance(declaration, BackendDeclaration):
+            raise ValueError("invalid backend declaration")
         modes = self.supported_initializations
         if (not isinstance(modes, (tuple, list)) or not modes
                 or any(not isinstance(mode, str) or mode not in PROGRAM_INITIALIZATIONS for mode in modes)
@@ -278,8 +288,8 @@ class LocalCircuitCompiler:
                 raise ValueError("single-qubit calibration must cover the frozen physical allocation")
             frozen = {}
             for qid, entries in raw.items():
-                if not isinstance(entries, Mapping) or set(entries) != {"rz", "sx", "x"}:
-                    raise ValueError("native single-qubit calibration requires rz, sx and x")
+                if not isinstance(entries, Mapping) or set(entries) != set(declaration.native_single_qubit_gates):
+                    raise ValueError("native single-qubit calibration does not match backend declaration")
                 values = {}
                 for native, entry in entries.items():
                     if not isinstance(entry, Mapping) or set(entry) != {"duration_us", "gate_error"}:
@@ -287,7 +297,9 @@ class LocalCircuitCompiler:
                     duration, error = entry["duration_us"], entry["gate_error"]
                     if (type(duration) not in (int, float) or not math.isfinite(float(duration)) or duration < 0
                             or type(error) not in (int, float) or not math.isfinite(float(error))
-                            or not 0.0 <= error <= 1.0 or native != "rz" and error > 0.5):
+                            or not 0.0 <= error <= 1.0
+                            or native in declaration.virtual_single_qubit_gates and duration != 0.0
+                            or native not in declaration.virtual_single_qubit_gates and error > 0.5):
                         raise ValueError("native single-qubit calibration cannot represent its replacement channel")
                     values[native] = MappingProxyType({"duration_us": float(duration), "gate_error": float(error)})
                 frozen[qid] = MappingProxyType(values)
@@ -295,11 +307,42 @@ class LocalCircuitCompiler:
             for gate, sequence in decompositions.items():
                 if (gate not in set(gates) & {"H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ"}
                         or not isinstance(sequence, (list, tuple)) or not 1 <= len(sequence) <= 16
-                        or any(type(native) is not str or native not in {"rz", "sx", "x"} for native in sequence)):
+                        or any(type(native) is not str or native not in declaration.native_single_qubit_gates
+                               for native in sequence)):
                     raise ValueError("invalid declared single-qubit gate decomposition")
                 sequences[gate] = tuple(sequence)
+            for gate, sequence in sequences.items():
+                theta = 0.371
+                probe = GateOperation(gate, [0], params={"theta_rad": theta}
+                                      if gate in {"RX", "RY", "RZ"} else {})
+                try:
+                    solve_native_steps(
+                        gate_unitary(probe, 1), sequence,
+                        {name: 1.0 for name in declaration.native_pulse_angles_rad},
+                        virtual_gates=declaration.virtual_single_qubit_gates,
+                        pulse_angles=declaration.native_pulse_angles_rad)
+                except UnsupportedNativeSequence as error:
+                    raise ValueError(f"declared decomposition for {gate} cannot be executed") from error
+            logical_single_qubit_gates = set(gates) & {
+                "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ",
+            }
+            if self.gate_durations_us is not None and set(sequences) != logical_single_qubit_gates:
+                raise ValueError("every calibrated logical single-qubit gate needs an executable decomposition")
             object.__setattr__(self, "single_qubit_native_gates", MappingProxyType(frozen))
             object.__setattr__(self, "single_qubit_gate_decompositions", MappingProxyType(sequences))
+        declared_two = {name.upper() for name in declaration.two_qubit_gates}
+        if ((self.cz_gate_calibrations is not None or self.two_qubit_gate_calibrations is not None)
+                and (set(gates) & {"CZ", "ECR"}) - declared_two):
+            raise ValueError("compiler exposes a native two-qubit gate not declared by backend")
+        if ("CNOT" in gates and (self.two_qubit_gate_calibrations is not None
+                                  or self.cz_gate_calibrations is not None)):
+            single_decompositions = self.single_qubit_gate_decompositions or {}
+            cz_path = ("cz" in declaration.two_qubit_gates and not declaration.two_qubit_gates["cz"]
+                       and "H" in single_decompositions)
+            ecr_path = ("ecr" in declaration.two_qubit_gates
+                        and {"S", "X", "RX"} <= set(single_decompositions))
+            if not (cz_path or ecr_path):
+                raise ValueError("CNOT has no executable decomposition in the declared two-qubit basis")
         if self.gate_durations_us is not None:
             if not isinstance(self.gate_durations_us, Mapping):
                 raise ValueError("gate_durations_us must be a gate-to-duration object")
@@ -314,7 +357,10 @@ class LocalCircuitCompiler:
                     raise ValueError("gate durations must be finite nonnegative numbers")
                 durations[gate] = float(duration)
             object.__setattr__(self, "gate_durations_us", MappingProxyType(durations))
+        two_calibrations: dict[str, Mapping[str, Mapping[str, float]]] = {}
         if self.cz_gate_calibrations is not None:
+            if "cz" not in declaration.two_qubit_gates:
+                raise ValueError("CZ calibration is not declared by this backend")
             if not isinstance(self.cz_gate_calibrations, Mapping) or not physical_ids:
                 raise ValueError("per-edge CZ calibration requires a frozen physical allocation")
             calibrations = {}
@@ -338,6 +384,44 @@ class LocalCircuitCompiler:
                     "depolarizing_probability": float(probability),
                 })
             object.__setattr__(self, "cz_gate_calibrations", MappingProxyType(calibrations))
+            two_calibrations["cz"] = MappingProxyType(calibrations)
+        if self.two_qubit_gate_calibrations is not None:
+            if not isinstance(self.two_qubit_gate_calibrations, Mapping) or not calibrated_ids:
+                raise ValueError("two-qubit calibrations require a frozen physical allocation")
+            raw_two = self.two_qubit_gate_calibrations
+            if set(raw_two) != set(declaration.two_qubit_gates):
+                raise ValueError("two-qubit calibrations do not match backend declaration")
+            two_calibrations = {}
+            for gate, edge_map in raw_two.items():
+                if not isinstance(edge_map, Mapping) or not edge_map:
+                    raise ValueError("each declared two-qubit gate requires calibrated edges")
+                directed = declaration.two_qubit_gates[gate]
+                frozen_edges = {}
+                for edge_id, entry in edge_map.items():
+                    if (type(edge_id) is not str or not isinstance(entry, Mapping)
+                            or set(entry) != {"duration_us", "depolarizing_probability"}):
+                        raise ValueError("invalid declared two-qubit calibration entry")
+                    try:
+                        left, right = (int(part) for part in edge_id.split(":"))
+                    except (ValueError, TypeError):
+                        raise ValueError("two-qubit edge IDs must use 'left:right' form") from None
+                    if (left == right or left not in calibrated_ids or right not in calibrated_ids
+                            or not directed and left >= right):
+                        raise ValueError("two-qubit calibration edge violates backend directionality")
+                    duration, probability = entry["duration_us"], entry["depolarizing_probability"]
+                    if (type(duration) not in (int, float) or not math.isfinite(float(duration)) or duration <= 0.0
+                            or type(probability) not in (int, float) or not math.isfinite(float(probability))
+                            or not 0.0 <= probability <= 1.0):
+                        raise ValueError("two-qubit calibration values must be finite and bounded")
+                    frozen_edges[edge_id] = MappingProxyType({
+                        "duration_us": float(duration),
+                        "depolarizing_probability": float(probability),
+                    })
+                two_calibrations[gate] = MappingProxyType(frozen_edges)
+        if ((self.two_qubit_gate_calibrations is not None or self.cz_gate_calibrations is not None)
+                and set(two_calibrations) != set(declaration.two_qubit_gates)):
+            raise ValueError("two-qubit calibration inventory differs from backend declaration")
+        object.__setattr__(self, "two_qubit_gate_calibrations", MappingProxyType(two_calibrations))
 
     def compile(self, request: ProgramSubmitRequest, *, sampling_seed: int,
                 physical_qubit_ids: tuple[int, ...] | None = None) -> CircuitExecutionOperation:
@@ -369,30 +453,47 @@ class LocalCircuitCompiler:
                 physical_id = str(allocation[gate.targets[0]])
                 natives = self.single_qubit_native_gates[physical_id]
                 sequence = self.single_qubit_gate_decompositions[gate.type]
-                duration = sum(natives[native]["duration_us"] for native in sequence)
+                duration = sum(natives[native]["duration_us"] for native in sequence
+                               if native not in self.backend_declaration.virtual_single_qubit_gates)
                 # Local complete-mixing channels commute with all one-qubit
                 # unitaries. Their exact composition is another such channel;
                 # no intermediate physical dynamics is modeled inside a gate.
                 survival = math.prod(1.0 - 2.0 * natives[native]["gate_error"]
-                                     for native in sequence if native != "rz")
+                                     for native in sequence
+                                     if native not in self.backend_declaration.virtual_single_qubit_gates)
                 return duration, 1.0 - survival
             if gate.type == "I":
                 return _delay_us(gate), 0.0
-            if gate.type != "CZ" or self.cz_gate_calibrations is None:
-                if self.gate_durations_us is not None and gate.type not in self.gate_durations_us:
-                    raise ProgramRequestError("gate has no declared service duration")
-                duration = (self.gate_durations_us[gate.type]
-                            if self.gate_durations_us is not None else gate_duration_us(gate))
+            two_qubit_name = gate.type.lower()
+            if two_qubit_name in {"cz", "ecr"}:
+                if two_qubit_name not in self.backend_declaration.two_qubit_gates:
+                    raise ProgramRequestError(f"{gate.type} is not declared by this backend")
+                calibration_map = self.two_qubit_gate_calibrations.get(two_qubit_name, {})
+                operands = tuple((gate.controls or []) + gate.targets)
+                if len(operands) != 2:
+                    raise ProgramRequestError(f"{gate.type} requires exactly two physical operands")
+                physical = tuple(allocation[index] for index in operands)
+                if not self.backend_declaration.two_qubit_gates[two_qubit_name]:
+                    physical = tuple(sorted(physical))
+                edge_id = f"{physical[0]}:{physical[1]}"
+                calibration = calibration_map.get(edge_id)
+                if calibration is not None:
+                    return calibration["duration_us"], calibration["depolarizing_probability"]
+                if calibration_map:
+                    raise ProgramRequestError(f"{gate.type} edge has no eligible snapshot calibration")
+                if self.gate_durations_us is not None and gate.type in self.gate_durations_us:
+                    return self.gate_durations_us[gate.type], 0.0
+                raise ProgramRequestError(f"{gate.type} has no declared calibration or fallback duration")
+            if gate.type not in self.supported_gates:
+                raise ProgramRequestError(f"gate is not supported by this service: {gate.type}")
+            if self.gate_durations_us is None and gate.type not in {"I", "MEASURE"}:
+                duration = gate_duration_us(gate)
                 return duration, 0.0
-            operands = tuple((gate.controls or []) + gate.targets)
-            if len(operands) != 2:
-                raise ProgramRequestError("CZ requires exactly two physical operands")
-            physical = tuple(allocation[index] for index in operands)
-            edge_id = f"{min(physical)}:{max(physical)}"
-            calibration = self.cz_gate_calibrations.get(edge_id)
-            if calibration is None:
-                raise ProgramRequestError("CZ edge has no eligible snapshot calibration")
-            return calibration["duration_us"], calibration["depolarizing_probability"]
+            if self.gate_durations_us is not None and gate.type not in self.gate_durations_us:
+                raise ProgramRequestError("gate has no declared service duration")
+            duration = (self.gate_durations_us[gate.type]
+                        if self.gate_durations_us is not None else gate_duration_us(gate))
+            return duration, 0.0
 
         def append_gate(gate: GateOperation, duration: float, group: int,
                         depolarizing_probability: float = 0.0, intrinsic: float = 0.0) -> None:
@@ -430,23 +531,21 @@ class LocalCircuitCompiler:
             if (self.single_qubit_gate_decompositions is not None and not gate.controls
                     and len(gate.targets) == 1 and gate.type in self.single_qubit_gate_decompositions):
                 steps = self.single_qubit_native_gates[str(allocation[gate.targets[0]])]
-                try:
-                    natives = solve_native_steps(
-                        matrix, self.single_qubit_gate_decompositions[gate.type],
-                        {name: spec["duration_us"] for name, spec in steps.items()})
-                except UnsupportedNativeSequence:
-                    natives = ()  # an unusual declared sequence keeps no pulse data
+                natives = solve_native_steps(
+                    matrix, self.single_qubit_gate_decompositions[gate.type],
+                    {name: spec["duration_us"] for name, spec in steps.items()},
+                    virtual_gates=self.backend_declaration.virtual_single_qubit_gates,
+                    pulse_angles=self.backend_declaration.native_pulse_angles_rad)
             instructions.append(CircuitInstruction(
                 "unitary", duration, matrix, operands, time_group=group,
                 depolarizing_probability=depolarizing_probability, intrinsic_us=intrinsic, natives=natives,
             ))
 
         def expand_service_gate(gate: GateOperation) -> tuple[GateOperation, ...]:
-            """Lower logical CNOTs to calibrated single-qubit gates and CZ."""
+            """Lower CNOT through a declared CZ or ECR basis with calibrated one-qubit gates."""
             if gate.type != "CNOT":
                 return (gate,)
-            if (self.single_qubit_gate_decompositions is None
-                    or self.cz_gate_calibrations is None):
+            if self.single_qubit_gate_decompositions is None:
                 return (gate,)
             if gate.type not in self.supported_gates or gate.conditions:
                 raise ProgramRequestError(f"gate or classical condition is not supported by this service: {gate.type}")
@@ -466,9 +565,19 @@ class LocalCircuitCompiler:
             control, target = gate.controls[0], gate.targets[0]
             before = [GateOperation("X", [control])] if open_control else []
             after = [GateOperation("X", [control])] if open_control else []
-            return tuple((*before, GateOperation("H", [target]),
-                          GateOperation("CZ", [target], [control]),
-                          GateOperation("H", [target]), *after))
+            if "cz" in self.two_qubit_gate_calibrations:
+                decomposition = (GateOperation("H", [target]),
+                                 GateOperation("CZ", [target], [control]),
+                                 GateOperation("H", [target]))
+            elif "ecr" in self.two_qubit_gate_calibrations:
+                # For the standard echoed-cross-resonance unitary, CNOT =
+                # ECR · (X·S on control ⊗ RX(pi/2) on target), up to global phase.
+                decomposition = (GateOperation("S", [control]), GateOperation("X", [control]),
+                                 GateOperation("RX", [target], params={"theta_rad": math.pi / 2.0}),
+                                 GateOperation("ECR", [control, target]))
+            else:
+                return (gate,)
+            return tuple((*before, *decomposition, *after))
 
         for group, kind, states in ((-2, "X", {"1", "-"}), (-1, "H", {"+", "-"})):
             prepared = ([q for q, state in enumerate(circuit.initial_states) if state in states]

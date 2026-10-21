@@ -1,10 +1,10 @@
-"""Verified loader for the checked-in IBM Kingston device snapshot."""
+"""Verified loader for checked-in device calibration snapshots (default: IBM Kingston)."""
 
 from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
@@ -12,12 +12,13 @@ from pathlib import Path
 import re
 from types import MappingProxyType
 
+from core.attack_simulation.backend_declaration import BackendDeclaration, KINGSTON_BACKEND
 
-SNAPSHOT_DIRECTORY = (
-    Path(__file__).resolve().parent.parent
-    / "data" / "device_snapshots" / "ibm_kingston_2026-04-15"
-)
-_HASH_ROW = re.compile(r"^\| `(props_kingston\.json|conf_kingston\.json)` \|[^|]+\| `([0-9a-f]{64})` \|$", re.M)
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+SNAPSHOT_DIRECTORY = REPOSITORY_ROOT / "data" / "device_snapshots" / "ibm_kingston_2026-04-15"
+DEFAULT_DEVICE_ID = "ibm_kingston"
+_HASH_ROW = re.compile(r"^\| `((?:props|conf)_[a-z0-9]+\.json)` \|[^|]+\| `([0-9a-f]{64})` \|$", re.M)
 _MAX_JSON_BYTES = 2_000_000
 
 
@@ -41,6 +42,14 @@ class CzCalibration:
 
 
 @dataclass(frozen=True)
+class TwoQubitGateCalibration:
+    gate: str
+    physical_qubit_ids: tuple[int, int]
+    error: float
+    duration_us: float
+
+
+@dataclass(frozen=True)
 class SingleQubitGateCalibration:
     gate: str
     physical_qubit_id: int
@@ -51,6 +60,7 @@ class SingleQubitGateCalibration:
 @dataclass(frozen=True)
 class DeviceSnapshot:
     device_id: str
+    source_path: str  # repository-relative POSIX path of the SOURCE.md that vouches for the files
     snapshot_date: str
     n_qubits: int
     props_sha256: str
@@ -62,6 +72,8 @@ class DeviceSnapshot:
     ineligible_qubit_reasons: Mapping[int, tuple[str, ...]]
     eligibility_policy: Mapping[str, object]
     single_qubit_calibrations: Mapping[tuple[str, int], SingleQubitGateCalibration]
+    backend_declaration: BackendDeclaration
+    two_qubit_calibrations: Mapping[str, Mapping[tuple[int, int], TwoQubitGateCalibration]] = field(default_factory=dict)
 
     @property
     def usable_qubit_ids(self) -> tuple[int, ...]:
@@ -70,8 +82,15 @@ class DeviceSnapshot:
 
 
 def load_ibm_kingston_snapshot(directory: Path | str | None = None) -> DeviceSnapshot:
+    """The default checked-in snapshot; other devices go through load_device_snapshot."""
+    return load_device_snapshot(SNAPSHOT_DIRECTORY if directory is None else directory,
+                                device_id=DEFAULT_DEVICE_ID, backend_declaration=KINGSTON_BACKEND)
+
+
+def load_device_snapshot(directory: Path | str, *, device_id: str,
+                         backend_declaration: BackendDeclaration) -> DeviceSnapshot:
     """Read immutable source files only after matching their SOURCE.md digests."""
-    root = SNAPSHOT_DIRECTORY if directory is None else Path(directory)
+    root = Path(directory)
     source_path = root / "SOURCE.md"
     source = _read_bounded(source_path, 16_384).decode("utf-8")
     # Hash rows are line-oriented metadata. Normalize SOURCE.md line endings
@@ -79,8 +98,11 @@ def load_ibm_kingston_snapshot(directory: Path | str | None = None) -> DeviceSna
     source = source.replace("\r\n", "\n").replace("\r", "\n")
     hash_rows = _HASH_ROW.findall(source)
     expected = {name: digest for name, digest in hash_rows}
-    if set(expected) != {"props_kingston.json", "conf_kingston.json"}:
+    props_name = [name for name in expected if name.startswith("props_")]
+    conf_name = [name for name in expected if name.startswith("conf_")]
+    if len(props_name) != 1 or len(conf_name) != 1:
         raise ValueError("snapshot SOURCE.md has no complete SHA-256 manifest")
+    props_name, conf_name = props_name[0], conf_name[0]
     if len(hash_rows) != len(expected):
         raise ValueError("snapshot SOURCE.md contains duplicate SHA-256 entries")
     payloads = {}
@@ -95,9 +117,9 @@ def load_ibm_kingston_snapshot(directory: Path | str | None = None) -> DeviceSna
 
     policy = _json_object(_read_bounded(root / "eligibility_policy.json", 16_384))
     policy = _validate_policy(policy)
-    props, config = payloads["props_kingston.json"], payloads["conf_kingston.json"]
-    if (props.get("backend_name") != "ibm_kingston"
-            or config.get("backend_name") != "ibm_kingston"
+    props, config = payloads[props_name], payloads[conf_name]
+    if (props.get("backend_name") != device_id
+            or config.get("backend_name") != device_id
             or type(config.get("n_qubits")) is not int
             or config["n_qubits"] != len(props.get("qubits", ()))
             or type(props.get("qubits")) is not list):
@@ -116,8 +138,6 @@ def load_ibm_kingston_snapshot(directory: Path | str | None = None) -> DeviceSna
     if len(set(directed)) != len(directed):
         raise ValueError("snapshot coupling map contains duplicate directed edges")
     directed_set = set(directed)
-    if any((right, left) not in directed_set for left, right in directed_set):
-        raise ValueError("snapshot coupling map is not bidirectionally complete")
     undirected = tuple(sorted({tuple(sorted(edge)) for edge in directed_set}))
 
     qubit_parameters = [_parameter_map(item) for item in props["qubits"]]
@@ -125,7 +145,7 @@ def load_ibm_kingston_snapshot(directory: Path | str | None = None) -> DeviceSna
     if type(raw_gates) is not list:
         raise ValueError("snapshot gate calibrations are missing")
     gate_records: dict[tuple[str, tuple[int, ...]], Mapping[str, float]] = {}
-    cz_pairs: dict[tuple[int, int], list[tuple[float, float]]] = defaultdict(list)
+    two_records: dict[str, dict[tuple[int, int], tuple[float, float]]] = defaultdict(dict)
     for raw_gate in raw_gates:
         if not isinstance(raw_gate, Mapping):
             raise ValueError("snapshot contains an invalid gate record")
@@ -139,33 +159,67 @@ def load_ibm_kingston_snapshot(directory: Path | str | None = None) -> DeviceSna
         if key in gate_records:
             raise ValueError("snapshot contains duplicate gate calibration records")
         gate_records[key] = parameters
-        if gate == "cz":
+        if gate in backend_declaration.two_qubit_gates:
             if len(qubits) != 2:
-                raise ValueError("CZ calibration must have two operands")
+                raise ValueError(f"{gate.upper()} calibration must have two operands")
+            edge = tuple(qubits)
+            if edge not in directed_set:
+                raise ValueError(f"{gate.upper()} calibration direction is absent from the coupling map")
             error = _required_number(parameters, "gate_error")
             length = _required_number(parameters, "gate_length")
-            cz_pairs[tuple(sorted(qubits))].append((error, _ns_to_us(length, parameters, "gate_length")))
-    if set(directed_set) != {edge for gate, edge in gate_records if gate == "cz"}:
-        raise ValueError("snapshot CZ calibrations do not match the directed coupling map")
+            duration = _ns_to_us(length, parameters, "gate_length")
+            if not 0.0 <= error <= 1.0 or duration <= 0.0:
+                raise ValueError(f"{gate.upper()} calibration is outside its physical range")
+            two_records[gate][edge] = (error, duration)
 
-    cz_calibrations = {}
-    for pair, records in cz_pairs.items():
-        if len(records) != 2 or records[0] != records[1]:
-            raise ValueError("opposite CZ directions have inconsistent calibration")
-        cz_calibrations[pair] = CzCalibration(pair, records[0][0], records[0][1])
+    two_qubit_calibrations: dict[str, Mapping[tuple[int, int], TwoQubitGateCalibration]] = {}
+    for gate, directed_flag in backend_declaration.two_qubit_gates.items():
+        records = two_records.get(gate, {})
+        if not records:
+            raise ValueError(f"snapshot has no calibration for declared {gate.upper()} gate")
+        if not directed_flag and set(records) != directed_set:
+            raise ValueError(f"{gate.upper()} calibrations do not match the directed coupling map")
+        if directed_flag:
+            if set(records) != directed_set:
+                raise ValueError(f"{gate.upper()} calibrations do not match the directed coupling map")
+            calibration = {edge: TwoQubitGateCalibration(gate, edge, *values)
+                           for edge, values in records.items()}
+        else:
+            pairs = {tuple(sorted(edge)) for edge in records}
+            calibration = {}
+            for pair in pairs:
+                forward, reverse = pair, (pair[1], pair[0])
+                if forward not in records or reverse not in records or records[forward] != records[reverse]:
+                    raise ValueError(f"opposite {gate.upper()} directions have inconsistent calibration")
+                calibration[pair] = TwoQubitGateCalibration(gate, pair, *records[forward])
+            if set(records) != {edge for left, right in pairs for edge in ((left, right), (right, left))}:
+                raise ValueError(f"{gate.upper()} calibrations do not match complete coupling pairs")
+        two_qubit_calibrations[gate] = MappingProxyType(calibration)
+    if set(two_records) - set(backend_declaration.two_qubit_gates):
+        raise ValueError("snapshot contains undeclared two-qubit gate calibrations")
+    cz_calibrations = {
+        pair: CzCalibration(pair, item.error, item.duration_us)
+        for pair, item in two_qubit_calibrations.get("cz", {}).items()
+    }
 
     single_qubit_calibrations = {}
     for (gate, operands), parameters in gate_records.items():
-        if gate not in {"rz", "sx", "x"}:
+        if gate not in backend_declaration.native_single_qubit_gates:
             continue
         if len(operands) != 1:
             raise ValueError("native single-qubit calibration must have one operand")
         error = _required_number(parameters, "gate_error")
         duration = _gate_duration(parameters, gate)
-        if error > 1.0 or (gate != "rz" and duration <= 0.0):
+        if gate in backend_declaration.virtual_single_qubit_gates and duration != 0.0:
+            raise ValueError("virtual single-qubit calibrations must have zero duration")
+        if error > 1.0 or (gate not in backend_declaration.virtual_single_qubit_gates and duration <= 0.0):
             raise ValueError("native single-qubit calibration is outside its physical range")
         qid = operands[0]
         single_qubit_calibrations[gate, qid] = SingleQubitGateCalibration(gate, qid, error, duration)
+    expected_native = {(gate, qid) for gate in backend_declaration.native_single_qubit_gates
+                       for qid in range(n_qubits)}
+    if set(single_qubit_calibrations) != expected_native:
+        raise ValueError("snapshot native calibrations do not match backend declaration")
 
     qubits = {}
     for qid, parameters in enumerate(qubit_parameters):
@@ -212,12 +266,21 @@ def load_ibm_kingston_snapshot(directory: Path | str | None = None) -> DeviceSna
     frozen_reasons = MappingProxyType({qid: tuple(sorted(set(items)))
                                       for qid, items in reasons.items() if items})
     return DeviceSnapshot(
-        "ibm_kingston", str(props.get("last_update_date")), n_qubits,
-        actual_hashes["props_kingston.json"], actual_hashes["conf_kingston.json"],
+        device_id, _repository_relative(source_path), str(props.get("last_update_date")), n_qubits,
+        actual_hashes[props_name], actual_hashes[conf_name],
         tuple(directed), undirected, MappingProxyType(qubits),
         MappingProxyType(cz_calibrations), frozen_reasons, MappingProxyType(policy),
-        MappingProxyType(single_qubit_calibrations),
+        MappingProxyType(single_qubit_calibrations), backend_declaration,
+        MappingProxyType(two_qubit_calibrations),
     )
+
+
+def _repository_relative(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(REPOSITORY_ROOT).as_posix()
+    except ValueError:
+        return resolved.as_posix()
 
 
 def deterministic_connected_region(

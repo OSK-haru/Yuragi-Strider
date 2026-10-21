@@ -15,7 +15,7 @@ How a leak becomes a kick, in the simulator's frame (virtual Z applied to the st
   leak). It is computed by cutting the leak into short slices. Third order and the cross terms between
   two different sources are neglected (cross terms between sources are of the same order as the
   second-order term of each).
-* While the target runs its own gate (``rz``/``sx``/``x`` steps), the leak is carried along by the
+* While the target runs its own gate (declared virtual-frame and pulse steps), the leak is carried along by the
   target's rotation. The integral is taken in the gate's interaction picture, ``n(t)`` rotated back by
   everything the gate has done up to ``t``, and the kick goes *before* the gate. A single kick at the
   gate's start with the plain axis would get the effect of a concurrent pi pulse wrong by order one.
@@ -163,7 +163,7 @@ class _Gate:
     start: float
     end: float
     frame_before: float
-    steps: tuple[tuple, ...]            # ("rz", angle) or ("pulse", start, end, angle)
+    steps: tuple[tuple, ...]            # ("frame", angle) or ("pulse", start, end, angle)
 
 
 class _Timeline:
@@ -179,14 +179,14 @@ class _Timeline:
                     raise ValueError("the virtual-Z frame is unknown: a single-qubit gate has no native steps")
                 cursor, steps = starts[index], []
                 for step in item.natives:
-                    if step.name == "rz":
-                        steps.append(("rz", step.angle_rad))
+                    if step.is_virtual:
+                        steps.append(("frame", step.angle_rad))
                     else:
                         steps.append(("pulse", cursor, cursor + step.duration_us, step.angle_rad))
                         cursor += step.duration_us
                 if cursor > starts[index]:
                     gates.append(_Gate(index, starts[index], cursor, frame, tuple(steps)))
-                frame += sum(step.angle_rad for step in item.natives if step.name == "rz")
+                frame += sum(step.angle_rad for step in item.natives if step.is_virtual)
             frames.append(frame)
         self.frames = frames
         self.gates = gates
@@ -243,7 +243,7 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
         """The leak over local [begin, end) inside ``gate``, in the gate's interaction picture."""
         rotation, frame, pieces = np.eye(3), gate.frame_before, []
         for step in gate.steps:
-            if step[0] == "rz":
+            if step[0] == "frame":
                 rotation, frame = _rotation_z(step[1]) @ rotation, frame + step[1]
                 continue
             _, pulse_start, pulse_end, angle = step
