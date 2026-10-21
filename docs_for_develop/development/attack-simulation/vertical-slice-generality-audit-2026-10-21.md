@@ -40,6 +40,19 @@
 
 `backend_declaration.py`、`execution_regime.py`、`placement.py`、`config_limits.py`、`scenario_compiler`（評価器IDを不透明に扱う）、`PulseEnvelope`、`process_characterization`、Rust境界（次元を引数に取る）、所有権profile、課題一覧と設定フォームの目録駆動、`AttackEnvironmentClient`境界。
 
+## 解消の状況（Claude側、2026-10-21）
+
+| 所見 | 状況 |
+|---|---|
+| 1 評価器の名前分岐 | 解消。`api/attack_evaluators.py`の登録表。未登録IDは拒否 |
+| 2 2課題のコピペ | 一部。逆向き依存は`api/attack_challenge_common.py`で解消。`locked`の生成と評価器クラスの複製は、全ロックが方針であり3つ目の課題で確かめるまで共通化しない（意図的に残した） |
+| 5 Kingston直結 | API側は`default_device_snapshot()`の1箇所に集約。frontendの見出しは`standard.device`から表示。座標レイアウト、テスト、実験スクリプトは残る |
+| 6 閉じた集合 | パルスの`MAX_TRANSMON_COUNT`二重定義を解消。ほかは未着手 |
+| 7 足場の明記 | factoryの凍結入力パーサ・出所一覧・interleaved victimに`SCAFFOLD`コメントを追加。foundation側は未 |
+| テストグループ | `run_tests.py attack`を追加（ファイル名パターンで選択） |
+| 3・4・6の残り・低の一部 | Codexへ申し送り |
+| frontendの`EnvironmentMode`/`InterleaveReference` | 自由/課題の2モードは製品上の語彙として現状維持。interleave値域は課題の宣言から取る形が望ましいが未着手 |
+
 ## 担当と次の判断
 
 - 3・4はfoundation層で、Codexのbackend中立化と重なる。Claudeはレビューのみ（申し送り）。
