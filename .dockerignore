@@ -1,0 +1,10 @@
+# The image copies only requirements-runtime.txt, api/, core/ and
+# data/device_snapshots/ (see Dockerfile); keep everything else out of the
+# build context.
+*
+!requirements-runtime.txt
+!api
+!core
+!data/device_snapshots
+**/__pycache__
+**/*.pyc
