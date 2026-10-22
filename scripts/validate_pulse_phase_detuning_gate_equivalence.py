@@ -7,7 +7,6 @@ import csv
 import json
 import math
 import platform
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -19,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit
 from core.circuit_model import GateOperation
 from core.gates import (
     X,
@@ -37,6 +37,7 @@ from validation_pulse.pulse_phase_detuning import (
     run_constant_closed_trajectory,
     target_rotation_unitary,
 )
+from validation_pulse.time_grid import uniform_times
 
 
 TRAJECTORY_TOLERANCE = 2e-8
@@ -83,7 +84,7 @@ def main() -> int:
 
     report = {
         "validation": "PULSE-BA3",
-        "base_git_commit": _git_commit(),
+        "base_git_commit": git_commit(ROOT),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "model_id": "driven_two_level_rwa_experimental_v1",
@@ -185,7 +186,7 @@ def _run_phase_cases():
     initial = initial_density_matrix(["0"])
     amplitude = math.pi / 2.0
     duration = 1.0
-    sample_times = _uniform_times(duration, 101)
+    sample_times = uniform_times(duration, 101)
     specifications = (
         ("phase_0_plus_x", 0.0, (0.0, -1.0, 0.0)),
         ("phase_pi_over_2_plus_y", math.pi / 2.0, (1.0, 0.0, 0.0)),
@@ -273,7 +274,7 @@ def _run_detuning_cases():
     amplitude = math.pi
     detuning_magnitude = 0.75 * math.pi
     duration = 1.0
-    sample_times = _uniform_times(duration, 101)
+    sample_times = uniform_times(duration, 101)
     cases = []
     rows = []
     for name, detuning in (
@@ -763,27 +764,6 @@ def _probe_states():
             (0.0 + 0.5j, 0.5 + 0.0j),
         ),
     }
-
-
-def _uniform_times(duration_us: float, count: int) -> tuple[float, ...]:
-    return tuple(
-        duration_us * index / (count - 1)
-        for index in range(count)
-    )
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            capture_output=True,
-            check=True,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
 
 
 def _parse_args():

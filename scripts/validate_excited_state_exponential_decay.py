@@ -6,7 +6,6 @@ import argparse
 import csv
 import json
 import math
-import subprocess
 import sys
 from pathlib import Path
 
@@ -14,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit, japanese_font_properties
 from tests.test_validation_excited_state_exponential_decay import (
     MAX_ABS_ERROR_P1,
     MAX_HERMITICITY_ERROR,
@@ -155,7 +155,7 @@ def main() -> int:
                 "hardware calibration",
             ],
         },
-        "git_commit": _git_commit(),
+        "git_commit": git_commit(ROOT),
     }
 
     json_path = args.output_dir / "validation3_excited_state_decay.json"
@@ -198,7 +198,7 @@ def _write_plots(case_reports, png_path: Path, error_png_path: Path) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.font_manager import FontProperties
 
-    japanese_font = _japanese_font_properties(FontProperties)
+    japanese_font = japanese_font_properties(FontProperties)
 
     figure, axis = plt.subplots(figsize=(8, 5))
     for case in case_reports:
@@ -249,17 +249,6 @@ def _write_plots(case_reports, png_path: Path, error_png_path: Path) -> None:
     plt.close(error_figure)
 
 
-def _japanese_font_properties(font_properties_type):
-    candidates = (
-        Path(r"C:\Windows\Fonts\NotoSansJP-VF.ttf"),
-        Path(r"C:\Windows\Fonts\meiryo.ttc"),
-    )
-    for path in candidates:
-        if path.exists():
-            return font_properties_type(fname=str(path))
-    return None
-
-
 def _write_markdown_report(report: dict[str, object], path: Path) -> None:
     lines = [
         "# VALIDATION-3: Excited-State Exponential Decay",
@@ -305,17 +294,6 @@ def _write_markdown_report(report: dict[str, object], path: Path) -> None:
         "",
     ])
     path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            text=True,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
 
 
 def _parse_args() -> argparse.Namespace:

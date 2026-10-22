@@ -34,6 +34,7 @@ from validation_pulse.qutip_adapter import (
     run_qutip_constant_segment,
     run_qutip_time_dependent_segment,
 )
+from validation_pulse.time_grid import uniform_times
 
 
 QUTRIT_QUTIP_TOLERANCE = 5e-7
@@ -202,11 +203,11 @@ def _run_case(
         total_duration,
         drag_beta_us=case.drag_beta_us,
     )
-    pulse_times = _uniform_times(
+    pulse_times = uniform_times(
         envelope.duration_us, QUTRIT_QUTIP_CHECKPOINT_COUNT
     )
     idle_times = (
-        _uniform_times(case.idle_duration_us, QUTRIT_QUTIP_CHECKPOINT_COUNT)
+        uniform_times(case.idle_duration_us, QUTRIT_QUTIP_CHECKPOINT_COUNT)
         if case.idle_duration_us > 0.0
         else ()
     )
@@ -319,11 +320,3 @@ def _comparison_rows(
             "leakage_error": diagonal[2],
         })
     return rows
-
-
-def _uniform_times(duration_us: float, count: int) -> tuple[float, ...]:
-    interior = tuple(
-        duration_us * index / (count - 1)
-        for index in range(1, count - 1)
-    )
-    return (0.0, *interior, float(duration_us))

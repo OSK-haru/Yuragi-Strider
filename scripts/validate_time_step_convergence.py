@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit
 from core.dense_numpy import force_python_dense_execution
 from tests.test_validation_time_step_convergence import (
     BACKEND_TOLERANCE,
@@ -67,7 +68,7 @@ def main() -> int:
     backend_consistency = _backend_consistency_audit()
     report = {
         "validation": "VALIDATION-6",
-        "base_git_commit": _git_commit(),
+        "base_git_commit": git_commit(ROOT),
         "solver_method": "fixed-step RK4 with production dense NumPy or tuple backend",
         "integration_policy_audit": {
             "substep_selection": "core.simulator._integration_substeps() calls _substep_count(dt, max_environment_rate_per_us)",
@@ -238,14 +239,6 @@ def _write_report(report, path: Path) -> None:
         "", "Production physics, rate conventions, API, frontend behavior, and default solver policy were unchanged.",
     ])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _git_commit():
-    try:
-        import subprocess
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    except Exception:
-        return None
 
 
 def _parse_args():

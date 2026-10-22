@@ -6,7 +6,6 @@ import argparse
 import csv
 import json
 import platform
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit  # noqa: E402
 from validation_pulse.qutrit_convergence import (  # noqa: E402
     run_qutrit_convergence_validation,
 )
@@ -36,7 +36,7 @@ def main() -> int:
 
     report, rows = run_qutrit_convergence_validation()
     report["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
-    report["git_commit"] = _git_commit()
+    report["git_commit"] = git_commit(ROOT)
     report["software_versions"] = {
         "python": platform.python_version(),
         "numpy": np.__version__,
@@ -294,20 +294,6 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
         "```",
     ])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            capture_output=True,
-            check=True,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
 
 
 def _parse_args() -> argparse.Namespace:

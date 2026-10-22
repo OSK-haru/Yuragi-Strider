@@ -22,6 +22,7 @@ from core.pulse_qutrit import (
 from core.pulse_qutrit_contract import (
     transmon_anharmonicity_rad_per_us,
 )
+from validation_pulse.time_grid import uniform_times
 
 
 COHERENCE_TOLERANCE = 2e-7
@@ -150,7 +151,7 @@ def _free_coherence_case(
         total_simulation_time_us=duration,
         max_step_us=2e-6,
         detuning_rad_per_us=detuning,
-        pulse_checkpoint_times_us=_uniform_times(duration, 21),
+        pulse_checkpoint_times_us=uniform_times(duration, 21),
     )
     _append_rows(rows, "free_coherence_0_2", result)
     energy_2 = -2.0 * detuning + anharmonicity
@@ -184,7 +185,7 @@ def _weak_two_level_case(
         sigma_us=0.05,
         truncation_sigma=4.0,
     )
-    times = _uniform_times(envelope.duration_us, 41)
+    times = uniform_times(envelope.duration_us, 41)
     qutrit = evolve_closed_qutrit_sequence(
         qutrit_initial_density_matrix("0"),
         envelope,
@@ -228,7 +229,7 @@ def _alpha_sweep_case(
         sigma_us=0.002,
         truncation_sigma=4.0,
     )
-    times = _uniform_times(envelope.duration_us, 81)
+    times = uniform_times(envelope.duration_us, 81)
     by_alpha: dict[str, dict[str, object]] = {}
     results = {}
     for alpha_mhz in (-100.0, -300.0):
@@ -289,8 +290,8 @@ def _closed_idle_case(
         total_simulation_time_us=pulse_duration + idle_duration,
         max_step_us=2e-6,
         detuning_rad_per_us=0.5,
-        pulse_checkpoint_times_us=_uniform_times(pulse_duration, 41),
-        idle_checkpoint_times_us=_uniform_times(idle_duration, 11),
+        pulse_checkpoint_times_us=uniform_times(pulse_duration, 41),
+        idle_checkpoint_times_us=uniform_times(idle_duration, 11),
     )
     _append_rows(rows, "closed_pulse_then_free_idle", result)
     pulse = qutrit_populations(result.pulse_end_state, pulse_duration, "pulse")
@@ -378,13 +379,6 @@ def _physicality_passes(metrics: dict[str, float | int]) -> bool:
         <= PHYSICALITY_TOLERANCE
         and metrics["maximum_population_sum_error"]
         <= PHYSICALITY_TOLERANCE
-    )
-
-
-def _uniform_times(duration_us: float, count: int) -> tuple[float, ...]:
-    return tuple(
-        duration_us * index / (count - 1)
-        for index in range(count)
     )
 
 

@@ -20,6 +20,7 @@ from core.pulse_qutrit_open_system import (
     qutrit_dissipation_rates,
     qutrit_gibbs_populations,
 )
+from validation_pulse.time_grid import uniform_times
 
 
 RATE_TOLERANCE = 2e-14
@@ -178,7 +179,7 @@ def _cascade_case(
         ),
         duration,
         0.002,
-        pulse_checkpoint_times_us=_uniform_times(duration, 61),
+        pulse_checkpoint_times_us=uniform_times(duration, 61),
     )
     maximum_error = 0.0
     for checkpoint in result.pulse_result.checkpoints:
@@ -244,7 +245,7 @@ def _pure_dephasing_case(
         _direct_rates(gamma_phi_adjacent_per_us=gamma_phi),
         duration,
         0.001,
-        pulse_checkpoint_times_us=_uniform_times(duration, 51),
+        pulse_checkpoint_times_us=uniform_times(duration, 51),
     )
     errors = {"rho_01": 0.0, "rho_12": 0.0, "rho_02": 0.0}
     for checkpoint in result.pulse_result.checkpoints:
@@ -323,7 +324,7 @@ def _population_outflow_case(
         rates,
         duration,
         0.001,
-        pulse_checkpoint_times_us=_uniform_times(duration, 51),
+        pulse_checkpoint_times_us=uniform_times(duration, 51),
     )
     maximum_error = 0.0
     for checkpoint in result.pulse_result.checkpoints:
@@ -392,7 +393,7 @@ def _gibbs_case(
         total_duration,
         0.005,
         pulse_checkpoint_times_us=(0.0, pulse_duration),
-        idle_checkpoint_times_us=_uniform_times(
+        idle_checkpoint_times_us=uniform_times(
             total_duration - pulse_duration,
             101,
         ),
@@ -450,8 +451,8 @@ def _drive_idle_case(
         rates,
         1.0,
         0.001,
-        pulse_checkpoint_times_us=_uniform_times(pulse_duration, 41),
-        idle_checkpoint_times_us=_uniform_times(0.8, 81),
+        pulse_checkpoint_times_us=uniform_times(pulse_duration, 41),
+        idle_checkpoint_times_us=uniform_times(0.8, 81),
     )
     _append_result_rows(rows, "dissipative_pulse_and_idle", result)
     initial = qutrit_initial_density_matrix("0")
@@ -670,13 +671,6 @@ def _physical_environment(
         t1_max_us=100.0,
         tphi_max_us=100.0,
         ideal_reference=False,
-    )
-
-
-def _uniform_times(duration_us: float, count: int) -> tuple[float, ...]:
-    return tuple(
-        duration_us * index / (count - 1)
-        for index in range(count)
     )
 
 

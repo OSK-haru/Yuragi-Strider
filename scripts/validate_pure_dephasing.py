@@ -6,7 +6,6 @@ import argparse
 import csv
 import json
 import math
-import subprocess
 import sys
 from pathlib import Path
 
@@ -14,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit, japanese_font_properties
 from core.gates import Z, multi_qubit_physical_collapse_operators, scale
 from tests.test_validation_pure_dephasing import (
     MAX_ABS_ERROR_COHERENCE,
@@ -126,7 +126,7 @@ def main() -> int:
                 "combined T1 and Tphi behavior", "non-Markovian dephasing",
             ],
         },
-        "git_commit": _git_commit(),
+        "git_commit": git_commit(ROOT),
     }
 
     json_path = args.output_dir / "validation4_pure_dephasing.json"
@@ -215,7 +215,7 @@ def _write_plots(case_reports, png_path: Path, error_png_path: Path) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.font_manager import FontProperties
 
-    japanese_font = _japanese_font_properties(FontProperties)
+    japanese_font = japanese_font_properties(FontProperties)
 
     figure, axis = plt.subplots(figsize=(9, 5))
     for case in case_reports:
@@ -252,16 +252,6 @@ def _write_plots(case_reports, png_path: Path, error_png_path: Path) -> None:
     figure.tight_layout()
     figure.savefig(error_png_path, dpi=160)
     plt.close(figure)
-
-
-def _japanese_font_properties(font_properties_type):
-    for path in (
-        Path(r"C:\Windows\Fonts\NotoSansJP-VF.ttf"),
-        Path(r"C:\Windows\Fonts\meiryo.ttc"),
-    ):
-        if path.exists():
-            return font_properties_type(fname=str(path))
-    return None
 
 
 def _write_markdown_report(report: dict[str, object], path: Path) -> None:
@@ -307,13 +297,6 @@ def _write_markdown_report(report: dict[str, object], path: Path) -> None:
         "Production physics, API, and frontend code are unchanged by this validation package.",
     ])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
 
 
 def _parse_args() -> argparse.Namespace:

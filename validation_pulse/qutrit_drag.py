@@ -22,6 +22,7 @@ from core.pulse_qutrit_open_system import (
     evolve_open_qutrit_sequence,
 )
 from core.pulse_step_policy import recommended_qutrit_step_policy
+from validation_pulse.time_grid import uniform_times
 
 
 SELECTED_DRAG_BETA_US = 0.001
@@ -584,7 +585,7 @@ def _open_metrics(
         envelope.duration_us,
         policy.selected_internal_step_cap_us,
         drag_beta_us=beta_us,
-        pulse_checkpoint_times_us=_uniform_times(
+        pulse_checkpoint_times_us=uniform_times(
             envelope.duration_us,
             81,
         ),
@@ -655,7 +656,7 @@ def _run_closed(
         envelope.duration_us,
         max_step_us,
         drag_beta_us=beta_us,
-        pulse_checkpoint_times_us=_uniform_times(
+        pulse_checkpoint_times_us=uniform_times(
             envelope.duration_us,
             81,
         ),
@@ -815,10 +816,3 @@ def _observed_order(coarse: float, fine: float) -> float | None:
     if coarse <= 0.0 or fine <= 0.0:
         return None
     return math.log(coarse / fine, 2.0)
-
-
-def _uniform_times(duration_us: float, count: int) -> tuple[float, ...]:
-    return tuple(
-        duration_us * index / (count - 1)
-        for index in range(count)
-    )

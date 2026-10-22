@@ -7,7 +7,6 @@ import csv
 import json
 import math
 import platform
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -20,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit
 from core.gates import initial_density_matrix
 from core.pulse_envelopes import (
     GaussianPulseEnvelope,
@@ -39,6 +39,7 @@ from validation_pulse.pulse_analytic import (
 from validation_pulse.pulse_phase_detuning import (
     analytic_constant_drive_density,
 )
+from validation_pulse.time_grid import uniform_times
 
 
 ZERO_RATE_TOLERANCE = 2e-8
@@ -92,7 +93,7 @@ def main() -> int:
 
     report = {
         "validation": "PULSE-BA4",
-        "base_git_commit": _git_commit(),
+        "base_git_commit": git_commit(ROOT),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "model_id": "driven_two_level_rwa_experimental_v1",
@@ -283,11 +284,11 @@ def _run_required_cases():
 def _run_case(specification):
     initial = initial_density_matrix(["0"])
     envelope = specification["envelope"]
-    pulse_times = _uniform_times(envelope.duration_us, 81)
+    pulse_times = uniform_times(envelope.duration_us, 81)
     idle_duration = (
         specification["total_duration_us"] - envelope.duration_us
     )
-    idle_times = _uniform_times(idle_duration, 101)
+    idle_times = uniform_times(idle_duration, 101)
     zero_rates = PulseDissipationRates(
         "direct_rates",
         0.0,
@@ -900,27 +901,6 @@ def _write_report(report, path: Path) -> None:
         "",
     ])
     path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _uniform_times(duration_us: float, count: int) -> tuple[float, ...]:
-    return tuple(
-        duration_us * index / (count - 1)
-        for index in range(count)
-    )
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            capture_output=True,
-            check=True,
-            text=True,
-            timeout=5,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
 
 
 def _parse_args():

@@ -6,7 +6,6 @@ import argparse
 import csv
 import json
 import math
-import subprocess
 import sys
 from pathlib import Path
 
@@ -14,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit
 from core.constants import BOLTZMANN_CONSTANT, PLANCK_CONSTANT
 from core.gates import SIGMA_MINUS, multi_qubit_environment_collapse_operators
 from core.physical_environment import compute_environment_rates
@@ -182,7 +182,7 @@ def main() -> int:
     report = {
         "validation": "VALIDATION-2",
         "description": "Zero-temperature thermal excitation limit and rate consistency",
-        "git_commit": _git_commit(),
+        "git_commit": git_commit(ROOT),
         "formula_convention": "ordinary frequency: n_th = 1 / (exp(h*f_q/(k_B*T)) - 1)",
         "unit_convention": {
             "temperature_input": "mK",
@@ -329,19 +329,6 @@ def _format(value: object) -> str:
     if isinstance(value, float):
         return f"{value:.6e}"
     return str(value)
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
 
 
 def _parse_args() -> argparse.Namespace:

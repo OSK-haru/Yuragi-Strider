@@ -6,7 +6,6 @@ import argparse
 import csv
 import json
 import math
-import subprocess
 import sys
 from pathlib import Path
 
@@ -14,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit, japanese_font_properties
 from core.constants import BOLTZMANN_CONSTANT, PLANCK_CONSTANT
 from core.gates import SIGMA_MINUS, SIGMA_PLUS, multi_qubit_physical_collapse_operators, scale
 from core.physical_environment import compute_environment_rates
@@ -118,7 +118,7 @@ def main() -> int:
             "proves": ["upward/downward solver dynamics", "thermal equilibrium", "population-rate convention", "physical-input detailed balance"],
             "does_not_prove": ["hardware calibration", "pulse-level dynamics", "non-Markovian noise", "QuTiP agreement"],
         },
-        "git_commit": _git_commit(),
+        "git_commit": git_commit(ROOT),
     }
 
     json_path = args.output_dir / "validation5_finite_temperature_equilibrium.json"
@@ -259,7 +259,7 @@ def _write_plots(groups, png_path: Path, error_png_path: Path) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.font_manager import FontProperties
 
-    font = _japanese_font_properties(FontProperties)
+    font = japanese_font_properties(FontProperties)
     figure, axis = plt.subplots(figsize=(9, 5))
     for group in groups:
         item = next(item for item in group["initial_state_results"] if item["initial_state"] == "1")
@@ -291,13 +291,6 @@ def _write_plots(groups, png_path: Path, error_png_path: Path) -> None:
     plt.close(figure)
 
 
-def _japanese_font_properties(font_properties_type):
-    for path in (Path(r"C:\Windows\Fonts\NotoSansJP-VF.ttf"), Path(r"C:\Windows\Fonts\meiryo.ttc")):
-        if path.exists():
-            return font_properties_type(fname=str(path))
-    return None
-
-
 def _write_markdown_report(report: dict[str, object], path: Path) -> None:
     lines = [
         "# VALIDATION-5: Finite-Temperature Thermal Equilibrium", "", "## Population Model", "",
@@ -327,13 +320,6 @@ def _write_markdown_report(report: dict[str, object], path: Path) -> None:
         "Production equations, API behavior, frontend behavior, and solver defaults were not changed.",
     ])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
 
 
 def _parse_args() -> argparse.Namespace:

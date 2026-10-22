@@ -7,7 +7,6 @@ import csv
 import json
 import math
 import platform
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -19,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit
 from core.gates import zero_hamiltonian
 from core.pulse_envelopes import (
     GaussianPulseEnvelope,
@@ -37,6 +37,7 @@ from validation_pulse.pulse_analytic import (
     pure_target_fidelity,
     run_resonant_closed_trajectory,
 )
+from validation_pulse.time_grid import uniform_times
 
 
 TRAJECTORY_TOLERANCE = 2e-8
@@ -83,7 +84,7 @@ def main() -> int:
 
     report = {
         "validation": "PULSE-BA2",
-        "base_git_commit": _git_commit(),
+        "base_git_commit": git_commit(ROOT),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "model_id": "driven_two_level_rwa_experimental_v1",
@@ -219,7 +220,7 @@ def _run_trajectory_cases():
     rows = []
     for name, envelope, target_angle, sample_count, max_step in specifications:
         started = time.perf_counter()
-        times = _uniform_times(envelope.duration_us, sample_count)
+        times = uniform_times(envelope.duration_us, sample_count)
         result = run_resonant_closed_trajectory(
             envelope,
             times,
@@ -431,13 +432,6 @@ def _run_idle_audit() -> dict[str, object]:
     }
 
 
-def _uniform_times(duration_us: float, count: int) -> tuple[float, ...]:
-    return tuple(
-        duration_us * index / (count - 1)
-        for index in range(count)
-    )
-
-
 def _shape_name(envelope: PulseEnvelope) -> str:
     if isinstance(envelope, SquarePulseEnvelope):
         return "square"
@@ -592,17 +586,6 @@ def _write_report(report, path: Path) -> None:
         "This phase does not validate nonzero phase, detuning, driven dissipation, qutrit leakage, DRAG, or calibrated hardware behavior.",
     ])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            text=True,
-        ).strip()
-    except Exception:
-        return None
 
 
 def _parse_args():

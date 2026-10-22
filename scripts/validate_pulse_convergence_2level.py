@@ -7,7 +7,6 @@ import csv
 import json
 import math
 import platform
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -23,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit
 from core.gates import initial_density_matrix
 from core.pulse_envelopes import GaussianPulseEnvelope, SquarePulseEnvelope
 from core.pulse_open_system import (
@@ -90,7 +90,7 @@ def main() -> int:
 
     report = {
         "validation": "PULSE-CONV-2LEVEL",
-        "base_git_commit": _git_commit(),
+        "base_git_commit": git_commit(ROOT),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "model_id": "driven_two_level_rwa_experimental_v1",
@@ -667,18 +667,6 @@ def _parse_args():
         / "pulse-convergence-2level.md",
     )
     return parser.parse_args()
-
-
-def _git_commit():
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return "unavailable"
 
 
 if __name__ == "__main__":

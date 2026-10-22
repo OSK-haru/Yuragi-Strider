@@ -7,7 +7,6 @@ import csv
 import json
 import math
 import platform
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._common import git_commit
 from core.gates import (
     initial_density_matrix,
     multi_qubit_physical_collapse_operators,
@@ -45,6 +45,7 @@ from validation_pulse.qutip_adapter import (
     run_qutip_constant_segment,
     run_qutip_time_dependent_segment,
 )
+from validation_pulse.time_grid import uniform_times
 
 
 COMPARISON_TOLERANCE = 5e-7
@@ -91,7 +92,7 @@ def main() -> int:
 
     report = {
         "validation": "PULSE-QUTIP-2LEVEL",
-        "base_git_commit": _git_commit(),
+        "base_git_commit": git_commit(ROOT),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "scipy_version": scipy.__version__,
@@ -245,9 +246,9 @@ def _run_case(specification):
     initial = initial_density_matrix(["0"])
     envelope = specification["envelope"]
     rates = specification["rates"]
-    pulse_times = _uniform_times(envelope.duration_us, 41)
+    pulse_times = uniform_times(envelope.duration_us, 41)
     idle_times = (
-        _uniform_times(specification["idle_duration"], 41)
+        uniform_times(specification["idle_duration"], 41)
         if specification["idle_duration"] > 0.0
         else ()
     )
@@ -544,13 +545,6 @@ def _write_report(report, path):
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _uniform_times(duration_us, count):
-    return tuple(
-        duration_us * index / (count - 1)
-        for index in range(count)
-    )
-
-
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -565,18 +559,6 @@ def _parse_args():
         / "pulse-qutip-2level-comparison.md",
     )
     return parser.parse_args()
-
-
-def _git_commit():
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return "unavailable"
 
 
 if __name__ == "__main__":
