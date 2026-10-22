@@ -44,9 +44,9 @@ from core.rust_dense_kernel import (
     rust_rk4_time_dependent_stages,
     rust_rk4_time_dependent_step,
 )
+from tests.physics_test_helpers import assert_matrix_close
 
 
-TOLERANCE = 1e-12
 
 
 @unittest.skipUnless(
@@ -163,22 +163,18 @@ class RustTimeDependentParityTest(unittest.TestCase):
             checkpoint_times_us=(0.012, 0.024),
             backend="rust",
         )
-        _assert_matrix_close(self, python_result.raw_final_state, rust_result.raw_final_state)
-        _assert_matrix_close(self, python_result.state, rust_result.state)
+        assert_matrix_close(python_result.raw_final_state, rust_result.raw_final_state)
+        assert_matrix_close(python_result.state, rust_result.state)
         self.assertEqual(len(python_result.checkpoints), len(rust_result.checkpoints))
         for python_checkpoint, rust_checkpoint in zip(
             python_result.checkpoints,
             rust_result.checkpoints,
         ):
             self.assertEqual(python_checkpoint.time_us, rust_checkpoint.time_us)
-            _assert_matrix_close(
-                self,
-                python_checkpoint.raw_state,
+            assert_matrix_close(python_checkpoint.raw_state,
                 rust_checkpoint.raw_state,
             )
-            _assert_matrix_close(
-                self,
-                python_checkpoint.cleaned_state,
+            assert_matrix_close(python_checkpoint.cleaned_state,
                 rust_checkpoint.cleaned_state,
             )
 
@@ -224,20 +220,16 @@ class RustTimeDependentParityTest(unittest.TestCase):
             checkpoint_times_us=(0.01,),
             backend="rust",
         )
-        _assert_matrix_close(self, python_result.raw_final_state, rust_result.raw_final_state)
-        _assert_matrix_close(self, python_result.state, rust_result.state)
+        assert_matrix_close(python_result.raw_final_state, rust_result.raw_final_state)
+        assert_matrix_close(python_result.state, rust_result.state)
         for python_checkpoint, rust_checkpoint in zip(
             python_result.checkpoints,
             rust_result.checkpoints,
         ):
-            _assert_matrix_close(
-                self,
-                python_checkpoint.raw_state,
+            assert_matrix_close(python_checkpoint.raw_state,
                 rust_checkpoint.raw_state,
             )
-            _assert_matrix_close(
-                self,
-                python_checkpoint.cleaned_state,
+            assert_matrix_close(python_checkpoint.cleaned_state,
                 rust_checkpoint.cleaned_state,
             )
 
@@ -269,7 +261,7 @@ class RustTimeDependentParityTest(unittest.TestCase):
             max_step_us=0.002,
             backend="auto",
         )
-        _assert_matrix_close(self, rust_result.state, auto_result.state)
+        assert_matrix_close(rust_result.state, auto_result.state)
 
     def test_two_level_sequence_cases_match_python(self) -> None:
         cases = (
@@ -393,7 +385,7 @@ class RustTimeDependentParityTest(unittest.TestCase):
             dt,
         )
         for python_stage, rust_stage in zip(python_stages, rust_stages):
-            _assert_matrix_close(self, python_stage, rust_stage)
+            assert_matrix_close(python_stage, rust_stage)
 
         python_rhs = lindblad_rhs_cached(
             state,
@@ -405,7 +397,7 @@ class RustTimeDependentParityTest(unittest.TestCase):
             hamiltonian_stages[0],
             collapse_matrices,
         )
-        _assert_matrix_close(self, python_rhs, rust_rhs)
+        assert_matrix_close(python_rhs, rust_rhs)
 
         python_step = _rk4_step_from_stages(state, python_stages, dt)
         rust_step = rust_rk4_time_dependent_step(
@@ -414,7 +406,7 @@ class RustTimeDependentParityTest(unittest.TestCase):
             collapse_matrices,
             dt,
         )
-        _assert_matrix_close(self, python_step, rust_step)
+        assert_matrix_close(python_step, rust_step)
 
 
 def _python_rk4_stages(
@@ -451,14 +443,10 @@ def _assert_sequence_result_close(
     python_result,
     rust_result,
 ) -> None:
-    _assert_matrix_close(
-        test_case,
-        python_result.pulse_result.raw_final_state,
+    assert_matrix_close(python_result.pulse_result.raw_final_state,
         rust_result.pulse_result.raw_final_state,
     )
-    _assert_matrix_close(
-        test_case,
-        python_result.pulse_result.state,
+    assert_matrix_close(python_result.pulse_result.state,
         rust_result.pulse_result.state,
     )
     test_case.assertEqual(
@@ -467,39 +455,12 @@ def _assert_sequence_result_close(
     )
     if python_result.idle_result is not None:
         assert rust_result.idle_result is not None
-        _assert_matrix_close(
-            test_case,
-            python_result.idle_result.raw_final_state,
+        assert_matrix_close(python_result.idle_result.raw_final_state,
             rust_result.idle_result.raw_final_state,
         )
-        _assert_matrix_close(
-            test_case,
-            python_result.idle_result.state,
+        assert_matrix_close(python_result.idle_result.state,
             rust_result.idle_result.state,
         )
-    _assert_matrix_close(
-        test_case,
-        python_result.final_state,
+    assert_matrix_close(python_result.final_state,
         rust_result.final_state,
     )
-
-
-def _assert_matrix_close(
-    test_case: unittest.TestCase,
-    actual: Matrix,
-    expected: Matrix,
-) -> None:
-    test_case.assertEqual(len(actual), len(expected))
-    for actual_row, expected_row in zip(actual, expected):
-        test_case.assertEqual(len(actual_row), len(expected_row))
-        for actual_value, expected_value in zip(actual_row, expected_row):
-            test_case.assertAlmostEqual(
-                actual_value.real,
-                expected_value.real,
-                delta=TOLERANCE,
-            )
-            test_case.assertAlmostEqual(
-                actual_value.imag,
-                expected_value.imag,
-                delta=TOLERANCE,
-            )

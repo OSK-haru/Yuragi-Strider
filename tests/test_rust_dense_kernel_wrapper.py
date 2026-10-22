@@ -13,6 +13,7 @@ from core.rust_dense_kernel import (
     rust_rk4_evolve_segment_samples,
     unflatten_complex_matrix,
 )
+from tests.physics_test_helpers import assert_matrix_close
 
 
 class RustDenseKernelWrapperConversionTest(unittest.TestCase):
@@ -73,7 +74,7 @@ class RustDenseKernelWrapperCallTest(unittest.TestCase):
 
         result = rust_rk4_evolve_segment(rho, hamiltonian, [], 0.01, 3)
 
-        _assert_matrix_close(self, result, rho)
+        assert_matrix_close(result, rho)
 
     def test_wrapper_hamiltonian_only_matches_reference(self) -> None:
         rho = (
@@ -88,7 +89,7 @@ class RustDenseKernelWrapperCallTest(unittest.TestCase):
         result = rust_rk4_evolve_segment(rho, hamiltonian, [], 0.005, 1)
         expected = _python_rk4_evolve(rho, hamiltonian, [], 0.005, 1)
 
-        _assert_matrix_close(self, result, expected)
+        assert_matrix_close(result, expected)
 
     def test_wrapper_pure_dephasing_matches_reference(self) -> None:
         rho = (
@@ -104,7 +105,7 @@ class RustDenseKernelWrapperCallTest(unittest.TestCase):
         result = rust_rk4_evolve_segment(rho, hamiltonian, [collapse], 0.01, 1)
         expected = _python_rk4_evolve(rho, hamiltonian, [collapse], 0.01, 1)
 
-        _assert_matrix_close(self, result, expected)
+        assert_matrix_close(result, expected)
 
     def test_cleaned_wrapper_returns_tuple_matrix_and_matches_reference(self) -> None:
         rho = (
@@ -137,7 +138,7 @@ class RustDenseKernelWrapperCallTest(unittest.TestCase):
 
         self.assertIsInstance(result, tuple)
         self.assertIsInstance(result[0], tuple)
-        _assert_matrix_close(self, result, expected, delta=1e-10)
+        assert_matrix_close(result, expected, tolerance=1e-10)
 
     def test_sampled_wrapper_returns_tuple_matrices(self) -> None:
         rho = (
@@ -158,8 +159,8 @@ class RustDenseKernelWrapperCallTest(unittest.TestCase):
         self.assertIsInstance(samples, tuple)
         self.assertIsInstance(samples[0], tuple)
         self.assertIsInstance(samples[0][0], tuple)
-        _assert_matrix_close(self, samples[0], rho)
-        _assert_matrix_close(self, samples[1], rho)
+        assert_matrix_close(samples[0], rho)
+        assert_matrix_close(samples[1], rho)
 
     def test_persistent_session_batches_different_hamiltonians(self) -> None:
         rho = (
@@ -181,8 +182,8 @@ class RustDenseKernelWrapperCallTest(unittest.TestCase):
         second = rust_rk4_evolve_segment_cleaned(first, h2, [collapse], 0.002, 3)
 
         self.assertEqual(len(samples), 2)
-        _assert_matrix_close(self, samples[0], first, delta=1e-10)
-        _assert_matrix_close(self, samples[1], second, delta=1e-10)
+        assert_matrix_close(samples[0], first, tolerance=1e-10)
+        assert_matrix_close(samples[1], second, tolerance=1e-10)
 
     def test_persistent_session_returns_paired_metrics(self) -> None:
         rho = ((1.0 + 0.0j, 0.0j), (0.0j, 0.0j))
@@ -237,7 +238,7 @@ class RustDenseKernelWrapperCallTest(unittest.TestCase):
         expected = explicit.evolve_cleaned(rho, hamiltonian, 0.004, 5)
         actual = local.evolve_cleaned(rho, hamiltonian, 0.004, 5)
 
-        _assert_matrix_close(self, actual, expected, delta=1e-10)
+        assert_matrix_close(actual, expected, tolerance=1e-10)
 
     def test_compact_paired_output_keeps_metrics_but_selects_states(self) -> None:
         rho = ((1.0 + 0.0j, 0.0j), (0.0j, 0.0j))
@@ -408,28 +409,6 @@ def _python_lindblad_overlap(left, right):
         for row in range(len(left))
         for column in range(len(left))
     ).real
-
-
-def _assert_matrix_close(
-    test_case: unittest.TestCase,
-    actual,
-    expected,
-    delta: float = 1e-12,
-) -> None:
-    test_case.assertEqual(len(actual), len(expected))
-    for row in range(len(actual)):
-        test_case.assertEqual(len(actual[row]), len(expected[row]))
-        for column in range(len(actual[row])):
-            test_case.assertAlmostEqual(
-                actual[row][column].real,
-                expected[row][column].real,
-                delta=delta,
-            )
-            test_case.assertAlmostEqual(
-                actual[row][column].imag,
-                expected[row][column].imag,
-                delta=delta,
-            )
 
 
 if __name__ == "__main__":

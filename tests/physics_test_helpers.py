@@ -3,9 +3,11 @@ from __future__ import annotations
 import math
 from typing import Iterable
 
+import numpy as np
+
 from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.expert_data import reconstruct_final_density_matrix
-from core.gates import Matrix
+from core.gates import Matrix, column_unitary, identity_matrix, matmul
 from core.physical_environment import INPUT_MODE_NORMALIZED, INPUT_MODE_PHYSICAL
 from core.results import EnvironmentConfig, SimulationConfig, SimulationResult
 from core.simulator import run_simulation
@@ -25,6 +27,29 @@ def make_ideal_environment() -> EnvironmentConfig:
         device_quality=1.0,
         temperature_mk=0.0,
         flux_noise_phi0=0.0,
+    )
+
+
+def circuit_unitary(circuit: CircuitConfig) -> Matrix:
+    """Ordered product of the circuit's column unitaries (no noise)."""
+    unitary = identity_matrix(2 ** circuit.logical_qubits)
+    for column in sorted(circuit.columns, key=lambda item: item.step):
+        unitary = matmul(column_unitary(column, circuit.logical_qubits), unitary)
+    return unitary
+
+
+def assert_matrix_close(actual, expected, tolerance: float = 1e-12) -> None:
+    """Fail unless every entry differs by at most ``tolerance`` (absolute).
+
+    Shapes must match exactly and NaN never compares equal, so a malformed or
+    broken result cannot pass by broadcasting or by being all-NaN.
+    """
+    np.testing.assert_allclose(
+        np.asarray(actual, dtype=np.complex128),
+        np.asarray(expected, dtype=np.complex128),
+        atol=tolerance,
+        rtol=0.0,
+        equal_nan=False,
     )
 
 

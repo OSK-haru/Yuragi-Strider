@@ -10,16 +10,14 @@ from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.gate_compiler import AUTO_DECOMPOSE, LOGICAL_DIRECT, compile_gate_aware_circuit
 from core.gates import (
     INVOLUTION_TOLERANCE,
-    column_unitary,
     expand_phase_oracle,
     gate_duration_us,
-    identity_matrix,
-    matmul,
 )
 from core.results import EnvironmentConfig, SimulationConfig
 from core.simulator import run_simulation
 from core.statevector import execute_statevector_branches
 from core.validation import validate_simulation_config
+from tests.physics_test_helpers import circuit_unitary
 
 
 class PhaseOracleMatrixTests(unittest.TestCase):
@@ -83,10 +81,10 @@ class PhaseOracleCompilerTests(unittest.TestCase):
             (4, [0, 1, 2, 3], 11), (5, [0, 1, 2, 3, 4], 22), (5, [4, 2, 0], 5),
         ):
             circuit = _oracle_circuit(n_qubits, targets, marked)
-            direct = np.asarray(_circuit_unitary(
+            direct = np.asarray(circuit_unitary(
                 compile_gate_aware_circuit(circuit, LOGICAL_DIRECT).circuit
             ))
-            compiled = np.asarray(_circuit_unitary(
+            compiled = np.asarray(circuit_unitary(
                 compile_gate_aware_circuit(circuit, AUTO_DECOMPOSE).circuit
             ))
             phase = np.trace(direct.conj().T @ compiled) / 2 ** n_qubits
@@ -281,13 +279,6 @@ def _grover_circuit(n_qubits, marked_index, iterations):
     return CircuitConfig(
         logical_qubits=n_qubits, initial_states=["0"] * n_qubits, columns=columns,
     )
-
-
-def _circuit_unitary(circuit):
-    unitary = identity_matrix(2 ** circuit.logical_qubits)
-    for column in sorted(circuit.columns, key=lambda item: item.step):
-        unitary = matmul(column_unitary(column, circuit.logical_qubits), unitary)
-    return unitary
 
 
 def _api_payload(targets, marked):

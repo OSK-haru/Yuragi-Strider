@@ -16,6 +16,7 @@ from core.gates import (
 )
 from core.results import EnvironmentConfig, SimulationConfig
 from core.simulator import run_simulation
+from tests.physics_test_helpers import make_ideal_environment
 
 
 class PythonBackendOptimizationTest(unittest.TestCase):
@@ -27,7 +28,7 @@ class PythonBackendOptimizationTest(unittest.TestCase):
         self.assertEqual(len(result.purity), len(result.times))
 
     def test_final_output_probabilities_remain_correct_for_ideal_h(self) -> None:
-        result = run_simulation(_one_qubit_h_config(_ideal_environment()))
+        result = run_simulation(_one_qubit_h_config(make_ideal_environment()))
 
         self.assertAlmostEqual(result.output_probabilities["0"], 0.5, delta=1e-10)
         self.assertAlmostEqual(result.output_probabilities["1"], 0.5, delta=1e-10)
@@ -35,7 +36,7 @@ class PythonBackendOptimizationTest(unittest.TestCase):
         self.assertAlmostEqual(result.purity[-1], 1.0, delta=1e-10)
 
     def test_final_output_probabilities_remain_correct_for_ideal_bell(self) -> None:
-        result = run_simulation(_bell_config(_ideal_environment(), duration_us=0.22))
+        result = run_simulation(_bell_config(make_ideal_environment(), duration_us=0.22))
 
         self.assertAlmostEqual(result.output_probabilities["00"], 0.5, delta=1e-10)
         self.assertAlmostEqual(result.output_probabilities["11"], 0.5, delta=1e-10)
@@ -101,16 +102,6 @@ class PythonBackendOptimizationTest(unittest.TestCase):
 
         _assert_matrices_close(self, uncached_rhs, cached_rhs)
         _assert_matrices_close(self, uncached_step, cached_step)
-
-
-def _ideal_environment() -> EnvironmentConfig:
-    return EnvironmentConfig(
-        input_mode="physical",
-        ideal_reference=True,
-        device_quality=1.0,
-        temperature_mk=0.0,
-        flux_noise_phi0=0.0,
-    )
 
 
 def _finite_environment() -> EnvironmentConfig:

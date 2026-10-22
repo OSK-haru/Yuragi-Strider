@@ -20,6 +20,7 @@ from core.pulse_qutrit_open_system import (
     qutrit_dissipation_rates,
     qutrit_gibbs_populations,
 )
+from tests.physics_test_helpers import assert_matrix_close
 
 
 STATE_TOLERANCE = 2e-7
@@ -139,9 +140,7 @@ class PulseB2QutritEvolutionTests(unittest.TestCase):
             pulse_checkpoint_times_us=times,
         )
 
-        _assert_matrix_close(
-            self,
-            open_result.final_state,
+        assert_matrix_close(open_result.final_state,
             closed_result.final_state,
             1e-14,
         )
@@ -319,9 +318,7 @@ class PulseB2QutritEvolutionTests(unittest.TestCase):
             0.001,
         )
 
-        _assert_matrix_close(
-            self,
-            physical.final_state,
+        assert_matrix_close(physical.final_state,
             direct.final_state,
             1e-14,
         )
@@ -460,13 +457,6 @@ def _matrix_max_error(actual, expected) -> float:
         abs(actual[row][column] - expected[row][column])
         for row in range(len(expected))
         for column in range(len(expected))
-    )
-
-
-def _assert_matrix_close(test_case, actual, expected, tolerance) -> None:
-    test_case.assertLessEqual(
-        _matrix_max_error(actual, expected),
-        tolerance,
     )
 
 

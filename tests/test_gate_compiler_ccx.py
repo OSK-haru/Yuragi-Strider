@@ -9,20 +9,18 @@ from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.gate_compiler import AUTO_DECOMPOSE, LOGICAL_DIRECT, compile_gate_aware_circuit
 from core.gates import (
     apply_unitary_to_density,
-    column_unitary,
-    identity_matrix,
-    matmul,
 )
 from core.results import EnvironmentConfig, SimulationConfig
 from core.simulator import run_simulation
+from tests.physics_test_helpers import circuit_unitary, make_ideal_environment
 
 
 class CcxGateCompilerTests(unittest.TestCase):
     def test_ccx_decomposition_matches_truth_table_and_density_channel(self):
         direct = compile_gate_aware_circuit(_ccx_circuit(), LOGICAL_DIRECT)
         compiled = compile_gate_aware_circuit(_ccx_circuit(), AUTO_DECOMPOSE)
-        direct_unitary = np.asarray(_circuit_unitary(direct.circuit))
-        compiled_unitary = np.asarray(_circuit_unitary(compiled.circuit))
+        direct_unitary = np.asarray(circuit_unitary(direct.circuit))
+        compiled_unitary = np.asarray(circuit_unitary(compiled.circuit))
 
         phase = np.trace(direct_unitary.conj().T @ compiled_unitary) / 8.0
         self.assertAlmostEqual(abs(phase), 1.0, delta=1e-12)
@@ -50,10 +48,10 @@ class CcxGateCompilerTests(unittest.TestCase):
 
         rho = _test_density_matrix()
         direct_rho = np.asarray(apply_unitary_to_density(
-            _as_matrix(rho), _circuit_unitary(direct.circuit),
+            _as_matrix(rho), circuit_unitary(direct.circuit),
         ))
         compiled_rho = np.asarray(apply_unitary_to_density(
-            _as_matrix(rho), _circuit_unitary(compiled.circuit),
+            _as_matrix(rho), circuit_unitary(compiled.circuit),
         ))
         self.assertLess(float(np.max(np.abs(direct_rho - compiled_rho))), 1e-12)
 
@@ -111,7 +109,7 @@ class CcxGateCompilerTests(unittest.TestCase):
         self.assertNotAlmostEqual(direct.fidelity[-1], compiled.fidelity[-1], delta=1e-6)
 
     def test_ccx_auto_decomposition_runs_through_explicit_cptp(self):
-        config = _simulation_config(AUTO_DECOMPOSE, _ideal_environment())
+        config = _simulation_config(AUTO_DECOMPOSE, make_ideal_environment())
         config.evolution_method = "explicit_cptp"
         result = run_simulation(config)
 
@@ -149,13 +147,6 @@ def _ccx_circuit() -> CircuitConfig:
     )
 
 
-def _circuit_unitary(circuit: CircuitConfig):
-    unitary = identity_matrix(2 ** circuit.logical_qubits)
-    for column in sorted(circuit.columns, key=lambda item: item.step):
-        unitary = matmul(column_unitary(column, circuit.logical_qubits), unitary)
-    return unitary
-
-
 def _test_density_matrix() -> np.ndarray:
     ket = np.asarray(
         [1.0, 0.2j, -0.3, 0.4j, 0.1, -0.2j, 0.5, 0.7j],
@@ -178,16 +169,6 @@ def _simulation_config(mode: str, environment: EnvironmentConfig):
         fidelity_threshold=0.9,
         compilation_mode=mode,
         native_gate_durations_us={"H": 0.02, "RZ": 0.02, "CNOT": 0.2},
-    )
-
-
-def _ideal_environment() -> EnvironmentConfig:
-    return EnvironmentConfig(
-        input_mode="physical",
-        ideal_reference=True,
-        device_quality=1.0,
-        temperature_mk=0.0,
-        flux_noise_phi0=0.0,
     )
 
 

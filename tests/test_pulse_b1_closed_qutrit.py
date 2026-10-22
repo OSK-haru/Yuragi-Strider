@@ -20,6 +20,7 @@ from core.pulse_qutrit_contract import (
     qutrit_rotating_frame_hamiltonian,
     transmon_anharmonicity_rad_per_us,
 )
+from tests.physics_test_helpers import assert_matrix_close
 
 
 STATE_TOLERANCE = 2e-7
@@ -40,7 +41,7 @@ class PulseB1ClosedQutritTests(unittest.TestCase):
             duration_us=envelope.duration_us,
             max_step_us=1e-4,
         )
-        _assert_matrix_close(self, result.state, initial, 1e-14)
+        assert_matrix_close(result.state, initial, 1e-14)
 
     def test_zero_drive_preserves_basis_populations(self) -> None:
         initial = qutrit_initial_density_matrix("2")
@@ -300,9 +301,7 @@ class PulseB1ClosedQutritTests(unittest.TestCase):
             phase_rad=math.pi / 2.0,
             detuning_rad_per_us=0.3,
         )
-        _assert_matrix_close(
-            self,
-            provider.evaluate(0.05),
+        assert_matrix_close(provider.evaluate(0.05),
             qutrit_rotating_frame_hamiltonian(
                 0.3,
                 alpha,
@@ -326,16 +325,6 @@ def _top_left_block_error(qutrit_state, two_level_state) -> float:
         for row in range(2)
         for column in range(2)
     )
-
-
-def _assert_matrix_close(test_case, actual, expected, tolerance):
-    for row in range(len(expected)):
-        for column in range(len(expected)):
-            test_case.assertAlmostEqual(
-                actual[row][column],
-                expected[row][column],
-                delta=tolerance,
-            )
 
 
 if __name__ == "__main__":

@@ -11,20 +11,18 @@ from core.gate_compiler import AUTO_DECOMPOSE, LOGICAL_DIRECT, compile_gate_awar
 from core.gates import (
     apply_gate_operation,
     apply_unitary_to_density,
-    column_unitary,
     initial_density_matrix,
     reduced_density_matrix,
     effective_hamiltonian_from_unitary,
     expand_qft,
     gate_duration_us,
-    identity_matrix,
-    matmul,
     unitary_from_hamiltonian,
 )
 from core.results import EnvironmentConfig, SimulationConfig
 from core.simulator import run_simulation
 from core.statevector import execute_statevector_branches
 from core.validation import validate_simulation_config
+from tests.physics_test_helpers import circuit_unitary
 
 
 class QftUnitaryTests(unittest.TestCase):
@@ -128,10 +126,10 @@ class QftGateCompilerTests(unittest.TestCase):
     def test_decomposition_matches_the_direct_unitary_up_to_global_phase(self):
         for n_qubits, targets in ((1, [0]), (2, [0, 1]), (3, [0, 1, 2]), (4, [3, 1, 0])):
             circuit = _qft_circuit(n_qubits, targets)
-            direct = np.asarray(_circuit_unitary(
+            direct = np.asarray(circuit_unitary(
                 compile_gate_aware_circuit(circuit, LOGICAL_DIRECT).circuit
             ))
-            compiled = np.asarray(_circuit_unitary(
+            compiled = np.asarray(circuit_unitary(
                 compile_gate_aware_circuit(circuit, AUTO_DECOMPOSE).circuit
             ))
             phase = np.trace(direct.conj().T @ compiled) / 2 ** n_qubits
@@ -145,10 +143,10 @@ class QftGateCompilerTests(unittest.TestCase):
         circuit = _qft_circuit(3, [0, 1, 2])
         rho = _test_density_matrix(3)
         direct = np.asarray(apply_unitary_to_density(
-            rho, _circuit_unitary(compile_gate_aware_circuit(circuit, LOGICAL_DIRECT).circuit)
+            rho, circuit_unitary(compile_gate_aware_circuit(circuit, LOGICAL_DIRECT).circuit)
         ))
         compiled = np.asarray(apply_unitary_to_density(
-            rho, _circuit_unitary(compile_gate_aware_circuit(circuit, AUTO_DECOMPOSE).circuit)
+            rho, circuit_unitary(compile_gate_aware_circuit(circuit, AUTO_DECOMPOSE).circuit)
         ))
         self.assertLess(float(np.max(np.abs(direct - compiled))), 1e-12)
 
@@ -387,13 +385,6 @@ def _qft_circuit(n_qubits, targets):
         initial_states=["0"] * n_qubits,
         columns=[GateColumn(0, [GateOperation("QFT", list(targets))])],
     )
-
-
-def _circuit_unitary(circuit):
-    unitary = identity_matrix(2 ** circuit.logical_qubits)
-    for column in sorted(circuit.columns, key=lambda item: item.step):
-        unitary = matmul(column_unitary(column, circuit.logical_qubits), unitary)
-    return unitary
 
 
 def _test_density_matrix(n_qubits):

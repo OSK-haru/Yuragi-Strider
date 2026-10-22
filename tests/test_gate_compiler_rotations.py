@@ -18,13 +18,12 @@ from core.gates import (
     X,
     Y,
     apply_unitary_to_density,
-    column_unitary,
     gate_unitary,
-    identity_matrix,
     matmul,
 )
-from core.results import EnvironmentConfig, SimulationConfig
+from core.results import SimulationConfig
 from core.simulator import run_simulation
+from tests.physics_test_helpers import circuit_unitary, make_ideal_environment
 
 
 class ParameterizedRotationCompilerTests(unittest.TestCase):
@@ -88,8 +87,8 @@ class ParameterizedRotationCompilerTests(unittest.TestCase):
                         _rotation_circuit(gate_type, theta),
                         AUTO_DECOMPOSE,
                     )
-                    direct_unitary = np.asarray(_circuit_unitary(direct.circuit))
-                    compiled_unitary = np.asarray(_circuit_unitary(compiled.circuit))
+                    direct_unitary = np.asarray(circuit_unitary(direct.circuit))
+                    compiled_unitary = np.asarray(circuit_unitary(compiled.circuit))
 
                     self.assertLess(
                         float(np.max(np.abs(compiled_unitary - direct_unitary))),
@@ -97,11 +96,11 @@ class ParameterizedRotationCompilerTests(unittest.TestCase):
                     )
                     direct_rho = np.asarray(apply_unitary_to_density(
                         _as_matrix(_test_density_matrix()),
-                        _circuit_unitary(direct.circuit),
+                        circuit_unitary(direct.circuit),
                     ))
                     compiled_rho = np.asarray(apply_unitary_to_density(
                         _as_matrix(_test_density_matrix()),
-                        _circuit_unitary(compiled.circuit),
+                        circuit_unitary(compiled.circuit),
                     ))
                     self.assertLess(
                         float(np.max(np.abs(compiled_rho - direct_rho))),
@@ -175,7 +174,7 @@ class ParameterizedRotationCompilerTests(unittest.TestCase):
             with self.subTest(gate_type=gate_type):
                 result = run_simulation(SimulationConfig(
                     circuit=_rotation_circuit(gate_type, theta),
-                    environment=_ideal_environment(),
+                    environment=make_ideal_environment(),
                     duration_us=0.04,
                     time_steps=11,
                     fidelity_threshold=0.9,
@@ -219,7 +218,7 @@ class ParameterizedRotationCompilerTests(unittest.TestCase):
         )
         result = run_simulation(SimulationConfig(
             circuit=circuit,
-            environment=_ideal_environment(),
+            environment=make_ideal_environment(),
             duration_us=0.04,
             time_steps=11,
             fidelity_threshold=0.9,
@@ -298,7 +297,7 @@ def _simulation_config(backend: str) -> SimulationConfig:
                 )]),
             ],
         ),
-        environment=_ideal_environment(),
+        environment=make_ideal_environment(),
         duration_us=0.16,
         time_steps=41,
         fidelity_threshold=0.9,
@@ -307,23 +306,6 @@ def _simulation_config(backend: str) -> SimulationConfig:
         compilation_mode=AUTO_DECOMPOSE,
         native_gate_durations_us={"H": 0.02, "RZ": 0.02},
     )
-
-
-def _ideal_environment() -> EnvironmentConfig:
-    return EnvironmentConfig(
-        input_mode="physical",
-        ideal_reference=True,
-        device_quality=1.0,
-        temperature_mk=0.0,
-        flux_noise_phi0=0.0,
-    )
-
-
-def _circuit_unitary(circuit: CircuitConfig):
-    unitary = identity_matrix(2 ** circuit.logical_qubits)
-    for column in sorted(circuit.columns, key=lambda item: item.step):
-        unitary = matmul(column_unitary(column, circuit.logical_qubits), unitary)
-    return unitary
 
 
 def _test_density_matrix() -> np.ndarray:

@@ -24,12 +24,13 @@ from validation_pulse.qutip_adapter import (
     compare_density_matrices,
     run_qutip_piecewise_segments,
 )
+from tests.physics_test_helpers import make_ideal_environment
 
 
 class GateAwareCPTPTests(unittest.TestCase):
     def test_noiseless_bell_is_ideal_without_cleanup(self) -> None:
         result = run_simulation(_bell_config(
-            environment=_ideal_environment(),
+            environment=make_ideal_environment(),
             evolution_method="explicit_cptp",
         ))
 
@@ -228,16 +229,6 @@ def _bell_config(
         fidelity_threshold=0.9,
         model=GATE_AWARE_HAMILTONIAN_LINDBLAD_MODEL,
         evolution_method=evolution_method,
-    )
-
-
-def _ideal_environment() -> EnvironmentConfig:
-    return EnvironmentConfig(
-        input_mode="physical",
-        ideal_reference=True,
-        device_quality=1.0,
-        temperature_mk=0.0,
-        flux_noise_phi0=0.0,
     )
 
 

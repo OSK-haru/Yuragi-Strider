@@ -5,9 +5,9 @@ import numpy as np
 from api.main import SimulateRequest, build_config_from_simulate_request
 from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.gate_compiler import AUTO_DECOMPOSE, LOGICAL_DIRECT, compile_gate_aware_circuit
-from core.gates import column_unitary, identity_matrix, matmul
 from core.results import EnvironmentConfig, SimulationConfig
 from core.simulator import run_simulation
+from tests.physics_test_helpers import circuit_unitary, make_ideal_environment
 
 
 class CZGateCompilerTests(unittest.TestCase):
@@ -16,8 +16,8 @@ class CZGateCompilerTests(unittest.TestCase):
         direct = compile_gate_aware_circuit(circuit, LOGICAL_DIRECT)
         compiled = compile_gate_aware_circuit(circuit, AUTO_DECOMPOSE)
 
-        direct_unitary = _circuit_unitary(direct.circuit)
-        compiled_unitary = _circuit_unitary(compiled.circuit)
+        direct_unitary = circuit_unitary(direct.circuit)
+        compiled_unitary = circuit_unitary(compiled.circuit)
         self.assertLess(
             float(np.max(np.abs(
                 np.asarray(direct_unitary) - np.asarray(compiled_unitary)
@@ -38,8 +38,8 @@ class CZGateCompilerTests(unittest.TestCase):
         )
 
     def test_zero_noise_direct_and_decomposed_cz_match(self) -> None:
-        direct = run_simulation(_simulation_config(LOGICAL_DIRECT, _ideal_environment()))
-        compiled = run_simulation(_simulation_config(AUTO_DECOMPOSE, _ideal_environment()))
+        direct = run_simulation(_simulation_config(LOGICAL_DIRECT, make_ideal_environment()))
+        compiled = run_simulation(_simulation_config(AUTO_DECOMPOSE, make_ideal_environment()))
 
         self.assertFalse(direct.issues)
         self.assertFalse(compiled.issues)
@@ -77,7 +77,7 @@ class CZGateCompilerTests(unittest.TestCase):
         )
 
     def test_compilation_settings_round_trip(self) -> None:
-        config = _simulation_config(AUTO_DECOMPOSE, _ideal_environment())
+        config = _simulation_config(AUTO_DECOMPOSE, make_ideal_environment())
         restored = SimulationConfig.from_dict(config.to_dict())
         self.assertEqual(restored.compilation_mode, AUTO_DECOMPOSE)
         self.assertEqual(restored.native_gate_durations_us["H"], 0.02)
@@ -123,23 +123,6 @@ def _cz_circuit() -> CircuitConfig:
         columns=[GateColumn(0, [GateOperation(
             "CZ", [1], controls=[0], params={"duration_us": 0.2}
         )])],
-    )
-
-
-def _circuit_unitary(circuit: CircuitConfig):
-    unitary = identity_matrix(2 ** circuit.logical_qubits)
-    for column in sorted(circuit.columns, key=lambda item: item.step):
-        unitary = matmul(column_unitary(column, circuit.logical_qubits), unitary)
-    return unitary
-
-
-def _ideal_environment() -> EnvironmentConfig:
-    return EnvironmentConfig(
-        input_mode="physical",
-        ideal_reference=True,
-        device_quality=1.0,
-        temperature_mk=0.0,
-        flux_noise_phi0=0.0,
     )
 
 
