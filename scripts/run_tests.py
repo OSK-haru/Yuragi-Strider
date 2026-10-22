@@ -21,27 +21,12 @@ PROFILE_MODULES: dict[str, tuple[str, ...]] = {
         "tests.test_ui_response_adapter",
         "tests.test_api_simulate_circuit_config",
     ),
-    "gate-aware": (
-        "tests.test_gate_execution",
-        "tests.test_gate_measurement",
-        "tests.test_gate_aware_general_unitary",
-        "tests.test_gate_aware_hamiltonian_lindblad",
-        "tests.test_gate_aware_cptp",
-        "tests.test_gate_compiler_rotations",
-        "tests.test_gate_compiler_cp",
-        "tests.test_gate_compiler_ccx",
-        "tests.test_gate_compiler_qft",
-        "tests.test_gate_oracle_grover",
-    ),
-    "pulse": (
-        "tests.test_pulse_api_baseline_a",
-        "tests.test_pulse_api_qutrit",
-        "tests.test_pulse_api_transmon_network",
-    ),
 }
 # Profiles selected by file-name pattern, so a new test file in the area joins the
 # profile without editing this list.
 PROFILE_GLOBS: dict[str, tuple[str, ...]] = {
+    "gate-aware": ("test_gate_*.py",),
+    "pulse": ("test_pulse_*api*.py",),
     "attack": ("test_attack*.py", "test_*challenge*.py", "test_crosstalk*.py", "test_concurrent*.py"),
 }
 
