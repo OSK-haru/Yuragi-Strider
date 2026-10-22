@@ -186,16 +186,17 @@ def _rhs_np(
             derivative = -1j * (_matmul_np(hamiltonian, rho) - _matmul_np(rho, hamiltonian))
             skipped_hamiltonian = False
 
-        for collapse_op in collapse_ops:
-            dissipator = (
-                _matmul_np(_matmul_np(collapse_op.operator, rho), collapse_op.operator_adjoint)
-                - 0.5
-                * (
-                    _matmul_np(collapse_op.operator_adjoint_operator, rho)
-                    + _matmul_np(rho, collapse_op.operator_adjoint_operator)
-                )
+        if collapse_ops:
+            # sum_k L_k^dagger L_k is state-independent, so the anticommutator
+            # costs two products per call instead of two per operator.
+            decay = _sum_adjoint_operators(collapse_ops)
+            derivative = derivative - 0.5 * (
+                _matmul_np(decay, rho) + _matmul_np(rho, decay)
             )
-            derivative = derivative + dissipator
+        for collapse_op in collapse_ops:
+            derivative = derivative + _matmul_np(
+                _matmul_np(collapse_op.operator, rho), collapse_op.operator_adjoint
+            )
         return derivative, skipped_hamiltonian
 
     rhs_started_at = timer_start()
@@ -217,30 +218,40 @@ def _rhs_np(
             skipped_hamiltonian = False
         profile.hamiltonian_term_ms += elapsed_ms(started_at)
 
-        for collapse_op in collapse_ops:
-            profile.dissipator_operator_iterations += 1
+        if collapse_ops:
             started_at = timer_start()
-            dissipator = _subtract_np(
-                _matmul_np(
-                    _matmul_np(collapse_op.operator, rho),
-                    collapse_op.operator_adjoint,
-                ),
+            decay = _sum_adjoint_operators(collapse_ops)
+            derivative = _subtract_np(
+                derivative,
                 _scale_np(
                     0.5,
-                    _add_np(
-                        _matmul_np(collapse_op.operator_adjoint_operator, rho),
-                        _matmul_np(rho, collapse_op.operator_adjoint_operator),
-                    ),
+                    _add_np(_matmul_np(decay, rho), _matmul_np(rho, decay)),
                 ),
             )
             profile.dissipator_total_ms += elapsed_ms(started_at)
 
+        for collapse_op in collapse_ops:
+            profile.dissipator_operator_iterations += 1
             started_at = timer_start()
-            derivative = _add_np(derivative, dissipator)
+            jump = _matmul_np(
+                _matmul_np(collapse_op.operator, rho),
+                collapse_op.operator_adjoint,
+            )
+            profile.dissipator_total_ms += elapsed_ms(started_at)
+
+            started_at = timer_start()
+            derivative = _add_np(derivative, jump)
             profile.matrix_accumulation_ms += elapsed_ms(started_at)
         return derivative, skipped_hamiltonian
     finally:
         profile.rhs_total_ms += elapsed_ms(rhs_started_at)
+
+
+def _sum_adjoint_operators(collapse_ops: Sequence[_NumpyCachedCollapseOperator]):
+    total = collapse_ops[0].operator_adjoint_operator
+    for collapse_op in collapse_ops[1:]:
+        total = total + collapse_op.operator_adjoint_operator
+    return total
 
 
 def _matmul_np(left, right):
