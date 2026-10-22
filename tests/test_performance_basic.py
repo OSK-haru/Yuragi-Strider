@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import unittest
@@ -19,6 +20,9 @@ PERFORMANCE_NOTES_PATH = (
     / "validation"
     / "performance_notes.md"
 )
+# Refreshing the tracked notes file is opt-in so that a normal test run leaves
+# the working tree clean. Set this to "1" to rewrite docs/validation/performance_notes.md.
+WRITE_NOTES_ENV = "YURAGI_WRITE_PERFORMANCE_NOTES"
 
 
 class PerformanceBasicTest(unittest.TestCase):
@@ -44,9 +48,10 @@ class PerformanceBasicTest(unittest.TestCase):
         _measure("Markdown export", timings, lambda: markdown_report_text(h_result))
         _measure("save/load config", timings, lambda: _save_load_roundtrip(one_qubit_gate_config("H")))
 
-        _write_performance_notes(timings)
+        if os.environ.get(WRITE_NOTES_ENV) == "1":
+            _write_performance_notes(timings)
 
-        self.assertTrue(timings)
+        self.assertEqual(len(timings), 10)
         self.assertTrue(all(elapsed >= 0.0 for _, elapsed in timings))
 
 
