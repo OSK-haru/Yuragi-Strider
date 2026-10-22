@@ -48,19 +48,44 @@ PYTHON_TESTS = (
 )
 
 
+# Only the modules this check runs, plus the non-test helpers they may import
+# (tests/__init__.py, *_helpers.py), so editing an unrelated test does not
+# invalidate the cache.
+PYTHON_TEST_INPUTS = (
+    *(ROOT / "tests" / f"{module.rsplit('.', 1)[-1]}.py" for module in PYTHON_TESTS),
+    *sorted(
+        path
+        for path in (ROOT / "tests").glob("*.py")
+        if not path.name.startswith("test_")
+    ),
+)
+
+# Inputs the Python tests read at run time besides the code under test. The Rust
+# crate is listed by source and manifest only, because its target/ directory is
+# build output of several hundred MB.
+RUNTIME_DATA_AND_RUST_INPUTS = (
+    ROOT / "data",
+    ROOT / "validation_results",
+    ROOT / "rust_kernels" / "yuragi_strider_rust" / "src",
+    ROOT / "rust_kernels" / "yuragi_strider_rust" / "Cargo.toml",
+    ROOT / "rust_kernels" / "yuragi_strider_rust" / "Cargo.lock",
+    ROOT / "rust_kernels" / "yuragi_strider_rust" / "pyproject.toml",
+)
+
+
 CHECKS = {
     "frontend-build": Check(
         name="frontend-build",
         command=("npm.cmd", "run", "build"),
         cwd=ROOT / "frontend",
-        source_roots=(ROOT / "scripts" / "verify_cached.py", ROOT / "frontend" / "src", ROOT / "frontend" / "package.json", ROOT / "frontend" / "package-lock.json", ROOT / "frontend" / "tsconfig.json", ROOT / "frontend" / "tsconfig.app.json", ROOT / "frontend" / "vite.config.ts"),
+        source_roots=(ROOT / "scripts" / "verify_cached.py", ROOT / "frontend" / "src", ROOT / "frontend" / "package.json", ROOT / "frontend" / "package-lock.json", ROOT / "frontend" / "tsconfig.json", ROOT / "frontend" / "tsconfig.app.json", ROOT / "frontend" / "vite.config.ts", ROOT / "frontend" / "tsconfig.node.json", ROOT / "frontend" / "index.html", ROOT / "frontend" / "public"),
         tools=(("node", "--version"), ("npm.cmd", "--version")),
     ),
     "gate-aware-tests": Check(
         name="gate-aware-tests",
         command=(PYTHON_EXECUTABLE, "-m", "unittest", *PYTHON_TESTS),
         cwd=ROOT,
-        source_roots=(ROOT / "scripts" / "verify_cached.py", ROOT / "core", ROOT / "api", ROOT / "tests", ROOT / "validation_pulse", ROOT / "validation_cptp"),
+        source_roots=(ROOT / "scripts" / "verify_cached.py", ROOT / "core", ROOT / "api", *PYTHON_TEST_INPUTS, ROOT / "validation_pulse", ROOT / "validation_cptp", *RUNTIME_DATA_AND_RUST_INPUTS),
         tools=((PYTHON_EXECUTABLE, "--version"),),
     ),
 }
