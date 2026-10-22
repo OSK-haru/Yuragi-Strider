@@ -6,12 +6,13 @@ import unittest
 from api.attack_product_factory import (
     ProductAssemblyLimits, ProductEnvironmentFactory, _parse_frozen_inputs, concurrent_regions_for,
 )
-from api.attack_device_snapshot import load_ibm_kingston_snapshot
+from api.attack_device_snapshot import default_device_snapshot
 from api.attack_product_profiles import product_free_scenarios
 from api.attack_sessions import SessionHostLimits, WebOwnerContext
 from api.attack_settings_resolver import ScenarioSettingsResolver
 from core.attack_simulation.qpu_topology import TopologyLimits
 from core.attack_simulation.request_receipts import ReceiptLimits
+from core.attack_simulation.concurrency_policy import CrosstalkDeclaration, cross_region_transfers
 
 PREFIX = "qpu_service.runtime_execution."
 DEDICATED = {PREFIX + "placement_policy": "tenant_dedicated_region"}
@@ -25,12 +26,25 @@ LIMITS = ProductAssemblyLimits(
 
 
 def resolve(settings):
-    resolver = ScenarioSettingsResolver(free_scenarios=product_free_scenarios(load_ibm_kingston_snapshot()))
+    resolver = ScenarioSettingsResolver(free_scenarios=product_free_scenarios(default_device_snapshot()))
     payload = {"mode": "free", "idle_noise_mode": "calibration_values", "settings": settings}
     return resolver, resolver.resolve(json.dumps(payload).encode())
 
 
 class ConcurrentProductSettingsTests(unittest.TestCase):
+    def test_declared_transfer_list_handles_three_named_regions(self):
+        transfers = cross_region_transfers(
+            ((1, 2), (2, 3)),
+            {"north": (1,), "middle": (2,), "south": (3,)},
+            (CrosstalkDeclaration("north", "middle", 0.1, 2.0),
+             CrosstalkDeclaration("middle", "south", 0.2, -3.0)),
+        )
+        self.assertEqual(
+            tuple((item.source, item.target, item.coefficient, item.detuning_rad_per_us)
+                  for item in transfers),
+            ((1, 2, 0.1, 2.0), (2, 3, 0.2, -3.0)),
+        )
+
     def test_default_is_the_exclusive_fifo_with_a_declared_sample_strength(self):
         _, environment = resolve({})
         execution = environment.establish().qpu_service_config["runtime_execution"]

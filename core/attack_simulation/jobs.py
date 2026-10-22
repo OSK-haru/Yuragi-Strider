@@ -205,6 +205,9 @@ class FifoJobScheduler:
 
     queue_policy_id = "on_demand_fifo_v1"
     cancellation_policy_id = "queued_only"
+    supported_placement_policies = frozenset({
+        "guaranteed_same_physical_qubit", "isolated_physical_resource", "tenant_dedicated_region",
+    })
 
     def __init__(self) -> None:
         self._lock = RLock()
@@ -555,6 +558,20 @@ class FifoJobScheduler:
     def get(self, job_id: str) -> JobRecord:
         return _snapshot(self._job(job_id))
 
+    @_synchronized
+    def completed_job_results_for_tenant(self, tenant_id: str) -> tuple[JobRecord, ...]:
+        """Public read model of successful completed jobs owned by one tenant.
+
+        Returns detached records in acceptance order; callers do not need access
+        to the scheduler's mutable job table.
+        """
+        tenant = _identifier(tenant_id, "tenant_id")
+        return tuple(
+            _snapshot(job) for job in sorted(self._jobs.values(), key=lambda item: item.acceptance_sequence)
+            if job.command.tenant_id == tenant and job.status is JobStatus.SUCCEEDED
+            and job.result is not None
+        )
+
     def _forget_terminal(self, job_id: str) -> None:
         """Trusted retention: drop a terminal record, keeping its idempotency key.
 
@@ -678,6 +695,40 @@ def _snapshot(job: _MutableJob) -> JobRecord:
         error_code=job.error_code,
         ingress_receipt=job.ingress_receipt,
     )
+
+
+_SCHEDULER_REGISTRY: dict[tuple[str, str], object] = {}
+
+
+def register_scheduler(queue_policy_id: str, cancellation_policy_id: str, factory) -> None:
+    """Register a scheduler implementation and the policy pair it fulfills."""
+    if (not isinstance(queue_policy_id, str) or not queue_policy_id.strip()
+            or not isinstance(cancellation_policy_id, str) or not cancellation_policy_id.strip()):
+        raise ValueError("scheduler policy IDs must be nonempty strings")
+    key = (queue_policy_id.strip(), cancellation_policy_id.strip())
+    if not callable(factory) or key in _SCHEDULER_REGISTRY:
+        raise ValueError("scheduler registration must be callable and unique")
+    scheduler = factory()
+    if (getattr(scheduler, "queue_policy_id", None) != key[0]
+            or getattr(scheduler, "cancellation_policy_id", None) != key[1]
+            or not isinstance(getattr(scheduler, "supported_placement_policies", None), (set, frozenset))):
+        raise TypeError("registered scheduler does not implement its declared policies")
+    _SCHEDULER_REGISTRY[key] = factory
+
+
+def scheduler_registered(queue_policy_id: str, cancellation_policy_id: str) -> bool:
+    return (queue_policy_id, cancellation_policy_id) in _SCHEDULER_REGISTRY
+
+
+def create_scheduler(queue_policy_id: str, cancellation_policy_id: str):
+    try:
+        return _SCHEDULER_REGISTRY[(queue_policy_id, cancellation_policy_id)]()
+    except KeyError:
+        raise ValueError("scheduler policy pair is not registered") from None
+
+
+register_scheduler(FifoJobScheduler.queue_policy_id, FifoJobScheduler.cancellation_policy_id,
+                   FifoJobScheduler)
 
 
 def _identifier(value: str, name: str) -> str:

@@ -7,7 +7,9 @@ from dataclasses import dataclass
 import math
 from types import MappingProxyType
 
-SUPPORTED_TWO_QUBIT_GATES = frozenset({"cz", "ecr"})
+from core.gate_specs import BACKEND_NATIVE_GATE_NAMES
+
+SUPPORTED_TWO_QUBIT_GATES = frozenset(name.lower() for name in BACKEND_NATIVE_GATE_NAMES)
 
 
 @dataclass(frozen=True)

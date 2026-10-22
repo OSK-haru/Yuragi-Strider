@@ -59,6 +59,43 @@
 - 1・2・5（API側）・frontendの項目はClaude側の製品層。着手時は未コミット差分（`attack_product_factory.py`ほか）との衝突に注意する。
 - 今決めること: 1・2の着手順序。試作で確かめること: 登録表の形（`live_context`の渡し方）。後回し可: 6の閉集合、低〜中の項目。
 
+## Foundation対応の判断（2026-10-21）
+
+以下はコードを再確認した上でのfoundation作業範囲。将来の第三backend・課題・役割を追加する際に共通契約を割らないことを基準にする。
+
+### 今決めること
+
+- 共通認可は登録された`ActorRole`ごとのgrants表を参照し、tenant数や役割名を認可機構の前提にしない。現行manifestのattacker/victim入力とその組はscenario adapterの足場として残す。
+- runtimeが受け取るresource bindingは`ResourceBinding`境界（roleから`PhysicalQubitRef`を解決）とし、Reset課題用bindingはscenario実装として分離する。bindingの有無をruntime種別の判定には使わず、runtime/scheduler capabilityを明示する。
+- 並行干渉は宣言項目の列（source region、destination region、strength、detuning、pulse shape）から構成し、2領域サンプルはscenario用データにする。
+- `DeviceInfo.gate_model`は既定語彙で埋めず、backend declaration由来の必須値とする。
+- scheduler適合性は実装型名・「initial」ラベルで拒否せず、登録済みscheduler profile/capabilityを使う。
+- schedulerにtenantで絞った完了jobの公開結果queryを設け、製品層はscheduler内部ストアを読まない。
+- Kingston固定のloader呼出しは既定snapshot入口またはdevice ID指定の汎用loaderへ寄せる。Kingston固有の期待値を検証するテスト自体はfixture名と期待内容を明示した上で残せる。
+
+### 試作で確かめること
+
+- `GateSpec`を唯一のゲート宣言として、supported gate一覧・arity/operand制約・既定時間・unitary実装の導出が現行ゲートを保てるか。検証文言や複合ゲート(CNOT/CCX/QFT/ORACLE)の展開は宣言だけに押し込まず、個別意味論の境界を測る。
+- circuit instruction kindを宣言・登録できる形にしつつ、現行compiler/runtimeが理解しない命令を明示的に拒否できるか。
+- backend declarationの二重表現と二量子ビットgate検査が`BackendDeclaration`へ集約できるか。非対応backendへの拒否は維持する。
+- concurrency declaration listの空・多領域・方向別の挙動を、現行2領域例と単純な第三領域で確認する。
+
+### 後回しにできること／明示する足場
+
+- 現在のscenario manifestがattacker/victim別設定を持つこと、interleaved victimが現行シナリオの主体・手順を表現することは、汎用core APIへ昇格させない範囲で足場として残す。
+- 新しい攻撃操作・任意のcircuit instructionを動的pluginとしてロードする仕組み、backend外部配布、較正形式の汎用化は今回の契約に含めない。
+- Kingston snapshotを基準にした物理係数・座標の数値的妥当性、第三backendの実機妥当性、第三scenarioでの評価品質は今回のコード試作では検証しない。
+- 対象外のreset model、persistent/multiprocess runtime、pulse shape catalogの全域は後続課題とする。これらを実装済み・検証済みとは扱わない。
+
+### Foundation実装の記録
+
+- `ActorRole`とgrants registry、`ResourceBinding`、`CrosstalkDeclaration`、scheduler registry、`GateSpec`をfoundation側に追加した。現行attacker/victim設定、2領域lane、APIのcrosstalk入力はadapter/足場として互換維持している。
+- `core/backend_boundary.py`は実行kernel選択（Python dense/Rust preview）、`BackendDeclaration`はhardware gate basis・directionality宣言で、責務が異なる二重宣言ではない。実行backend分岐はそれぞれ異なるfallback/診断契約を持つため今回統合しない。
+- `CIRCUIT_INSTRUCTION_KINDS`は命令語彙の宣言になったが、実行器が扱える命令追加にはruntimeの実装と試作確認が別途必要。
+- schedulerの公開queryは`completed_job_results_for_tenant(tenant_id)`。`api/attack_evaluators.py`の呼出側切替はClaude側の作業として残す。
+- Kingston固定loaderの利用箇所を既定snapshot入口またはdevice ID指定loaderへ移した。Kingstonの物理値・レイアウトを使う既存テストは基準fixtureとして残し、汎用snapshot loader自体も直接使う。
+- `concurrent_lanes.py`とruntimeの保管構造は現状2領域を要求する。第三regionの完全な実行は未対応で、scenario宣言形式の汎用化をその証拠と取り違えない。
+
 ## 未読範囲（判断保留）
 
 `jobs.py`本体、`qpu_state.py`本体、`request_receipts.py`、`virtual_credentials.py`、`credential_policy.py`、`live_*.py`、`world_event_frontier.py`、`event_commit_boundary.py`、`scenario_*.py`、`victim_workload.py`、`workload_config.py`、`pulse_shape.py`、`register_readout.py`、`api/attack_workloads.py`、`api/attack_sessions.py`、`api/attack_live_world.py`、`api/attack_world.py`、`attack_client/`、frontendのSimulatePage等、`validation_hardware/`、`packaging/`、`desktop_app.py`、testsの大半、baseline JSONの中身、Rust/cptp/ioの中身。

@@ -40,7 +40,9 @@ from core.attack_simulation.jobs import (
 from core.attack_simulation.resource_binding import PhysicalQubitLayout, PhysicalQubitRef
 from core.attack_simulation.shared_qpu_runtime import SharedQpuRuntime
 from core.attack_simulation.scenario_compiler import ResolvedScenarioManifest
-from core.attack_simulation.job_authorization import JobAuthorizationPolicy
+from core.attack_simulation.job_authorization import (
+    ATTACKER_ROLE, VICTIM_ROLE, JobAuthorizationPolicy,
+)
 
 
 @dataclass(frozen=True)
@@ -86,8 +88,8 @@ class DeviceInfo:
     max_instruction_executions: int
     queue_policy: str
     cancellation_policy: str
-    initialization_policy: str = "imperfect_reset_then_declared_preparation"
-    gate_model: str = "ideal_unitaries_with_reset_and_readout"
+    initialization_policy: str
+    gate_model: str
     max_local_qubits: int = 8
     max_execution_work: int = 536870912
     classical_bit_order: str = "c0_leftmost"
@@ -182,7 +184,7 @@ class JobApplicationService:
             if type(spec) is not InterleaveVictimSpec or spec.reference in victims:
                 raise ValueError("interleaved victim references must be unique specs")
             if (spec.principal_id not in indexed
-                    or policy.tenant_roles[indexed[spec.principal_id].tenant_id] != "victim"):
+                    or policy.tenant_roles[indexed[spec.principal_id].tenant_id] != VICTIM_ROLE):
                 raise ValueError("interleaved victim program must belong to the scenario victim")
             victims[spec.reference] = spec
         self._interleave_victims = MappingProxyType(victims)
@@ -251,7 +253,9 @@ class JobApplicationService:
         policy = self._runtime.job_authorization
         if policy is None:
             raise ValueError("job service authorization is missing")
-        by_role = {role: tenant for tenant, role in policy.tenant_roles.items()}
+        # SCAFFOLD: this consistency adapter still binds the current two-role
+        # manifest. JobAuthorizationPolicy itself accepts additional ActorRoles.
+        by_role = {role.role_id: tenant for tenant, role in policy.tenant_roles.items()}
         if set(by_role) != {"attacker", "victim"}:
             raise ValueError("unsupported actor tenant binding")
         expected_policy = JobAuthorizationPolicy.from_manifest(
@@ -307,7 +311,7 @@ class JobApplicationService:
         principal = self._principals.get(plan.actor_id)
         policy = self._runtime.job_authorization
         if (principal is None or policy is None
-                or policy.tenant_roles.get(principal.tenant_id) != role):
+                or policy.tenant_roles.get(principal.tenant_id).role_id != role):
             raise ValueError("workload actor does not match its declared role")
         if self._program_compiler is None:
             raise ValueError("workload service requires the common Program compiler")
@@ -323,7 +327,7 @@ class JobApplicationService:
             target = None
             if self._runtime.config.resource_binding is not None:
                 binding = self._runtime.config.resource_binding
-                target = binding.attacker if role == "attacker" else binding.victim
+                target = binding.resolve(ATTACKER_ROLE if role == "attacker" else VICTIM_ROLE)
                 ids = (target.physical_qubit_id,)
             operation = self._program_compiler.compile(
                 request, sampling_seed=0, physical_qubit_ids=tuple(ids),
@@ -362,6 +366,10 @@ class JobApplicationService:
                 if "prepare" not in compiler.supported_initializations
                 else "explicit_preparation_or_inherited_physical_register"
             ),
+            gate_model=(
+                "declared_native_calibrations" if compiler.two_qubit_gate_calibrations
+                or compiler.single_qubit_native_gates else "ideal_gate_fallback"
+            ),
         ),)
 
     def get_device(self, principal_id: str, device_id: str) -> DeviceInfo:
@@ -396,7 +404,7 @@ class JobApplicationService:
         binding = self._runtime.config.resource_binding
         if binding is not None:
             role = self._runtime.job_authorization.tenant_roles[principal.tenant_id]
-            target = binding.victim if role == "victim" else binding.attacker
+            target = binding.resolve(role)
             available = (target.physical_qubit_id,)
         if request.interleave is not None:
             self._authorize(principal_id, interleave_operation_id(request.interleave))
@@ -523,7 +531,7 @@ class JobApplicationService:
         target = None
         if binding is not None:
             role = self._runtime.job_authorization.tenant_roles[principal.tenant_id]
-            target = binding.victim if role == "victim" else binding.attacker
+            target = binding.resolve(role)
             available = (target.physical_qubit_id,)
         width = command.operation.logical_qubits
         if (width > len(available) or command.target != target
@@ -587,7 +595,7 @@ class JobApplicationService:
     ) -> JobStatusView:
         principal = self._authorize(principal_id, "program.submit")
         policy = self._runtime.job_authorization
-        if policy is None or policy.tenant_roles[principal.tenant_id] != "victim":
+        if policy is None or policy.tenant_roles[principal.tenant_id] != VICTIM_ROLE:
             raise PermissionError("scenario workload requires the victim actor")
         command = JobCommand(
             tenant_id=principal.tenant_id,
@@ -687,10 +695,11 @@ class JobApplicationService:
             if event.job_id != job.job_id:
                 continue
             if event.event_kind == "program_shot":
-                actor = roles.get(event.owner_after, "unknown")
+                actor = getattr(roles.get(event.owner_after), "role_id", "unknown")
                 step = {"actor": actor, "kind": "victim_run" if actor == "victim" else "attacker_measure"}
             elif event.event_kind == "service_reset":
-                step = {"actor": "service", "kind": "service_reset", "after": roles.get(event.owner_before)}
+                step = {"actor": "service", "kind": "service_reset",
+                        "after": getattr(roles.get(event.owner_before), "role_id", None)}
             elif event.event_kind == "declared_idle":
                 step = {"actor": "service", "kind": "idle"}
             else:

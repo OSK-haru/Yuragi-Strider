@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from api.attack_product_runtime import build_attack_simulator_runtime
 from api.attack_product_profiles import product_free_scenarios
 from api.attack_settings_resolver import ChallengeDefinition, ScenarioSettingsResolver
-from api.attack_device_snapshot import deterministic_connected_region, load_ibm_kingston_snapshot
+from api.attack_device_snapshot import deterministic_connected_region, default_device_snapshot
 from api.attack_web_ownership import WebOwnershipSettings
 from api.main import configure_attack_simulator
 from core.attack_simulation.scenario_policy import ScenarioMode, ScenarioPolicy, ScenarioPreset
@@ -49,7 +49,7 @@ class ProductRuntimeProfileTests(unittest.TestCase):
     def test_catalog_profiles_use_snapshot_region_and_keep_idle_modes_exclusive(self):
         runtime = build_attack_simulator_runtime(WebOwnershipSettings.local_development())
         catalog = runtime.resolver.catalog()
-        snapshot = load_ibm_kingston_snapshot()
+        snapshot = default_device_snapshot()
         modes = {item["id"]: item for item in catalog["free_mode"]["idle_noise_modes"]}
         self.assertTrue(modes["calibration_values"]["available"])
         self.assertTrue(modes["physical_parameters"]["available"])
@@ -284,7 +284,7 @@ class ProductRuntimeProfileTests(unittest.TestCase):
             http = DirectHttp(app)
             sockets = []
             environment_ids = []
-            snapshot = load_ibm_kingston_snapshot()
+            snapshot = default_device_snapshot()
             default_region = tuple(sorted(deterministic_connected_region(snapshot, 6)))
             selected_region = tuple(sorted(deterministic_connected_region(
                 snapshot, 6, excluded_qubit_ids=frozenset(default_region),

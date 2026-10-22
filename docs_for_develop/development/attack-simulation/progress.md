@@ -2,6 +2,31 @@
 
 設計の最終同期: 2026-10-08。実装の確認日: 2026-10-09。
 
+## Foundationの縦切り一般化（2026-10-21）
+
+[点検と判断記録](vertical-slice-generality-audit-2026-10-21.md#foundation対応の判断2026-10-21)に従い、コードを再確認して次を実装した。
+
+- 認可は`ActorRole` registryとrole grantsで引く。現在のattacker/victim組はmanifest adapterの足場として残る。
+- runtimeのresource binding型を`ResourceBinding` Protocolへ変更し、Reset bindingを`ResetScenarioResourceBinding`として分離。legacy名は既存scenario組立用aliasとして残す。
+- 並行漏洩は名前付きregion間の`CrosstalkDeclaration`列から物理辺へ展開できる。現行APIの2領域strength/direction入力はscenario adapter経由で維持する。
+- `DeviceInfo.gate_model`と`initialization_policy`のReset語彙既定値をなくし、compilerのprofileから組み立てる。
+- scheduler policy pairはregistryで解決し、tenant別成功job結果を返す公開query`completed_job_results_for_tenant`を追加した。Claude側評価器の差替えは別作業。
+- ゲートmetadataは`GateSpec`からsupported gate、duration、program gate、二量子backend候補を導出する。回路命令kindも語彙定数に集約した。複合gateの意味論・runtime実装は個別コードに残る。
+- `simulator.py`の密度・CPTP閾値はcapability名へ集約。`backend_boundary`（実行kernel選択）と`BackendDeclaration`（hardware gate basis）は責務が異なるため統合しない。
+- 実験scriptと一般product testsはKingston専用loader呼出しから既定snapshotまたはdevice ID指定loaderへ移行した。snapshot自体の基準値テストは維持。
+
+意図して残した足場は、attacker/victim manifest構造、2領域だけを保持する現在のconcurrent lane/state store、API由来の旧crosstalk入力、Reset向けObservationBudgetのtraining/victim上限である。宣言形式の導入は3領域同時実行や第三scenarioの統合検証を意味しない。公開job queryを`api/attack_evaluators.py`から使う変更も未実施。
+
+検証（`scripts/run_tests.py`各profile）:
+
+```text
+gate-aware: 112 tests, PASS
+pulse:       43 tests, PASS
+attack:     338 tests, PASS
+```
+
+これらは現行基準fixtureに対する自動テスト。第三backendの物理妥当性、第三scenarioの採点品質、任意の回路命令追加、3領域lane実行、永続化・複数process復旧は未検証。
+
 ## 設計整合の点検と修正（2026-10-20）
 
 対象は、現行設計の共通状態・時刻・主体境界と、それに接続する共通Program受付・観測予算・提出評価。

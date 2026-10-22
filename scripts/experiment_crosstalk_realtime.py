@@ -18,7 +18,7 @@ import json
 import time
 
 from api.attack_crosstalk_challenge import PRESET_ID, CrosstalkGroverSettings, crosstalk_grover_challenge
-from api.attack_device_snapshot import load_ibm_kingston_snapshot
+from api.attack_device_snapshot import default_device_snapshot
 from api.attack_product_factory import ProductAssemblyLimits, ProductEnvironmentFactory
 from api.attack_product_profiles import product_free_scenarios
 from api.attack_sessions import SessionHostLimits, WebOwnerContext
@@ -33,7 +33,7 @@ LIMITS = ProductAssemblyLimits(
     max_runtime_jobs=160, max_events_per_job=1100, max_unresolved_events=32,
     max_workload_pending=16, max_workload_history=64, retained_jobs=128,
 )
-SNAPSHOT = load_ibm_kingston_snapshot()
+SNAPSHOT = default_device_snapshot()
 
 
 def pulse_train(pulses: int) -> CircuitProgram:

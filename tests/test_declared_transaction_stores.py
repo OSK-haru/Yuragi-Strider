@@ -47,6 +47,22 @@ def _running(scheduler: FifoJobScheduler):
     return submitted.job_id
 
 
+class PublicSchedulerResultQueryTests(unittest.TestCase):
+    def test_tenant_query_returns_detached_successful_results_only(self):
+        scheduler = FifoJobScheduler()
+        first = _submitted(scheduler, "first")
+        second = scheduler.submit(JobCommand("attacker", VictimPrepareOperation(1), "second"))
+        scheduler.allocate_next()
+        scheduler.mark_running(first.job_id)
+        scheduler.mark_succeeded(first.job_id, {"counts": {"0": 3}})
+        self.assertEqual(scheduler.completed_job_results_for_tenant("attacker"), ())
+        records = scheduler.completed_job_results_for_tenant("victim")
+        self.assertEqual(tuple(record.job_id for record in records), (first.job_id,))
+        records[0].result["counts"]["0"] = 99
+        self.assertEqual(scheduler.get(first.job_id).result, {"counts": {"0": 3}})
+        self.assertEqual(scheduler.get(second.job_id).status, JobStatus.QUEUED)
+
+
 class TransactionBindingTests(unittest.TestCase):
     def test_common_rlock_binds_once_and_rejects_invalid_locks(self):
         shared = RLock()

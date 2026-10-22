@@ -24,10 +24,7 @@ class EvaluatorContext:
 
 def tenant_run_counts(runtime, tenant_id: str) -> tuple[Mapping[str, int], ...]:
     """A tenant's finished runs, in submission order (supervisor-side read of the live scheduler)."""
-    from core.attack_simulation.jobs import JobStatus
-    jobs = sorted((job for job in runtime.scheduler._jobs.values()
-                   if job.command.tenant_id == tenant_id and job.status is JobStatus.SUCCEEDED
-                   and job.result is not None), key=lambda job: job.acceptance_sequence)
+    jobs = runtime.scheduler.completed_job_results_for_tenant(tenant_id)
     return tuple(dict(job.result["counts"]) for job in jobs)
 
 

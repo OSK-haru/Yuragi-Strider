@@ -9,6 +9,7 @@ from math import pi, sqrt
 import numpy as np
 
 from core.capabilities import normalize_gate_type
+from core.gate_specs import GATE_SPECS
 from core.circuit_model import GateOperation
 from core.internal_profiling import active_internal_profile, elapsed_ms, timer_start
 
@@ -64,24 +65,8 @@ SIGMA_PLUS: Matrix = (
 )
 
 DEFAULT_GATE_DURATIONS_US = {
-    "I": 0.0,
-    "H": 0.02,
-    "X": 0.02,
-    "Y": 0.02,
-    "Z": 0.0,
-    "S": 0.0,
-    "T": 0.0,
-    "RX": 0.02,
-    "RY": 0.02,
-    "RZ": 0.02,
-    "CNOT": 0.20,
-    "CZ": 0.20,
-    "ECR": 0.20,
-    "SWAP": 0.20,
-    "CP": 0.20,
-    "CCX": 0.40,
-    "MEASURE": 0.0,
-    "MESSAGE": 0.04,
+    name: spec.duration_us for name, spec in GATE_SPECS.items()
+    if spec.duration_us is not None
 }
 # QFT and ORACLE span a variable number of qubits, so their logical durations are
 # declared per spanned qubit instead of as single entries in the table above.

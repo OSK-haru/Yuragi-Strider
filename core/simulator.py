@@ -24,6 +24,8 @@ from core.capabilities import (
     GATE_AWARE_HAMILTONIAN_LINDBLAD_MODEL,
     GATE_AWARE_SPLIT_STEP_MODEL,
     MAX_DENSITY_MATRIX_QUBITS,
+    MAX_CPTP_CHOI_AUDIT_QUBITS,
+    MAX_EXPLICIT_CPTP_NOISY_QUBITS,
     POST_CIRCUIT_DEGRADATION_MODEL,
 )
 from core.complexity import complexity_diagnostics
@@ -437,7 +439,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     main_method_fallback = None
     if (
         config.evolution_method == EXPLICIT_CPTP
-        and config.circuit.logical_qubits > 4
+        and config.circuit.logical_qubits > MAX_CPTP_CHOI_AUDIT_QUBITS
         and _has_classical_conditions(config)
         and representation != "statevector"
     ):
@@ -462,7 +464,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     result.diagnostics.update(
         representation_diagnostics(representation, config.circuit.logical_qubits)
     )
-    if representation == "density_matrix" and config.circuit.logical_qubits > 5:
+    if representation == "density_matrix" and config.circuit.logical_qubits > MAX_EXPLICIT_CPTP_NOISY_QUBITS:
         result.diagnostics["large_density_matrix_execution"] = True
     if representation == "statevector":
         try:
@@ -506,7 +508,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             branch_method_fallback = None
             if (
                 config.evolution_method == EXPLICIT_CPTP
-                and config.circuit.logical_qubits > 4
+                and config.circuit.logical_qubits > MAX_CPTP_CHOI_AUDIT_QUBITS
             ):
                 branch_evolution_method = FIXED_STEP_RK4
                 branch_method_fallback = (
@@ -561,7 +563,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     diagnostic_issues = diagnose_simulation_result(result)
     result.issues = diagnostic_issues
     result.warnings = _issue_warnings(diagnostic_issues)
-    if representation == "density_matrix" and config.circuit.logical_qubits > 5:
+    if representation == "density_matrix" and config.circuit.logical_qubits > MAX_EXPLICIT_CPTP_NOISY_QUBITS:
         result.warnings.append(
             "6-8 qubit noisy simulation uses the exact dense density-matrix path; "
             "runtime and response size grow exponentially. Start with fixed-step "
@@ -1025,7 +1027,7 @@ def _runtime_issues(config: SimulationConfig) -> list[ValidationIssue]:
             ),
         ))
     if (
-        config.circuit.logical_qubits > 5
+        config.circuit.logical_qubits > MAX_EXPLICIT_CPTP_NOISY_QUBITS
         and config.evolution_method == EXPLICIT_CPTP
         and not _environment_is_ideal(config)
     ):

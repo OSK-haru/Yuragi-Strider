@@ -6,6 +6,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from core.capabilities import SUPPORTED_GATES, normalize_gate_type
+from core.gate_specs import GATE_SPECS
 from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.errors import ValidationIssue
 
@@ -95,7 +96,9 @@ def validate_gate_for_circuit(
             f"Received targets={gate.targets!r}.",
             "Choose a target qubit for the gate.",
         ))
-    elif gate_type in {"I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ", "MEASURE", "MESSAGE"} and len(gate.targets) != 1:
+    elif (GATE_SPECS[gate_type].min_targets == GATE_SPECS[gate_type].max_targets == 1
+          and GATE_SPECS[gate_type].min_controls == GATE_SPECS[gate_type].max_controls == 0
+          and len(gate.targets) != 1):
         issues.append(_error(
             "GATE_REQUIRES_SINGLE_TARGET",
             f"{gate.type} requires exactly one target qubit.",

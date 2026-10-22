@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Protocol
 
+from core.attack_simulation.job_authorization import ActorRole, ATTACKER_ROLE, VICTIM_ROLE
 from core.attack_simulation.placement import PlacementPolicy
 from core.attack_simulation.scenario_compiler import ResolvedScenarioManifest
 
@@ -38,17 +40,42 @@ class PhysicalQubitLayout:
         object.__setattr__(self, "physical_qubit_ids", qubits)
 
 
+class ResourceBinding(Protocol):
+    """Foundation contract mapping any registered actor role to a physical resource."""
+
+    def resolve(self, role: ActorRole) -> PhysicalQubitRef: ...
+
+    def to_manifest_config(self) -> Mapping[str, object]: ...
+
+
 @dataclass(frozen=True)
-class ResetResourceBinding:
+class ResetScenarioResourceBinding:
+    """Reset-slice scaffold: binds the two roles used by the current scenario."""
+
     victim: PhysicalQubitRef
     attacker: PhysicalQubitRef
+
+    def resolve(self, role: ActorRole) -> PhysicalQubitRef:
+        if role == VICTIM_ROLE:
+            return self.victim
+        if role == ATTACKER_ROLE:
+            return self.attacker
+        raise KeyError(f"the Reset scenario has no resource for actor role {role.role_id!r}")
+
+    def to_manifest_config(self) -> Mapping[str, object]:
+        return {
+            VICTIM_ROLE.role_id: {"qpu_id": self.victim.qpu_id,
+                                  "physical_qubit_id": self.victim.physical_qubit_id},
+            ATTACKER_ROLE.role_id: {"qpu_id": self.attacker.qpu_id,
+                                    "physical_qubit_id": self.attacker.physical_qubit_id},
+        }
 
     @classmethod
     def from_manifest(
         cls,
         manifest: ResolvedScenarioManifest,
         placement: PlacementPolicy,
-    ) -> "ResetResourceBinding":
+    ) -> "ResetScenarioResourceBinding":
         raw = manifest.relation_config.get("resource_binding")
         if not isinstance(raw, Mapping):
             raise ValueError("relation_config.resource_binding must be configured")
@@ -82,6 +109,11 @@ class ResetResourceBinding:
         if placement is PlacementPolicy.ISOLATED_PHYSICAL_RESOURCE and same:
             raise ValueError("isolated placement requires distinct physical qubit IDs")
         return binding
+
+
+# Compatibility name for already assembled runtime profiles; new scenario code
+# should name the scaffold explicitly.
+ResetResourceBinding = ResetScenarioResourceBinding
 
 
 def reset_resource_binding_config(

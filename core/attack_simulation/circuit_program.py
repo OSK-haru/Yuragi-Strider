@@ -18,13 +18,14 @@ from core.circuit_model import CircuitConfig, GateOperation
 from core.attack_simulation.native_pulses import NativeStep, UnsupportedNativeSequence, solve_native_steps
 from core.attack_simulation.backend_declaration import BackendDeclaration, KINGSTON_BACKEND
 from core.gates import Matrix, gate_duration_us, gate_unitary
+from core.gate_specs import PROGRAM_GATE_NAMES
 
 if TYPE_CHECKING:
     from core.attack_simulation.scenario_compiler import ResolvedScenarioManifest
 
 
-NATIVE_GATES = ("I", "H", "X", "Y", "Z", "S", "T", "RX", "RY", "RZ",
-                "CNOT", "CZ", "ECR", "CP", "CCX", "SWAP", "QFT", "ORACLE", "MEASURE")
+NATIVE_GATES = PROGRAM_GATE_NAMES
+CIRCUIT_INSTRUCTION_KINDS = frozenset({"initialize", "reset", "unitary", "measure", "delay"})
 
 
 MAX_DELAY_US = 10_000.0
@@ -58,7 +59,7 @@ class CircuitInstruction:
     natives: tuple[NativeStep, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.kind not in {"initialize", "reset", "unitary", "measure", "delay"}:
+        if self.kind not in CIRCUIT_INSTRUCTION_KINDS:
             raise ValueError("unknown circuit instruction")
         if not math.isfinite(self.duration_us) or self.duration_us < 0:
             raise ValueError("invalid instruction duration")

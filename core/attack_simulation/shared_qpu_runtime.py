@@ -9,7 +9,7 @@ import math
 import random
 from typing import Callable
 from core.attack_simulation.concurrency_policy import (
-    CONCURRENCY_POLICIES, CROSSTALK_DIRECTIONS, OVERLAP_DISJOINT_REGIONS,
+    CONCURRENCY_POLICIES, CROSSTALK_DIRECTIONS, OVERLAP_DISJOINT_REGIONS, CrosstalkDeclaration,
 )
 import numpy as np
 
@@ -19,6 +19,8 @@ from core.attack_simulation.jobs import (
     JobCommand,
     JobRecord,
     VictimPrepareOperation,
+    create_scheduler,
+    scheduler_registered,
 )
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.interleaved_execution import derived_seed, interleaved_work
@@ -26,14 +28,16 @@ from core.attack_simulation.kick_application import EMPTY_PLAN, KickPlan, Placed
 from core.attack_simulation.program_request import STATE_INHERIT_OPERATION_ID, interleave_operation_id
 from core.attack_simulation.register_readout import register_assignment_errors
 from core.attack_simulation.request_receipts import RequestReceipt
-from core.attack_simulation.job_authorization import JobAuthorizationPolicy
+from core.attack_simulation.job_authorization import (
+    ATTACKER_ROLE, VICTIM_ROLE, JobAuthorizationPolicy,
+)
 from core.attack_simulation.qpu_state import (
     MAX_DENSE_LOCAL_QUBITS,
     QpuStateStore,
     QpuStateTransition,
 )
 from core.attack_simulation.placement import PlacementPolicy
-from core.attack_simulation.resource_binding import ResetResourceBinding
+from core.attack_simulation.resource_binding import ResourceBinding
 from core.experimental_isolation_physics.reset_model import (
     ResetModelMode,
     ResetModelResult,
@@ -50,7 +54,7 @@ from core.register_operations import (
 
 @dataclass(frozen=True)
 class SharedQpuRuntimeConfig:
-    """Versioned service behavior for the initial single-QPU runtime."""
+    """Versioned service behavior for the shared-QPU execution runtime."""
 
     reset_model_id: str
     reset_model_configuration_id: str
@@ -66,7 +70,7 @@ class SharedQpuRuntimeConfig:
         PlacementPolicy.GUARANTEED_SAME_PHYSICAL_QUBIT
     )
     isolated_assignment_duration_us: float = 0.0
-    resource_binding: ResetResourceBinding | None = None
+    resource_binding: ResourceBinding | None = None
     program_measurement_duration_us: float = 1.0
     # Declared wait between consecutive shots of one Program; 0 means no gap.
     repetition_delay_us: float = 0.0
@@ -78,6 +82,9 @@ class SharedQpuRuntimeConfig:
     # two dedicated regions run side by side, coupled only by the declared drive crosstalk: one strength
     # for every coupling edge that joins the regions, in the chosen direction(s).
     concurrency_policy: str = "exclusive_fifo"
+    crosstalk_declarations: tuple[CrosstalkDeclaration, ...] = ()
+    # Compatibility fields for the current product scenario adapter. New scenarios
+    # should declare directed region transfers in crosstalk_declarations.
     drive_crosstalk_strength: float = 0.0
     drive_crosstalk_direction: str = "both"
     max_local_qubits: int = 8
@@ -86,7 +93,7 @@ class SharedQpuRuntimeConfig:
     def to_manifest_config(self) -> dict[str, object]:
         """Return every behavior-changing runtime value for pre-start freezing."""
         binding = self.resource_binding
-        return {
+        config = {
             "schema_version": "shared_qpu_runtime_v3",
             "reset_model_id": self.reset_model_id,
             "reset_model_configuration_id": self.reset_model_configuration_id,
@@ -106,15 +113,17 @@ class SharedQpuRuntimeConfig:
             "concurrency_policy": self.concurrency_policy,
             "drive_crosstalk_strength": self.drive_crosstalk_strength,
             "drive_crosstalk_direction": self.drive_crosstalk_direction,
-            "resource_binding": None if binding is None else {
-                "victim": {"qpu_id": binding.victim.qpu_id,
-                           "physical_qubit_id": binding.victim.physical_qubit_id},
-                "attacker": {"qpu_id": binding.attacker.qpu_id,
-                             "physical_qubit_id": binding.attacker.physical_qubit_id},
-            },
+            "resource_binding": None if binding is None else dict(binding.to_manifest_config()),
             "max_local_qubits": self.max_local_qubits,
             "max_execution_work": self.max_execution_work,
         }
+        if self.crosstalk_declarations:
+            config["crosstalk_declarations"] = [
+                {"src_region": item.src_region, "dst_region": item.dst_region,
+                 "strength": item.strength, "detuning_rad_per_us": item.detuning_rad_per_us}
+                for item in self.crosstalk_declarations
+            ]
+        return config
 
     def __post_init__(self) -> None:
         if type(self.max_local_qubits) is not int or not 1 <= self.max_local_qubits <= MAX_DENSE_LOCAL_QUBITS:
@@ -158,13 +167,18 @@ class SharedQpuRuntimeConfig:
             if isinstance(self.placement_policy, PlacementPolicy)
             else PlacementPolicy(self.placement_policy)
         )
-        if placement is PlacementPolicy.SCHEDULER_DEPENDENT:
-            raise ValueError(
-                "the initial runtime does not support scheduler-dependent placement"
-            )
+        if not scheduler_registered(self.queue_policy_id, self.cancellation_policy_id):
+            raise ValueError("scheduler policy pair is not registered")
+        scheduler_factory = create_scheduler(self.queue_policy_id, self.cancellation_policy_id)
+        if placement.value not in scheduler_factory.supported_placement_policies:
+            raise ValueError("registered scheduler does not support the selected placement policy")
         object.__setattr__(self, "placement_policy", placement)
         if self.concurrency_policy not in CONCURRENCY_POLICIES:
             raise ValueError("unknown concurrency policy")
+        declarations = tuple(self.crosstalk_declarations)
+        if any(type(item) is not CrosstalkDeclaration for item in declarations):
+            raise TypeError("crosstalk_declarations must contain declared transfer specs")
+        object.__setattr__(self, "crosstalk_declarations", declarations)
         if self.drive_crosstalk_direction not in CROSSTALK_DIRECTIONS:
             raise ValueError("unknown drive-crosstalk direction")
         strength = float(self.drive_crosstalk_strength)
@@ -175,17 +189,8 @@ class SharedQpuRuntimeConfig:
                 and placement is not PlacementPolicy.TENANT_DEDICATED_REGION):
             raise ValueError("overlapping jobs need tenant-dedicated regions")
         if self.resource_binding is not None:
-            if not isinstance(self.resource_binding, ResetResourceBinding):
-                raise TypeError("resource_binding must be a ResetResourceBinding")
-            same = self.resource_binding.victim == self.resource_binding.attacker
-            if placement is PlacementPolicy.GUARANTEED_SAME_PHYSICAL_QUBIT and not same:
-                raise ValueError("same-qubit placement requires identical resource IDs")
-            if placement is PlacementPolicy.ISOLATED_PHYSICAL_RESOURCE and same:
-                raise ValueError("isolated placement requires distinct physical qubit IDs")
-        if self.queue_policy_id != FifoJobScheduler.queue_policy_id:
-            raise ValueError("the initial runtime only supports on_demand_fifo_v1")
-        if self.cancellation_policy_id != FifoJobScheduler.cancellation_policy_id:
-            raise ValueError("the initial runtime only supports queued_only cancellation")
+            if not callable(getattr(self.resource_binding, "resolve", None)):
+                raise TypeError("resource_binding must implement ResourceBinding.resolve")
 
 
 class SharedQpuRuntime:
@@ -220,6 +225,8 @@ class SharedQpuRuntime:
             raise ValueError("fixed retained region does not support isolated resource reassignment")
         dedicated = config.placement_policy is PlacementPolicy.TENANT_DEDICATED_REGION
         if dedicated:
+            # SCAFFOLD: QpuStateStore currently represents one active and one
+            # parked region. The policy declaration layer supports N named regions.
             regions = {tuple(ids) for ids in (tenant_regions or {}).values()}
             bindings = {binding.physical_qubit_ids for binding in state_store.regional_bindings}
             if (len(regions) != 2 or regions != bindings or state_store.inactive_region() is None
@@ -243,12 +250,16 @@ class SharedQpuRuntime:
         if config.repetition_delay_us > 0.0 and not dedicated and idle_model is None:
             raise ValueError("a positive repetition delay requires an explicit complete idle model")
         if config.resource_binding is not None:
-            binding = config.resource_binding
-            if binding.victim.qpu_id != binding.attacker.qpu_id:
-                raise ValueError("the initial runtime supports only one QPU")
-            if (snapshot.qpu_id != binding.victim.qpu_id
-                    or snapshot.physical_qubit_ids != (binding.victim.physical_qubit_id,)):
-                raise ValueError("initial QPU state does not match the victim resource binding")
+            if not callable(getattr(config.resource_binding, "to_manifest_config", None)):
+                raise TypeError("resource_binding must implement manifest serialization")
+            bound = tuple(config.resource_binding.to_manifest_config().values())
+            refs = tuple((str(item["qpu_id"]), int(item["physical_qubit_id"]))
+                         for item in bound if isinstance(item, Mapping))
+            if any(qpu_id != snapshot.qpu_id for qpu_id, _ in refs):
+                raise ValueError("resource binding QPU ID does not match runtime state")
+            if (len(snapshot.physical_qubit_ids) == 1 and refs
+                    and snapshot.physical_qubit_ids[0] not in {qubit_id for _, qubit_id in refs}):
+                raise ValueError("initial QPU state does not match its resource binding")
         self.state_store = state_store
         self.reset_models = reset_models
         self.config = config
@@ -257,7 +268,12 @@ class SharedQpuRuntime:
         self.regional_idle_models = dict(regional_idle_models or {})
         self.regional_service_durations = dict(regional_service_durations or {})
         self.idle_model = idle_model
-        self.scheduler = scheduler or FifoJobScheduler()
+        self.scheduler = scheduler or create_scheduler(
+            config.queue_policy_id, config.cancellation_policy_id,
+        )
+        if (self.scheduler.queue_policy_id, self.scheduler.cancellation_policy_id) != (
+                config.queue_policy_id, config.cancellation_policy_id):
+            raise ValueError("scheduler instance does not match the registered runtime profile")
         reset_model = self.reset_models.get(config.reset_model_id)
         if reset_model.configuration_id != config.reset_model_configuration_id:
             raise ValueError(
@@ -724,7 +740,7 @@ class SharedQpuRuntime:
                 if self._job_authorization is None:
                     raise PermissionError("job authorization is not configured")
                 role = self._job_authorization.tenant_roles[command.tenant_id]
-                expected = binding.victim if role == "victim" else binding.attacker
+                expected = binding.resolve(role)
                 if layout.physical_qubit_ids != (expected.physical_qubit_id,):
                     raise ValueError("program layout does not match the scenario binding")
             if any(item.kind == "delay" and item.wait_us > 0.0 for item in command.operation.instructions):
@@ -757,9 +773,9 @@ class SharedQpuRuntime:
         if binding is None:
             return
         if isinstance(command.operation, VictimPrepareOperation):
-            expected = binding.victim
+            expected = binding.resolve(VICTIM_ROLE)
         elif isinstance(command.operation, AttackerMeasureOperation):
-            expected = binding.attacker
+            expected = binding.resolve(ATTACKER_ROLE)
         else:
             raise TypeError("unsupported job operation")
         if command.target != expected:
@@ -776,7 +792,8 @@ class SharedQpuRuntime:
         if self.config.repetition_delay_us > 0.0:
             raise ValueError("interleaved runs do not define a repetition delay")
         roles = self._job_authorization.tenant_roles if self._job_authorization else {}
-        if roles.get(victim.tenant_id) != "victim" or roles.get(command.tenant_id) != "attacker":
+        from core.attack_simulation.job_authorization import ATTACKER_ROLE, VICTIM_ROLE
+        if roles.get(victim.tenant_id) != VICTIM_ROLE or roles.get(command.tenant_id) != ATTACKER_ROLE:
             raise PermissionError("interleaving pairs the scenario victim with the requesting attacker")
         if self._declared_event_limit is not None:
             # Worst case adds the entry handover reset and one idle-gap event.

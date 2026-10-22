@@ -11,8 +11,10 @@ import unittest
 import numpy as np
 
 from api.attack_device_snapshot import (
-    SNAPSHOT_DIRECTORY, deterministic_connected_region, load_ibm_kingston_snapshot,
+    SNAPSHOT_DIRECTORY, deterministic_connected_region, default_device_snapshot,
+    load_device_snapshot,
 )
+from core.attack_simulation.backend_declaration import KINGSTON_BACKEND
 from api.attack_product_profiles import product_free_scenarios, standard_snapshot_initial_values
 from api.attack_product_factory import IDLE_INPUT_CALIBRATION, IDLE_INPUT_PHYSICAL
 from core.attack_simulation.circuit_program import LocalCircuitCompiler
@@ -29,7 +31,7 @@ class DeviceSnapshotTests(unittest.TestCase):
             props = target / "props_kingston.json"
             props.write_bytes(props.read_bytes() + b" ")
             with self.assertRaisesRegex(ValueError, "digest mismatch"):
-                load_ibm_kingston_snapshot(target)
+                load_device_snapshot(target, device_id="ibm_kingston", backend_declaration=KINGSTON_BACKEND)
 
     def test_source_manifest_accepts_crlf_line_endings(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -38,12 +40,12 @@ class DeviceSnapshotTests(unittest.TestCase):
                 shutil.copyfile(SNAPSHOT_DIRECTORY / name, target / name)
             source = target / "SOURCE.md"
             source.write_bytes(source.read_bytes().replace(b"\n", b"\r\n"))
-            snapshot = load_ibm_kingston_snapshot(target)
+            snapshot = load_device_snapshot(target, device_id="ibm_kingston", backend_declaration=KINGSTON_BACKEND)
         self.assertEqual(snapshot.n_qubits, 156)
         self.assertEqual(len(snapshot.undirected_coupling_edges), 176)
 
     def test_snapshot_counts_per_qubit_values_and_excluded_inventory(self):
-        snapshot = load_ibm_kingston_snapshot()
+        snapshot = default_device_snapshot()
         self.assertEqual(snapshot.n_qubits, 156)
         self.assertEqual(len(snapshot.directed_coupling_map), 352)
         self.assertEqual(len(snapshot.undirected_coupling_edges), 176)
@@ -108,7 +110,7 @@ class DeviceSnapshotTests(unittest.TestCase):
         self.assertNotIn("2026-08-03", json.dumps(inventory))
 
     def test_disjoint_connected_six_qubit_regions_use_eligible_snapshot_qubits(self):
-        snapshot = load_ibm_kingston_snapshot()
+        snapshot = default_device_snapshot()
         first = deterministic_connected_region(snapshot, 6)
         second = deterministic_connected_region(
             snapshot, 6, excluded_qubit_ids=frozenset(first),
@@ -131,7 +133,7 @@ class DeviceSnapshotTests(unittest.TestCase):
         self.assertEqual(reachable, set(second))
 
     def test_compiled_cz_uses_selected_snapshot_edge_duration_and_error(self):
-        snapshot = load_ibm_kingston_snapshot()
+        snapshot = default_device_snapshot()
         region = deterministic_connected_region(snapshot, 6)
         pair = tuple(sorted(region[:2]))
         expected = snapshot.cz_calibrations[pair]
@@ -176,7 +178,7 @@ class DeviceSnapshotTests(unittest.TestCase):
         self.assertEqual(sum(item.kind == "unitary" for item in cnot_operation.instructions), 3)
 
     def test_snapshot_cz_gate_error_matches_average_infidelity_after_d4_conversion(self):
-        snapshot = load_ibm_kingston_snapshot()
+        snapshot = default_device_snapshot()
         region = deterministic_connected_region(snapshot, 6)
         pair = tuple(sorted(region[:2]))
         gate_error = snapshot.cz_calibrations[pair].error

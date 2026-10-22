@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from api.attack_device_snapshot import SNAPSHOT_DIRECTORY, load_device_snapshot, load_ibm_kingston_snapshot
+from api.attack_device_snapshot import SNAPSHOT_DIRECTORY, load_device_snapshot, default_device_snapshot
 from api.attack_product_factory import IDLE_INPUT_CALIBRATION, IDLE_INPUT_PHYSICAL, ProductEnvironmentFactory
 from api.attack_product_profiles import product_free_scenarios
 from api.attack_sessions import WebOwnerContext
@@ -113,7 +113,7 @@ def synthetic_snapshot(directory, *, device_id, declaration, single_gate_rename=
 class SingleQubitCalibrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.snapshot = load_ibm_kingston_snapshot()
+        cls.snapshot = default_device_snapshot()
 
     def test_loader_preserves_each_qubit_native_values_and_units(self):
         source = json.loads((SNAPSHOT_DIRECTORY / "props_kingston.json").read_text(encoding="utf-8"))

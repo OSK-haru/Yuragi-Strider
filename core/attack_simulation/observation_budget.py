@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
+from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from types import MappingProxyType
 from threading import Lock
 
 from core.attack_simulation.scenario_policy import ObservationBudget
 
 
-class ObservationQueryKind(str, Enum):
+class ObservationQueryKind:
+    """Current scenario query labels; the ledger accepts registered labels as strings."""
+
     TRAINING = "training"
     VICTIM = "victim"
 
@@ -43,10 +46,21 @@ class ObservationBudgetLedger:
     caller cannot bypass limits by repeatedly inducing partial failures.
     """
 
-    def __init__(self, budget: ObservationBudget) -> None:
+    def __init__(self, budget: ObservationBudget,
+                 query_kind_counters: Mapping[str, str] | None = None) -> None:
         if not isinstance(budget, ObservationBudget):
             raise TypeError("paired-query accounting requires an explicit observation budget")
         self.budget = budget
+        bindings = query_kind_counters or {
+            ObservationQueryKind.TRAINING: "training_queries",
+            ObservationQueryKind.VICTIM: "victim_observations",
+        }
+        allowed_counters = {"training_queries", "victim_observations"}
+        if (not bindings or any(not isinstance(kind, str) or not kind.strip()
+                                or counter not in allowed_counters
+                                for kind, counter in bindings.items())):
+            raise ValueError("query kinds must map to a declared observation counter")
+        self.query_kind_counters = MappingProxyType(dict(bindings))
         self._usage = ObservationBudgetUsage()
         self._lock = Lock()
 
@@ -57,31 +71,28 @@ class ObservationBudgetLedger:
     def reserve(
         self,
         *,
-        kind: ObservationQueryKind | str,
+        kind: str,
         shots: int,
         retry: bool = False,
     ) -> ObservationBudgetUsage:
-        selected = (
-            kind
-            if isinstance(kind, ObservationQueryKind)
-            else ObservationQueryKind(kind)
-        )
+        try:
+            counter = self.query_kind_counters[kind]
+        except (KeyError, TypeError):
+            raise ValueError("observation query kind is not registered") from None
         requested_shots = int(shots)
         with self._lock:
             current = self._usage
-            if retry and not self._has_original_query(current, selected):
+            if retry and not self._has_original_query(current, counter):
                 raise ObservationBudgetExceeded(
                     "a retry requires an existing query of the same kind"
                 )
-            next_usage = ObservationBudgetUsage(
-                training_queries=current.training_queries + int(
-                    not retry and selected is ObservationQueryKind.TRAINING
-                ),
-                victim_observations=current.victim_observations + int(
-                    not retry and selected is ObservationQueryKind.VICTIM
-                ),
-                retries=current.retries + int(retry),
-                consumed_shots=current.consumed_shots + requested_shots,
+            next_usage = replace(
+                current,
+                **{
+                    counter: getattr(current, counter) + int(not retry),
+                    "retries": current.retries + int(retry),
+                    "consumed_shots": current.consumed_shots + requested_shots,
+                },
             )
             try:
                 self.budget.require_within(
@@ -98,8 +109,6 @@ class ObservationBudgetLedger:
     @staticmethod
     def _has_original_query(
         usage: ObservationBudgetUsage,
-        kind: ObservationQueryKind,
+        counter: str,
     ) -> bool:
-        if kind is ObservationQueryKind.TRAINING:
-            return usage.training_queries > 0
-        return usage.victim_observations > 0
+        return getattr(usage, counter) > 0

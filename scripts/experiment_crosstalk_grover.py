@@ -16,7 +16,7 @@ import json
 import math
 import time
 
-from api.attack_device_snapshot import load_ibm_kingston_snapshot
+from api.attack_device_snapshot import default_device_snapshot
 from api.attack_product_factory import (
     ProductAssemblyLimits, _parse_frozen_inputs, build_service_stack, concurrent_regions_for,
 )
@@ -50,7 +50,7 @@ def pulse_train(pulses: int) -> dict:
 
 def run(strength: float, attack: bool, *, victim_shots: int, pulses: int, attacker_shots: int,
         attacker_jobs: int, direction: str = "both", victim_jobs: int = 1) -> dict[str, float]:
-    resolver = ScenarioSettingsResolver(free_scenarios=product_free_scenarios(load_ibm_kingston_snapshot()))
+    resolver = ScenarioSettingsResolver(free_scenarios=product_free_scenarios(default_device_snapshot()))
     settings = {PREFIX + "placement_policy": "tenant_dedicated_region",
                 PREFIX + "concurrency_policy": "overlap_disjoint_regions",
                 PREFIX + "drive_crosstalk_strength": strength, PREFIX + "drive_crosstalk_direction": direction}

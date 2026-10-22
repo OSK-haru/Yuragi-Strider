@@ -11,7 +11,7 @@ from api.attack_live_websocket import (
     PausedWorldWebSocketRegistry, create_live_attack_websocket_router,
 )
 from api.attack_product_factory import ProductEnvironmentFactory
-from api.attack_device_snapshot import load_ibm_kingston_snapshot
+from api.attack_device_snapshot import default_device_snapshot
 from api.attack_product_profiles import product_free_scenarios, standard_snapshot_initial_values
 from api.attack_settings_resolver import (
     ChallengeDefinition, FreeScenarioDefinition, ScenarioSettingsResolver, SettingField,
@@ -159,7 +159,7 @@ class SettingsResolverTests(unittest.TestCase):
             self.resolver.resolve(json.dumps(payload).encode())
 
     def test_product_resolver_freezes_selected_connected_region_and_qubit_noise(self):
-        snapshot = load_ibm_kingston_snapshot()
+        snapshot = default_device_snapshot()
         resolver = ScenarioSettingsResolver(free_scenarios=product_free_scenarios(snapshot),
                                             standard_initial_values=standard_snapshot_initial_values(snapshot))
         catalog = resolver.catalog()
@@ -195,7 +195,7 @@ class SettingsResolverTests(unittest.TestCase):
             product.close()
 
     def test_product_resolver_rejects_invalid_regions_and_applies_dedicated_qubit_noise(self):
-        snapshot = load_ibm_kingston_snapshot()
+        snapshot = default_device_snapshot()
         resolver = ScenarioSettingsResolver(free_scenarios=product_free_scenarios(snapshot),
                                             standard_initial_values=standard_snapshot_initial_values(snapshot))
         catalog = resolver.catalog()
