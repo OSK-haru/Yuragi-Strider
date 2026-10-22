@@ -1,6 +1,8 @@
 {
   "circuit": {
     "qubit_count": 2,
+    "classical_bit_count": 0,
+    "annotations": [],
     "columns": [
       {
         "id": "step-0",
@@ -13,7 +15,10 @@
             "qubits": [
               0
             ],
-            "kind": "single"
+            "kind": "single",
+            "classical_targets": [],
+            "condition": null,
+            "conditions": []
           }
         ]
       },
@@ -28,7 +33,10 @@
             "qubits": [
               0
             ],
-            "kind": "control"
+            "kind": "control",
+            "classical_targets": [],
+            "condition": null,
+            "conditions": []
           },
           {
             "label": "CNOT",
@@ -36,7 +44,10 @@
             "qubits": [
               1
             ],
-            "kind": "target"
+            "kind": "target",
+            "classical_targets": [],
+            "condition": null,
+            "conditions": []
           }
         ]
       }
@@ -56,24 +67,102 @@
     "fidelity_threshold": 0.9,
     "simulation_backend": "python_dense"
   },
+  "rates": {
+    "gamma0_per_us": 0.010471285480508996,
+    "gamma_down_per_us": 0.010471285495936114,
+    "gamma_up_per_us": 1.5427118443425314e-11,
+    "gamma_population_relaxation_per_us": 0.010471285511363232,
+    "gamma_phi_per_us": 0.015471285480508995,
+    "t1_base_us": 95.49925860214358,
+    "t1_effective_us": 95.49925832074962,
+    "tphi_base_us": 95.49925860214358,
+    "t2_effective_us": 48.293015197311895,
+    "gamma1_per_us": 0.010471285495936114,
+    "gamma1_per_us_deprecation": "Legacy alias for gamma_down_per_us; it is not the population relaxation rate.",
+    "per_qubit": [
+      {
+        "qubit": 0.0,
+        "environment_model": "generic_superconducting_open_system_v1",
+        "input_mode": "normalized",
+        "n_th": 1.4732783737145731e-09,
+        "gamma0_per_us": 0.010471285480508996,
+        "t1_base_us": 95.49925860214358,
+        "t1_zero_temperature_us": 95.49925860214358,
+        "tphi_base_us": 95.49925860214358,
+        "gamma_down_per_us": 0.010471285495936114,
+        "gamma_up_per_us": 1.5427118443425314e-11,
+        "gamma_population_relaxation_per_us": 0.010471285511363232,
+        "gamma_phi_per_us": 0.015471285480508995,
+        "gamma_phi_total_per_us": 0.015471285480508995,
+        "gamma_phi_base_per_us": 0.010471285480508996,
+        "gamma_phi_flux_per_us": 0.005,
+        "tphi_effective_us": 64.63587019060685,
+        "t1_effective_us": 95.49925832074962,
+        "t2_effective_us": 48.293015197311895,
+        "device_quality": 0.99,
+        "temperature_mk": 11.8,
+        "flux_noise_phi0": 1e-06,
+        "qubit_frequency_ghz": 5.0,
+        "t1_max_us": 100.0,
+        "tphi_max_us": 100.0,
+        "ideal_reference": false,
+        "t1_us": 95.49925832074962,
+        "t2_us": 48.293015197311895,
+        "gamma1_per_us": 0.010471285495936114,
+        "gammaphi_per_us": 0.015471285480508995
+      },
+      {
+        "qubit": 1.0,
+        "environment_model": "generic_superconducting_open_system_v1",
+        "input_mode": "normalized",
+        "n_th": 1.4732783737145731e-09,
+        "gamma0_per_us": 0.010471285480508996,
+        "t1_base_us": 95.49925860214358,
+        "t1_zero_temperature_us": 95.49925860214358,
+        "tphi_base_us": 95.49925860214358,
+        "gamma_down_per_us": 0.010471285495936114,
+        "gamma_up_per_us": 1.5427118443425314e-11,
+        "gamma_population_relaxation_per_us": 0.010471285511363232,
+        "gamma_phi_per_us": 0.015471285480508995,
+        "gamma_phi_total_per_us": 0.015471285480508995,
+        "gamma_phi_base_per_us": 0.010471285480508996,
+        "gamma_phi_flux_per_us": 0.005,
+        "tphi_effective_us": 64.63587019060685,
+        "t1_effective_us": 95.49925832074962,
+        "t2_effective_us": 48.293015197311895,
+        "device_quality": 0.99,
+        "temperature_mk": 11.8,
+        "flux_noise_phi0": 1e-06,
+        "qubit_frequency_ghz": 5.0,
+        "t1_max_us": 100.0,
+        "tphi_max_us": 100.0,
+        "ideal_reference": false,
+        "t1_us": 95.49925832074962,
+        "t2_us": 48.293015197311895,
+        "gamma1_per_us": 0.010471285495936114,
+        "gammaphi_per_us": 0.015471285480508995
+      }
+    ],
+    "per_qubit_environment_enabled": false
+  },
   "diagnostics": {
     "final_time_us": 2.0,
-    "final_fidelity": 0.951577116665665,
-    "final_purity": 0.9067563036463391,
-    "min_fidelity": 0.951577116665665,
-    "min_purity": 0.9067563036463391,
+    "final_fidelity": 0.9515771166656648,
+    "final_purity": 0.9067563036463387,
+    "min_fidelity": 0.9515771166656648,
+    "min_purity": 0.9067563036463387,
     "time_step_us": 0.2,
     "threshold_crossed": 0.0,
-    "max_trace_error": 1.1102230246251565e-16,
+    "max_trace_error": 2.220446049250313e-16,
     "integration_substeps": 7.0,
     "backend_name": "python_dense_streaming_v1",
     "simulation_model": "gate_aware_open_system",
     "evolution_mode": "gate_aware_hamiltonian_lindblad_v1",
     "simulation_mode": "gate_aware_hamiltonian_lindblad_v1",
-    "hamiltonian_mode": "effective_involution_generator",
+    "hamiltonian_mode": "effective_unitary_spectral_generator_v2",
     "completion_time_us": 0.22,
-    "completion_fidelity": 0.9958784965744776,
-    "completion_purity": 0.991789918421384,
+    "completion_fidelity": 0.9958784965744774,
+    "completion_purity": 0.9917899184213838,
     "configured_duration_us": 2.0,
     "total_gate_duration_us": 0.22,
     "idle_duration_us": 1.78,
@@ -81,9 +170,29 @@
     "gate_duration_model": "default_gate_duration_us_with_params_override",
     "gate_aware_noise": 1.0,
     "post_circuit_degradation": 0.0,
+    "evolution_method_requested": "fixed_step_rk4",
+    "evolution_method_resolved": "fixed_step_rk4",
+    "evolution_method_id": "fixed_step_rk4_v1",
+    "cptp_guaranteed_by_construction": false,
+    "cleanup_applied": true,
     "recorded_state_count": 11.0,
     "state_history_retained": 0.0,
     "state_history_storage_mode": "streaming_metrics_only",
+    "state_snapshot_count": 7.0,
+    "state_snapshot_max_count": 10.0,
+    "state_snapshot_matrix_dimension": 4.0,
+    "state_snapshot_policy": "bounded_semantic_v1",
+    "state_snapshot_requested_uniform_count": 0.0,
+    "state_snapshot_requested_custom_count": 0.0,
+    "state_snapshot_event_candidate_count": 8.0,
+    "state_snapshot_candidate_count": 8.0,
+    "state_snapshot_returned_count": 7.0,
+    "state_snapshot_deduplicated_count": 1.0,
+    "state_snapshot_dropped_by_cap_count": 0.0,
+    "state_snapshot_exact_capture_count": 0.0,
+    "state_snapshot_nearest_capture_count": 0.0,
+    "state_snapshot_max_time_error_us": 0.0,
+    "state_snapshot_hard_cap": 10.0,
     "rust_kernel_used": false,
     "rust_kernel_mode": "none",
     "rust_kernel_fallback_used": false,
@@ -91,6 +200,9 @@
     "rust_kernel_call_count": 0.0,
     "rust_kernel_segment_count": 0.0,
     "rust_kernel_substep_count": 0.0,
+    "rust_kernel_session_count": 0.0,
+    "rust_kernel_session_reuse_count": 0.0,
+    "rust_kernel_piecewise_segment_count": 0.0,
     "rust_kernel_batchable_interval_count": 0.0,
     "rust_kernel_actual_batch_count": 0.0,
     "rust_kernel_max_batch_substeps": 0.0,
@@ -125,18 +237,65 @@
     "complexity_max_environment_rate_per_us": 0.02594257099187223,
     "complexity_max_generator_scale_per_us": 314.18520792997117,
     "complexity_estimated_work_units_segmented": 26880.0,
+    "core_dimension": 4.0,
+    "core_density_matrix_shape": "4x4",
+    "core_segments_count": 3.0,
+    "core_idle_segments_count": 1.0,
+    "core_gate_segments_count": 2.0,
+    "core_total_segment_duration_us": 2.0,
+    "core_total_idle_duration_us": 1.78,
+    "core_total_gate_duration_us": 0.22,
+    "core_time_steps": 11.0,
+    "core_total_rk4_substeps": 15.0,
+    "core_total_rhs_evaluations": 60.0,
+    "core_collapse_operator_count": 6.0,
+    "core_lindblad_operator_build_ms": 0.24839997058734298,
+    "core_segment_setup_ms": 0.338599958922714,
+    "core_idle_evolution_ms": 1.0992999305017292,
+    "core_gate_evolution_ms": 2.4005999439395964,
+    "core_total_evolution_ms": 3.4998998744413257,
+    "core_output_probabilities_ms": 0.011000025551766157,
+    "core_diagnostics_build_ms": 0.04229997284710407,
+    "core_dense_execution_engine": "numpy_dense_v1",
+    "core_zero_hamiltonian_fast_path_used": true,
+    "core_rk4_step_count": 15.0,
+    "core_rhs_call_count": 60.0,
+    "core_commutator_evaluation_count": 60.0,
+    "core_lindblad_term_evaluation_count": 360.0,
+    "core_idle_only": false,
+    "core_has_gate_segments": true,
+    "core_has_idle_after_circuit": true,
+    "execution_representation": "density_matrix",
+    "state_dimension": 4,
+    "density_matrix_dimension": 16,
+    "representation_policy": "adaptive_representation_v1",
+    "trajectory_available": false,
+    "density_matrix_qubit_limit": 8,
+    "compilation_mode": "logical_direct",
+    "native_gate_set_id": "gate_aware_hxyzst_rz_cnot_v3",
+    "logical_gate_count": 2,
+    "compiled_gate_count": 2,
+    "expanded_gate_count": 0,
+    "logical_depth": 2,
+    "compiled_depth": 2,
+    "logical_declared_duration_us": 0.22,
+    "compiled_duration_us": 0.22,
+    "decomposition_rules_used": "[]",
+    "source_map": "[{'logical_column': 0, 'logical_gate_index': 0, 'source_gate': 'H', 'targets': [0], 'controls': [], 'rule_id': None, 'compiled_operations': [{'compiled_column': 0, 'gate': 'H', 'targets': [0], 'controls': [], 'params': {'duration_us': 0.02}}]}, {'logical_column': 1, 'logical_gate_index': 0, 'source_gate': 'CNOT', 'targets': [1], 'controls': [0], 'rule_id': None, 'compiled_operations': [{'compiled_column': 1, 'gate': 'CNOT', 'targets': [1], 'controls': [0], 'params': {'duration_us': 0.2}}]}]",
+    "compiled_circuit": "{'logical_qubits': 2, 'initial_states': ['0', '0'], 'classical_bits': 0, 'columns': [{'step': 0, 'gates': [{'type': 'H', 'targets': [0], 'controls': [], 'params': {'duration_us': 0.02}, 'classical_targets': [], 'condition': None, 'conditions': []}]}, {'step': 1, 'gates': [{'type': 'CNOT', 'targets': [1], 'controls': [0], 'params': {'duration_us': 0.2}, 'classical_targets': [], 'condition': None, 'conditions': []}]}], 'annotations': []}",
     "backend_requested": "python_dense",
     "backend_version": "7.10",
     "backend_available": true,
     "backend_fallback_used": false,
     "backend_fallback_reason": "",
-    "simulation_backend": "python_dense"
+    "simulation_backend": "python_dense",
+    "state_snapshot_serialization_ms": 0.043
   },
   "summary": {
-    "final_fidelity": 0.951577116665665,
-    "final_purity": 0.9067563036463391,
-    "completion_fidelity": 0.9958784965744776,
-    "completion_purity": 0.991789918421384,
+    "final_fidelity": 0.9515771166656648,
+    "final_purity": 0.9067563036463387,
+    "completion_fidelity": 0.9958784965744774,
+    "completion_purity": 0.9917899184213838,
     "effective_time_us": 2.0
   },
   "timeline": [
@@ -147,65 +306,1316 @@
     },
     {
       "time_us": 0.2,
-      "fidelity": 0.9962303891744199,
-      "purity": 0.9928159573997454
+      "fidelity": 0.9971912229600531,
+      "purity": 0.9928159573997455
     },
     {
       "time_us": 0.4,
-      "fidelity": 0.991255994600919,
-      "purity": 0.9826382363301267
+      "fidelity": 0.9912559946009187,
+      "purity": 0.9826382363301264
     },
     {
       "time_us": 0.6,
-      "fidelity": 0.9861581890551765,
-      "purity": 0.9726208576016203
+      "fidelity": 0.9861581890551763,
+      "purity": 0.97262085760162
     },
     {
       "time_us": 0.8,
-      "fidelity": 0.9811004071515099,
-      "purity": 0.9627602317558017
+      "fidelity": 0.9811004071515098,
+      "purity": 0.9627602317558013
     },
     {
       "time_us": 1.0,
-      "fidelity": 0.9760823406021306,
-      "purity": 0.9530539552376661
+      "fidelity": 0.9760823406021304,
+      "purity": 0.9530539552376658
     },
     {
       "time_us": 1.2,
-      "fidelity": 0.9711036835428584,
-      "purity": 0.9434996623370417
+      "fidelity": 0.9711036835428581,
+      "purity": 0.9434996623370415
     },
     {
       "time_us": 1.4,
-      "fidelity": 0.9661641325136885,
-      "purity": 0.9340950245832034
+      "fidelity": 0.9661641325136883,
+      "purity": 0.9340950245832029
     },
     {
       "time_us": 1.6,
-      "fidelity": 0.9612633864395147,
-      "purity": 0.9248377501492672
+      "fidelity": 0.9612633864395148,
+      "purity": 0.9248377501492673
     },
     {
       "time_us": 1.8,
-      "fidelity": 0.9564011466110109,
-      "purity": 0.9157255832662086
+      "fidelity": 0.9564011466110107,
+      "purity": 0.9157255832662081
     },
     {
       "time_us": 2.0,
-      "fidelity": 0.951577116665665,
-      "purity": 0.9067563036463391
+      "fidelity": 0.9515771166656648,
+      "purity": 0.9067563036463387
     }
   ],
+  "physical_timeline": {
+    "schema_version": "physical_timeline_v1",
+    "time_unit": "us",
+    "column_timing_model": "sequential_columns_max_parallel_gate_duration_v1",
+    "total_duration_us": 2.0,
+    "circuit_completion_time_us": 0.22,
+    "sampled_times_us": [
+      0.0,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0,
+      1.2,
+      1.4,
+      1.6,
+      1.8,
+      2.0
+    ],
+    "events": [
+      {
+        "id": "execution-column-0",
+        "kind": "circuit_column",
+        "execution_column_index": 0,
+        "circuit_step": 0,
+        "source_circuit_columns": [
+          0
+        ],
+        "start_us": 0.0,
+        "duration_us": 0.02,
+        "end_us": 0.02,
+        "operations": [
+          {
+            "gate": "H",
+            "qubits": [
+              0
+            ],
+            "targets": [
+              0
+            ],
+            "controls": [],
+            "declared_duration_us": 0.02,
+            "effective_column_duration_us": 0.02
+          }
+        ]
+      },
+      {
+        "id": "execution-column-1",
+        "kind": "circuit_column",
+        "execution_column_index": 1,
+        "circuit_step": 1,
+        "source_circuit_columns": [
+          1
+        ],
+        "start_us": 0.02,
+        "duration_us": 0.2,
+        "end_us": 0.22,
+        "operations": [
+          {
+            "gate": "CNOT",
+            "qubits": [
+              0,
+              1
+            ],
+            "targets": [
+              1
+            ],
+            "controls": [
+              0
+            ],
+            "declared_duration_us": 0.2,
+            "effective_column_duration_us": 0.2
+          }
+        ]
+      },
+      {
+        "id": "post-circuit-idle",
+        "kind": "idle",
+        "execution_column_index": null,
+        "circuit_step": null,
+        "source_circuit_columns": [],
+        "start_us": 0.22,
+        "duration_us": 1.78,
+        "end_us": 2.0,
+        "operations": []
+      }
+    ]
+  },
   "output_probabilities": {
-    "00": 0.5008819573309702,
-    "01": 0.00953649206068438,
-    "10": 0.009895231591209638,
-    "11": 0.4796863190171359
+    "00": 0.5008819573309701,
+    "01": 0.009536492060684382,
+    "10": 0.009895231591209523,
+    "11": 0.479686319017136
+  },
+  "measurement": {
+    "mode": "final_computational_basis_shots_v1",
+    "shots": 1024,
+    "seed": 0,
+    "counts": {
+      "00": 517,
+      "01": 8,
+      "10": 10,
+      "11": 489
+    },
+    "frequencies": {
+      "00": 0.5048828125,
+      "01": 0.0078125,
+      "10": 0.009765625,
+      "11": 0.4775390625
+    },
+    "explicit_measurement_mode": "non_selective_computational_basis_v1",
+    "explicit_measurement_count": 0,
+    "explicit_measurement_targets": [],
+    "explicit_measurement_bindings": [],
+    "classical_register_bits": 0,
+    "classical_register_mode": "schema_only_v2",
+    "classical_conditioning_supported": false,
+    "classical_branch_count": 0,
+    "classical_branching_noise_applied": false,
+    "classical_branches": [],
+    "classical_shot_preview": [],
+    "branch_probability_sum": 0.0,
+    "branch_probability_normalized": null,
+    "conditional_operations": [],
+    "branch_state_representation": "probability_and_classical_bits_only_v1"
+  },
+  "state_snapshots": [
+    {
+      "index": 0,
+      "requested_time_us": null,
+      "time_us": 0.0,
+      "progress": 0.0,
+      "kind": "initial",
+      "capture_method": "simulation_event_boundary",
+      "event_kind": "initial",
+      "column_index": null,
+      "density_matrix": {
+        "real": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "imag": [
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "requested_time_us": null,
+      "time_us": 0.02,
+      "progress": 0.01,
+      "kind": "column_boundary",
+      "capture_method": "simulation_event_boundary",
+      "event_kind": "column_boundary",
+      "column_index": 0,
+      "density_matrix": {
+        "real": [
+          [
+            0.5001619264061862,
+            0.0,
+            0.4997869237175651,
+            0.0
+          ],
+          [
+            0.0,
+            1.5442234561088415e-13,
+            0.0,
+            1.5407193322271305e-13
+          ],
+          [
+            0.4997869237175651,
+            0.0,
+            0.49983807359350524,
+            0.0
+          ],
+          [
+            0.0,
+            1.5407193322271305e-13,
+            0.0,
+            1.5408771716053615e-13
+          ]
+        ],
+        "imag": [
+          [
+            0.0,
+            0.0,
+            -0.00041885633555796553,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            -4.922116692453132e-17
+          ],
+          [
+            0.00041885633555796553,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            4.922116692453132e-17,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "requested_time_us": null,
+      "time_us": 0.22,
+      "progress": 0.11,
+      "kind": "after_circuit",
+      "capture_method": "simulation_event_boundary",
+      "event_kind": "after_circuit",
+      "column_index": null,
+      "density_matrix": {
+        "real": [
+          [
+            0.5006861622905091,
+            0.0,
+            0.00011047337535293603,
+            0.4965826991345283
+          ],
+          [
+            0.0,
+            0.0005214581900414992,
+            9.184388154817339e-13,
+            1.5289677026641285e-15
+          ],
+          [
+            0.00011047337535293603,
+            9.184388154817339e-13,
+            0.0008869469300602452,
+            0.0
+          ],
+          [
+            0.4965826991345283,
+            1.5289677026641285e-15,
+            0.0,
+            0.49790543258938913
+          ]
+        ],
+        "imag": [
+          [
+            0.0,
+            -0.00033192290105924356,
+            0.000928517856719435,
+            -0.0006894858230926808
+          ],
+          [
+            0.00033192290105924356,
+            0.0,
+            -8.741546399864158e-16,
+            4.892405026059809e-13
+          ],
+          [
+            -0.000928517856719435,
+            8.741546399864158e-16,
+            0.0,
+            -0.0006053637801101823
+          ],
+          [
+            0.0006894858230926808,
+            -4.892405026059809e-13,
+            0.0006053637801101823,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "requested_time_us": null,
+      "time_us": 0.6,
+      "progress": 0.3,
+      "kind": "idle_sample",
+      "capture_method": "simulation_event_boundary",
+      "event_kind": null,
+      "column_index": null,
+      "density_matrix": {
+        "real": [
+          [
+            0.5006996074312059,
+            0.0,
+            0.00010960751198317422,
+            0.4888290162819922
+          ],
+          [
+            0.0,
+            0.002488808568034532,
+            9.040982367480895e-13,
+            2.1522357798959556e-15
+          ],
+          [
+            0.00010960751198317422,
+            9.040982367480895e-13,
+            0.0028528458855973126,
+            0.0
+          ],
+          [
+            0.4888290162819922,
+            2.1522357798959556e-15,
+            0.0,
+            0.4939587381151622
+          ]
+        ],
+        "imag": [
+          [
+            0.0,
+            -0.0003317065382707197,
+            0.0009212403602409645,
+            -0.000678720135095701
+          ],
+          [
+            0.0003317065382707197,
+            0.0,
+            -8.60505517988528e-16,
+            4.888681807937848e-13
+          ],
+          [
+            -0.0009212403602409645,
+            8.60505517988528e-16,
+            0.0,
+            -0.0005982339185165683
+          ],
+          [
+            0.000678720135095701,
+            -4.888681807937848e-13,
+            0.0005982339185165683,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "requested_time_us": null,
+      "time_us": 1.0,
+      "progress": 0.5,
+      "kind": "idle_sample",
+      "capture_method": "simulation_event_boundary",
+      "event_kind": null,
+      "column_index": null,
+      "density_matrix": {
+        "real": [
+          [
+            0.5007305638611964,
+            0.0,
+            0.00010870340744294892,
+            0.4807980011095292
+          ],
+          [
+            0.0,
+            0.0045344026419460864,
+            8.892447267990558e-13,
+            2.7949505960447245e-15
+          ],
+          [
+            0.00010870340744294892,
+            8.892447267990558e-13,
+            0.00489691837285145,
+            0.0
+          ],
+          [
+            0.4807980011095292,
+            2.7949505960447245e-15,
+            0.0,
+            0.48983811512400605
+          ]
+        ],
+        "imag": [
+          [
+            0.0,
+            -0.0003314502814561129,
+            0.0009136414504851567,
+            -0.0006675693819258743
+          ],
+          [
+            0.0003314502814561129,
+            0.0,
+            -8.463681966741824e-16,
+            4.884353772660078e-13
+          ],
+          [
+            -0.0009136414504851567,
+            8.463681966741824e-16,
+            0.0,
+            -0.0005908195022788075
+          ],
+          [
+            0.0006675693819258743,
+            -4.884353772660078e-13,
+            0.0005908195022788075,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "requested_time_us": null,
+      "time_us": 1.6,
+      "progress": 0.8,
+      "kind": "idle_sample",
+      "capture_method": "simulation_event_boundary",
+      "event_kind": null,
+      "column_index": null,
+      "density_matrix": {
+        "real": [
+          [
+            0.5008088473807872,
+            0.0,
+            0.00010736121432179099,
+            0.46899819128506687
+          ],
+          [
+            0.0,
+            0.007554682211880582,
+            8.674207619751162e-13,
+            3.733800897583963e-15
+          ],
+          [
+            0.00010736121432179099,
+            8.674207619751162e-13,
+            0.007914927479223741,
+            0.0
+          ],
+          [
+            0.46899819128506687,
+            3.733800897583963e-15,
+            0.0,
+            0.4837215429281085
+          ]
+        ],
+        "imag": [
+          [
+            0.0,
+            -0.0003310124249397318,
+            0.0009023604492858439,
+            -0.0006511858035141896
+          ],
+          [
+            0.0003310124249397318,
+            0.0,
+            -8.255965134742071e-16,
+            4.877094944315532e-13
+          ],
+          [
+            -0.0009023604492858439,
+            8.255965134742071e-16,
+            0.0,
+            -0.0005798698210187598
+          ],
+          [
+            0.0006511858035141896,
+            -4.877094944315532e-13,
+            0.0005798698210187598,
+            0.0
+          ]
+        ]
+      }
+    },
+    {
+      "index": 6,
+      "requested_time_us": null,
+      "time_us": 2.0,
+      "progress": 1.0,
+      "kind": "final",
+      "capture_method": "simulation_event_boundary",
+      "event_kind": "final",
+      "column_index": null,
+      "density_matrix": {
+        "real": [
+          [
+            0.5008819573309701,
+            0.0,
+            0.00010647563851083202,
+            0.46129297849161177
+          ],
+          [
+            0.0,
+            0.009536492060684382,
+            8.531698295052792e-13,
+            4.343195574667521e-15
+          ],
+          [
+            0.00010647563851083202,
+            8.531698295052792e-13,
+            0.009895231591209523,
+            0.0
+          ],
+          [
+            0.46129297849161177,
+            4.343195574667521e-15,
+            0.0,
+            0.479686319017136
+          ]
+        ],
+        "imag": [
+          [
+            0.0,
+            -0.00033068576928048116,
+            0.0008949172716774445,
+            -0.0006404874143148502
+          ],
+          [
+            0.00033068576928048116,
+            0.0,
+            -8.120327152846597e-16,
+            4.871757490704235e-13
+          ],
+          [
+            -0.0008949172716774445,
+            8.120327152846597e-16,
+            0.0,
+            -0.0005726830064907982
+          ],
+          [
+            0.0006404874143148502,
+            -4.871757490704235e-13,
+            0.0005726830064907982,
+            0.0
+          ]
+        ]
+      }
+    }
+  ],
+  "circuit_probes": [
+    {
+      "id": "probe-before-column-0",
+      "circuit_position": {
+        "column_index": null,
+        "boundary": "before"
+      },
+      "noisy_snapshot_index": 0,
+      "ideal_snapshot_index": 0,
+      "time_us": 0.0
+    },
+    {
+      "id": "probe-after-column-0",
+      "circuit_position": {
+        "column_index": 0,
+        "boundary": "after"
+      },
+      "noisy_snapshot_index": 1,
+      "ideal_snapshot_index": 1,
+      "time_us": 0.02
+    },
+    {
+      "id": "probe-after-column-1",
+      "circuit_position": {
+        "column_index": 1,
+        "boundary": "after"
+      },
+      "noisy_snapshot_index": 2,
+      "ideal_snapshot_index": 2,
+      "time_us": 0.22
+    },
+    {
+      "id": "probe-completion",
+      "circuit_position": {
+        "column_index": null,
+        "boundary": "completion"
+      },
+      "noisy_snapshot_index": 2,
+      "ideal_snapshot_index": 2,
+      "time_us": 0.22
+    },
+    {
+      "id": "probe-final",
+      "circuit_position": {
+        "column_index": null,
+        "boundary": "final"
+      },
+      "noisy_snapshot_index": 6,
+      "ideal_snapshot_index": 6,
+      "time_us": 2.0
+    }
+  ],
+  "state_transfer": {
+    "schema_version": "state_transfer_v1",
+    "available": false,
+    "reason": "requires one physical MESSAGE gate and one explicit RECEIVED annotation",
+    "message": null,
+    "receive": null,
+    "checkpoints": []
   },
   "run": {
     "status": "Completed",
     "selected_backend": "python_dense",
-    "last_run_label": "Latest simulation"
+    "last_run_label": "Latest simulation",
+    "compilation": {
+      "mode": "logical_direct",
+      "native_gate_set_id": "gate_aware_hxyzst_rz_cnot_v3",
+      "logical_gate_count": 2,
+      "compiled_gate_count": 2,
+      "logical_depth": 2,
+      "compiled_depth": 2,
+      "logical_duration_us": 0.22,
+      "compiled_duration_us": 0.22,
+      "decomposition_rules_used": [],
+      "source_map": [
+        {
+          "logical_column": 0,
+          "logical_gate_index": 0,
+          "source_gate": "H",
+          "targets": [
+            0
+          ],
+          "controls": [],
+          "rule_id": null,
+          "compiled_operations": [
+            {
+              "compiled_column": 0,
+              "gate": "H",
+              "targets": [
+                0
+              ],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              }
+            }
+          ]
+        },
+        {
+          "logical_column": 1,
+          "logical_gate_index": 0,
+          "source_gate": "CNOT",
+          "targets": [
+            1
+          ],
+          "controls": [
+            0
+          ],
+          "rule_id": null,
+          "compiled_operations": [
+            {
+              "compiled_column": 1,
+              "gate": "CNOT",
+              "targets": [
+                1
+              ],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              }
+            }
+          ]
+        }
+      ],
+      "compiled_circuit": {
+        "logical_qubits": 2,
+        "initial_states": [
+          "0",
+          "0"
+        ],
+        "classical_bits": 0,
+        "columns": [
+          {
+            "step": 0,
+            "gates": [
+              {
+                "type": "H",
+                "targets": [
+                  0
+                ],
+                "controls": [],
+                "params": {
+                  "duration_us": 0.02
+                },
+                "classical_targets": [],
+                "condition": null,
+                "conditions": []
+              }
+            ]
+          },
+          {
+            "step": 1,
+            "gates": [
+              {
+                "type": "CNOT",
+                "targets": [
+                  1
+                ],
+                "controls": [
+                  0
+                ],
+                "params": {
+                  "duration_us": 0.2
+                },
+                "classical_targets": [],
+                "condition": null,
+                "conditions": []
+              }
+            ]
+          }
+        ],
+        "annotations": []
+      }
+    },
+    "comparison": {
+      "ideal_timeline": [
+        {
+          "time_us": 0.0,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 0.2,
+          "fidelity": 1.0,
+          "purity": 0.999667408975975
+        },
+        {
+          "time_us": 0.4,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 0.6,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 0.8,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 1.0,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 1.2,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 1.4,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 1.6,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 1.8,
+          "fidelity": 1.0,
+          "purity": 1.0
+        },
+        {
+          "time_us": 2.0,
+          "fidelity": 1.0,
+          "purity": 1.0
+        }
+      ],
+      "ideal_state_snapshots": [
+        {
+          "index": 0,
+          "requested_time_us": null,
+          "time_us": 0.0,
+          "progress": 0.0,
+          "kind": "initial",
+          "capture_method": "simulation_event_boundary",
+          "event_kind": "initial",
+          "column_index": null,
+          "density_matrix": {
+            "real": [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ],
+            "imag": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        {
+          "index": 1,
+          "requested_time_us": null,
+          "time_us": 0.02,
+          "progress": 0.01,
+          "kind": "column_boundary",
+          "capture_method": "simulation_event_boundary",
+          "event_kind": "column_boundary",
+          "column_index": 0,
+          "density_matrix": {
+            "real": [
+              [
+                0.5,
+                0.0,
+                0.5,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.5,
+                0.0,
+                0.5,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ],
+            "imag": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        {
+          "index": 2,
+          "requested_time_us": null,
+          "time_us": 0.22,
+          "progress": 0.11,
+          "kind": "after_circuit",
+          "capture_method": "simulation_event_boundary",
+          "event_kind": "after_circuit",
+          "column_index": null,
+          "density_matrix": {
+            "real": [
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ]
+            ],
+            "imag": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        {
+          "index": 3,
+          "requested_time_us": null,
+          "time_us": 0.6,
+          "progress": 0.3,
+          "kind": "idle_sample",
+          "capture_method": "simulation_event_boundary",
+          "event_kind": null,
+          "column_index": null,
+          "density_matrix": {
+            "real": [
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ]
+            ],
+            "imag": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        {
+          "index": 4,
+          "requested_time_us": null,
+          "time_us": 1.0,
+          "progress": 0.5,
+          "kind": "idle_sample",
+          "capture_method": "simulation_event_boundary",
+          "event_kind": null,
+          "column_index": null,
+          "density_matrix": {
+            "real": [
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ]
+            ],
+            "imag": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        {
+          "index": 5,
+          "requested_time_us": null,
+          "time_us": 1.6,
+          "progress": 0.8,
+          "kind": "idle_sample",
+          "capture_method": "simulation_event_boundary",
+          "event_kind": null,
+          "column_index": null,
+          "density_matrix": {
+            "real": [
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ]
+            ],
+            "imag": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        {
+          "index": 6,
+          "requested_time_us": null,
+          "time_us": 2.0,
+          "progress": 1.0,
+          "kind": "final",
+          "capture_method": "simulation_event_boundary",
+          "event_kind": "final",
+          "column_index": null,
+          "density_matrix": {
+            "real": [
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.5,
+                0.0,
+                0.0,
+                0.5
+              ]
+            ],
+            "imag": [
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        }
+      ]
+    }
   },
   "warnings": [],
   "issues": []
