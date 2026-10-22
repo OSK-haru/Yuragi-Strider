@@ -1,7 +1,13 @@
-"""Lightweight structural check for the exported UI response JSON."""
+"""Lightweight structural check for the UI response the backend produces.
+
+By default the response is generated from the current code, so the check
+notices drift. ``--sample`` checks the saved outputs/ui_response_example.json
+instead (a stale file passes without telling you the backend has moved on).
+"""
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -244,19 +250,42 @@ def check_warnings_or_issues(value: Any, path: str, errors: list[str]) -> None:
             add_error(errors, f"{path}[{index}]", "expected string or object")
 
 
-def main() -> int:
-    if not OUTPUT_PATH.exists():
-        print(
-            "Missing outputs/ui_response_example.json. "
-            "Run .\\.venv\\Scripts\\python.exe -B scripts/export_ui_response_example.py"
-        )
-        return 1
+def load_live_response() -> dict[str, Any]:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    if str(ROOT / "scripts") not in sys.path:
+        sys.path.insert(0, str(ROOT / "scripts"))
+    from core.simulator import run_simulation
+    from core.ui_response import simulation_result_to_ui_response
+    from export_ui_response_example import build_example_config
 
-    with OUTPUT_PATH.open("r", encoding="utf-8") as file:
-        data = json.load(file)
+    response = simulation_result_to_ui_response(run_simulation(build_example_config()))
+    return json.loads(json.dumps(response, default=str))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--sample",
+        action="store_true",
+        help="Check the saved outputs/ui_response_example.json instead of a live response.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.sample:
+        if not OUTPUT_PATH.exists():
+            print(
+                "Missing outputs/ui_response_example.json. "
+                "Run .\\.venv\\Scripts\\python.exe -B scripts/export_ui_response_example.py"
+            )
+            return 1
+        with OUTPUT_PATH.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+    else:
+        data = load_live_response()
 
     if not isinstance(data, dict):
-        print("outputs/ui_response_example.json: expected top-level object")
+        print("UI response: expected top-level object")
         return 1
 
     errors: list[str] = []
