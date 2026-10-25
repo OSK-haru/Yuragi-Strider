@@ -1,15 +1,13 @@
 /* ============================================================================
    HOME MODE DRUM // ROTARY SELECTOR
-   四角柱のドラム。面が4枚、90°ごと。回転半径は面の高さ h に対して
-   r = h / (2·tan 45°) = 0.5·h。高さを1つ決めれば残りは従属する。
-   面の数を変えるときは --drum-step と半径の係数の両方を直す
-   （HomeModeDrum.tsx の FACE_ANGLE_DEG も同じ値）。
+   三角柱のドラム。面が3枚、120°ごと。回転半径は面の高さ h に対して
+   r = h / (2·tan 60°)。
    ========================================================================= */
 
 .mode-drum {
   --drum-height: clamp(330px, 34vw, 392px);
-  --drum-step: 90deg;
-  --drum-radius: calc(var(--drum-height) * 0.5);
+  --drum-step: 120deg;
+  --drum-radius: calc(var(--drum-height) * 0.288675);
   --drum-face-tint: 0.62;
   --drum-frame-tint: 0.18;
 
@@ -143,6 +141,10 @@
 
 .mode-drum__face--docs::before {
   background: var(--tt-rule-strong);
+}
+
+.mode-drum__face--physics::before {
+  background: linear-gradient(180deg, var(--tt-accent) 0 50%, var(--tt-rule-strong) 50%);
 }
 
 /* --- Face content --------------------------------------------------------- */
@@ -314,6 +316,23 @@
   border-color: var(--tt-interact);
   background: var(--tt-interact-fill);
   color: var(--tt-on-interact);
+}
+
+.mode-drum__cta-group {
+  display: grid;
+  align-content: end;
+  gap: 8px;
+  grid-area: cta;
+}
+
+.mode-drum__cta-group .mode-drum__cta {
+  grid-area: auto;
+}
+
+.mode-drum__cta--secondary {
+  border-color: var(--tt-rule-strong);
+  background: transparent;
+  color: var(--tt-ink);
 }
 
 .mode-drum__cta--latched {

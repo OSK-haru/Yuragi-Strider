@@ -8,7 +8,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Yuragi-Strider',
-  tagline: '物理環境が量子回路に与える影響を可視化するシミュレーター',
+  tagline: '量子サービスの攻撃を試し、物理エンジンの挙動を観察するシミュレーター',
   favicon: 'img/favicon.svg',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future

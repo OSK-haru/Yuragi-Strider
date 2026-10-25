@@ -20,13 +20,10 @@ type NavigationItem = { route: NavigationRoute; label: string; detail: string }
 const homeItem: NavigationItem = { route: 'home', label: 'ホーム', detail: 'Yuragi-Strider' }
 const attackItem: NavigationItem = { route: 'attack-simulator', label: '攻撃シミュレーター', detail: '環境設定 / live操作' }
 
-const gateAwareItems: NavigationItem[] = [
-  { route: 'gate-aware-ide', label: 'IDEワークスペース', detail: '回路・実行・状態エクスプローラー' },
+const physicsItems: NavigationItem[] = [
+  { route: 'gate-aware-ide', label: 'Gate-aware 回路', detail: '回路・実行・状態エクスプローラー' },
+  { route: 'pulse-ide', label: 'Pulse-level 制御', detail: 'Pulse回路・実行・状態エクスプローラー' },
   { route: 'help', label: 'ヘルプ / Q&A', detail: 'Guide' },
-]
-
-const pulseItems: NavigationItem[] = [
-  { route: 'pulse-ide', label: 'Pulse IDE', detail: 'Pulse 回路・実行・状態エクスプローラー' },
 ]
 
 /* レール左側に出す、現在地の機械的な呼称。 */
@@ -38,16 +35,14 @@ const routeDesignations: Record<NavigationRoute, string> = {
   'attack-simulator': 'ATK / SHARED SERVICE',
 }
 
-type NavigationDomain = 'home' | 'gate-aware' | 'pulse' | 'attack'
+type NavigationDomain = 'home' | 'physics' | 'attack'
 
 function navigationDomainForRoute(route: NavigationRoute): NavigationDomain {
   if (route === 'attack-simulator') return 'attack'
   if (route === 'home') {
     return 'home'
   }
-  return route === 'pulse-ide'
-    ? 'pulse'
-    : 'gate-aware'
+  return 'physics'
 }
 
 /* メニューは3つのフォルダに分ける。現在地のフォルダだけ開いた状態で始める。 */
@@ -59,9 +54,8 @@ type NavigationGroup = {
 }
 
 const navigationGroups: NavigationGroup[] = [
-  { domain: 'gate-aware', label: '通常モード', detail: 'Gate-aware', items: gateAwareItems },
   { domain: 'attack', label: '攻撃シミュレーター', detail: 'Attack', items: [attackItem] },
-  { domain: 'pulse', label: 'Pulseモード', detail: 'Pulse', items: pulseItems },
+  { domain: 'physics', label: '物理エンジンを試す', detail: 'Gate / Pulse', items: physicsItems },
 ]
 
 export function AppNavigation({ currentRoute, onNavigate }: AppNavigationProps) {
@@ -173,11 +167,9 @@ export function AppNavigation({ currentRoute, onNavigate }: AppNavigationProps) 
           <small>
             {domain === 'home'
               ? 'モードを選択'
-              : domain === 'pulse'
-                ? 'Pulseワークスペース'
-                : domain === 'attack'
+              : domain === 'attack'
                   ? '攻撃ワークスペース'
-                : 'Gate-awareワークスペース'}
+                : '物理エンジンのワークスペース'}
           </small>
         </div>
         {renderItem(homeItem)}

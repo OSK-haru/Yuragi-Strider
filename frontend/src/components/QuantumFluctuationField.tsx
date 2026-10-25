@@ -107,28 +107,18 @@ type FieldRegime = {
 
 /*
  * 面ごとの相。中身の性格をそのまま場の物理量に翻訳している。
- *   通常モード … 基準。落ち着いているが死んではいない。
- *   PULSE     … k と時間スケールを上げる。細かい粒が速く震え、赤が濃い。
- *                対も倍の速さで生成消滅する。
- *   攻撃      … PULSE ほどは速くないが谷を浅く拾い、赤が多めに出る。
+ *   物理エンジン … 基準。落ち着いているが死んではいない。
+ *   攻撃      … 物理エンジンより谷を浅く拾い、赤が多めに出る。
  *   ドキュメント … k も時間も落とす。大きな塊が凪いで、赤はほとんど出ない。
  */
 const REGIMES: Record<ModeId, FieldRegime> = {
-  'gate-aware': {
+  physics: {
     mass: 0.9,
     wavenumberScale: 1,
     timeScale: 0.085,
     pairRate: 1,
     troughThreshold: 0.52,
     intensity: 1,
-  },
-  pulse: {
-    mass: 2.6,
-    wavenumberScale: 1.55,
-    timeScale: 0.26,
-    pairRate: 2.2,
-    troughThreshold: 0.38,
-    intensity: 1.18,
   },
   attack: {
     mass: 1.7,

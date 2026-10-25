@@ -20,13 +20,12 @@ import {
 } from '../utils/homeModes'
 
 /*
- * ホームの主動線。通常モード / PULSEモード / 攻撃シミュレーター / 公式ドキュメント
- * の4つを、四角柱のドラムが回るように切り替える。
+ * ホームの主動線。攻撃シミュレーター / 物理エンジン / 公式ドキュメント
+ * の3つを、三角柱のドラムが回るように切り替える。
  *
- * 面の間隔は 360° / 面の数 = 90°。回転半径は面の高さ h に対して
- * r = h / (2·tan 45°) = h·0.5 で決まるので、高さだけ決めれば辻褄が合う。
- * CSS 側でこの係数を持っている。面の数を変えるときは、ここの角度と
- * CSS の係数の両方を直す。
+ * 面の間隔は 360° / 面の数 = 120°。回転半径は面の高さ h に対して
+ * r = h / (2·tan 60°) で決まる。
+ * CSS 側でこの係数を持っている。
  *
  * 自動送りはするが、ホバー・フォーカス中は止める。読んでいる最中に
  * 面が回るのはただの妨害なので。
@@ -275,6 +274,17 @@ export function HomeModeDrum({
                       </span>
                       {entry.callToAction}
                     </a>
+                  ) : entry.id === 'physics' ? (
+                    <div className="mode-drum__cta-group">
+                      <button className="mode-drum__cta" type="button" onClick={() => activate(entry, onStartSimulation)}>
+                        <span className="mode-drum__cta-mark" aria-hidden="true">&gt;&gt;&gt;</span>
+                        Gate-aware 回路シミュレーター
+                      </button>
+                      <button className="mode-drum__cta mode-drum__cta--secondary" type="button" onClick={() => activate(entry, onOpenPulseLab)}>
+                        <span className="mode-drum__cta-mark" aria-hidden="true">&gt;&gt;&gt;</span>
+                        Pulse-level 制御シミュレーター
+                      </button>
+                    </div>
                   ) : (
                     <button
                       className={`mode-drum__cta${
@@ -284,11 +294,7 @@ export function HomeModeDrum({
                       onClick={() =>
                         activate(
                           entry,
-                          entry.id === 'pulse'
-                            ? onOpenPulseLab
-                            : entry.id === 'attack'
-                              ? onOpenAttackSimulator
-                              : onStartSimulation,
+                          entry.id === 'attack' ? onOpenAttackSimulator : onStartSimulation,
                         )
                       }
                     >

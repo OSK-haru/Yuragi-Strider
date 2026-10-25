@@ -14,6 +14,11 @@ videomaking/
 /docs_for_develop/*
 !/docs_for_develop/README.md
 !/docs_for_develop/development/
+!/docs_for_develop/archive/
+/docs_for_develop/archive/*
+!/docs_for_develop/archive/README.md
+!/docs_for_develop/archive/phase-plans/
+!/docs_for_develop/archive/phase-plans/**
 /docs_for_develop/development/*
 !/docs_for_develop/development/attack-simulation/
 /docs/

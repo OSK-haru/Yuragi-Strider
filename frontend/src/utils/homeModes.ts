@@ -1,14 +1,14 @@
 /*
- * ホームのドラムに載せる4つの行き先。
+ * ホームのドラムに載せる3つの行き先。
  *
  * データを HomeModeDrum から出してあるのは、背景のゆらぎ（
  * QuantumFluctuationField）が同じ ModeId で相を切り替えるため。
- * 両方が1つの定義を見るようにしておく。
+ * 背景のゆらぎも同じ定義から現在の面を受け取る。
  */
 
-export const HOME_MODE_COUNT = 4
+export const HOME_MODE_COUNT = 3
 
-export type ModeId = 'gate-aware' | 'pulse' | 'attack' | 'docs'
+export type ModeId = 'attack' | 'physics' | 'docs'
 
 export type ModeEntry = {
   id: ModeId
@@ -23,56 +23,38 @@ export type ModeEntry = {
 
 export const MODE_ENTRIES: ModeEntry[] = [
   {
-    id: 'gate-aware',
-    unit: 'MODE 01 / GATE-AWARE',
-    title: '通常モード',
-    tagline: '量子ゲートで回路を組む',
-    detail:
-      '理想的なゲート操作でも、現実の量子ビットはノイズで少しずつ状態がずれていきます。'
-      + '回路を組んでノイズの強さを変えるだけで、その“ズレ”がどれだけ・なぜ起きるのかを追えます。まずはこちら。',
-    callToAction: '通常モードを開始',
-    readouts: [
-      { label: 'SOLVER', value: 'LINDBLAD / RK4' },
-      { label: 'LAYER', value: 'GATE' },
-      { label: 'STATUS', value: 'STABLE' },
-    ],
-    signature: 'gate',
-  },
-  {
-    id: 'pulse',
-    unit: 'MODE 02 / PULSE',
-    title: 'PULSEモード',
-    tagline: 'ゲートより下の層へ',
-    detail:
-      'ゲートは、本当はマイクロ波パルスの列です。包絡線・離調・振幅を直接いじって、'
-      + '波形そのものから量子ビットの応答を追いかけます。実験的な層。',
-    callToAction: 'PULSEモードを開始',
-    readouts: [
-      { label: 'SOLVER', value: 'TIME-DEPENDENT' },
-      { label: 'LAYER', value: 'MICROWAVE' },
-      { label: 'STATUS', value: 'EXPERIMENTAL' },
-    ],
-    signature: 'pulse',
-  },
-  {
     id: 'attack',
-    unit: 'MODE 03 / ATTACK',
+    unit: 'MODE 01 / ATTACK SIMULATOR',
     title: '攻撃シミュレーター',
-    tagline: '量子コンピューターを攻撃する側に立つ',
+    tagline: '量子サービスの攻撃と防御を試す',
     detail:
-      '攻撃の環境を用意して、コマンドターミナルから操作します。'
-      + '攻撃がどの層に、どれだけ効くのかを、守る側の指標と並べて観察します。実験的な層。',
+      '仮想QPUを用意し、攻撃者として操作します。共有された量子計算環境で起こる干渉や情報漏れを調べます。',
     callToAction: '攻撃シミュレーターを開始',
     readouts: [
-      { label: 'CONSOLE', value: 'TERMINAL' },
-      { label: 'LAYER', value: 'ATTACK' },
+      { label: 'WORKSPACE', value: 'VIRTUAL QPU' },
+      { label: 'ROLE', value: 'ATTACKER' },
       { label: 'STATUS', value: 'EXPERIMENTAL' },
     ],
     signature: 'attack',
   },
   {
+    id: 'physics',
+    unit: 'MODE 02 / PHYSICS ENGINE',
+    title: '物理エンジンを試す',
+    tagline: '量子状態が変化する仕組みを観察する',
+    detail:
+      '回路ゲート単位の Gate-aware と、制御波形を扱う Pulse をここにまとめました。',
+    callToAction: '物理エンジンを選ぶ',
+    readouts: [
+      { label: 'ENGINE', value: 'GATE / PULSE' },
+      { label: 'FOCUS', value: 'QUANTUM PHYSICS' },
+      { label: 'STATUS', value: 'RESEARCH' },
+    ],
+    signature: 'gate',
+  },
+  {
     id: 'docs',
-    unit: 'REF 04 / DOCUMENTATION',
+    unit: 'REF 03 / DOCUMENTATION',
     title: '公式ドキュメント',
     tagline: '何を計算しているのかを確かめる',
     detail:

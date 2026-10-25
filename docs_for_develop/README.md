@@ -231,6 +231,9 @@ model baseline validation record, and the Windows desktop distribution guide.
 - Old phase documents under `development/` are implementation history.
   Documents marked "Historical" or "Superseded" must not be used as current
   runtime instructions.
+- Archived completed phase plans are kept under [`archive/`](archive/README.md)
+  so they remain available for traceability without crowding the active
+  development-document tree.
 - Freeze reports record the state at freeze time. Later work may supersede
   individual clauses; the superseding document is named inline where that has
   happened.
