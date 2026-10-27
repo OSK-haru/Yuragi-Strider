@@ -14,6 +14,7 @@ import math
 from dataclasses import dataclass
 from functools import reduce
 
+from core.backend_boundary import PYTHON_DENSE_BACKEND, RUST_DENSE_PREVIEW_BACKEND
 from core.cptp import KrausChannel
 from core.gates import Matrix, identity_matrix, tensor
 
@@ -86,6 +87,7 @@ def apply_local_imperfect_reset(
     subsystem_count: int,
     target: int,
     spec: ImperfectResetSpec,
+    kernel_backend: str = PYTHON_DENSE_BACKEND,
 ) -> Matrix:
     """Apply one reset attempt to a tensor-product qubit/qutrit register.
 
@@ -102,9 +104,23 @@ def apply_local_imperfect_reset(
     expected = dimension ** count
     if len(state) != expected or any(len(row) != expected for row in state):
         raise ValueError("state dimension does not match the reset register")
+    if kernel_backend not in (PYTHON_DENSE_BACKEND, RUST_DENSE_PREVIEW_BACKEND):
+        raise ValueError(f"unsupported reset kernel backend: {kernel_backend}")
     if spec.success_probability == 0.0:
         return state
 
+    if kernel_backend == RUST_DENSE_PREVIEW_BACKEND:
+        from core.rust_dense_kernel import rust_apply_local_reset_sequence
+
+        return rust_apply_local_reset_sequence(
+            state,
+            subsystem_count=count,
+            local_dimension=dimension,
+            targets=(target,),
+            success_probabilities=(spec.success_probability,),
+            target_populations=(spec.target_populations,),
+            reset_count=1,
+        )
     return _embedded_reset_channel(spec, target, count).apply(state)
 
 
