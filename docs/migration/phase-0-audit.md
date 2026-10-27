@@ -6,7 +6,7 @@ Scope: source and design-contract review; no physical hardware or external servi
 
 ## Summary
 
-The repository already has a substantial Python attack-simulation foundation and an optional Rust numerical preview. The product is not yet Rust-centered: FastAPI, scenario compilation, service/runtime state, attack evaluation, and the main simulation orchestration remain Python. The Rust extension is called through PyO3 and is not installed in this audit environment.
+The repository already has a substantial Python attack-simulation foundation and an optional Rust numerical preview. The product is not yet Rust-centered: FastAPI, scenario compilation, service/runtime state, attack evaluation, and the main simulation orchestration remain Python. Rust was absent during the initial audit; after the user authorized tool installation, Rust 1.96.0 and the existing PyO3 extension were installed in this environment.
 
 The migration should preserve the current Python contracts as the behavioral reference. In particular, `attack_scenario_manifest_v2`, frozen physical-model baselines, current numerical tolerances, and explicit statuses for experimental models must remain authoritative during the first Rust vertical slice.
 
@@ -30,9 +30,12 @@ The migration should preserve the current Python contracts as the behavioral ref
 
 The call granularity is already better than one PyO3 round trip per RK4 timestep for session-based evolution: `RustDenseSession` holds state and collapse operators and submits a piecewise schedule to a batched Rust method. However, registering each distinct Hamiltonian uses a separate PyO3 method call, and the schedule and output states still cross the boundary. Stateless exponential/Lindblad helpers transfer inputs and outputs on each helper call. A future process boundary would also serialize data; it should be compared empirically before selection.
 
-No timing, memory, or numerical parity claim is made in this audit. The execution host has Python 3.12.14, no `rustc`/`cargo`, and no importable `yuragi_strider_rust` module. Therefore a same-input Python-vs-Rust benchmark and Rust parity run could not be performed here. This is the key Phase 0 verification gap.
+Initial audit check: the execution host had Python 3.12.14, no `rustc`/`cargo`, and no importable `yuragi_strider_rust` module, so the first benchmark attempt was unavailable. After the toolchain was installed, `cargo check` succeeded and the extension built for CPython 3.12. The existing crate also required PyO3's `extension-module` feature for a clean link in this Linux environment; that build configuration is now explicit.
 
 The reproducible benchmark entry point is `scripts/benchmark_backend_boundary.py`. It times the same one-qubit raw fixed-step Lindblad RK4 input through Python and the Rust wrapper, reports warm-ups/repeats, boundary call count, f64 payload sizes, separate Python flatten/reconstruction medians, and Python-traced peak allocations for both paths. `tracemalloc` excludes native Rust allocations, which remain unmeasured. It exits with an explicit unavailable result when the extension is missing. It intentionally does not claim numerical parity from timing.
+
+
+Measured on this execution host (Python 3.12.14, Rust 1.96.0): dimension 2, zero Hamiltonian, one amplitude-damping collapse operator, `dt=0.0002`, 500 RK4 substeps, 2 warm-ups and 7 timed repetitions. Median Python end-to-end was 49.361 ms; Rust through PyO3 was 0.435 ms. Python flattening was 0.008212 ms and output reconstruction 0.000981 ms. The run used one PyO3 call per segment and accounted 256 bytes of flattened f64 payload including input and output. `tracemalloc` peaks were 4,608 bytes for the Python loop and 616 bytes of Python-traced allocation for the Rust wrapper; native Rust allocation peak was not measured. This is one narrow raw-kernel case; it does not establish speedup for full Gate-aware/Pulse simulations or attack scenarios.
 
 ## Behavior and support classification
 
@@ -72,9 +75,23 @@ python -m unittest tests.test_backend_boundary tests.test_scenario_compiler \
   tests.test_concurrent_windows
 ```
 
-Result: 61 tests executed; 59 passed, 1 failed, and 1 test module could not import. The backend test requiring an installed Rust extension failed because the extension is absent. The crosstalk challenge test module could not import because FastAPI is not installed. The remaining selected scenario, budget, analysis, grader, and concurrency tests passed. A follow-up without the unavailable Rust-backend and FastAPI-dependent tests ran 51 tests successfully.
+Initial environment-limited result: 61 tests executed; 59 passed, 1 failed, and 1 test module could not import. The backend test requiring an installed Rust extension failed because the extension was absent. The crosstalk challenge test module could not import because FastAPI was missing. A subset without those dependencies ran 51 tests successfully. After installing the repository's pinned runtime dependencies and building the Rust extension, the same selected suite ran 81 tests successfully; the attack profile ran 338 tests successfully; the Rust/reset/physics subset ran 82 tests successfully.
 
-This is an environment-limited baseline, not a clean repository-wide test result. Full Python dependencies and Rust tooling need to be provisioned before claiming full acceptance.
+At the start of the migration work, verification was focused because the Rust toolchain and runtime dependencies were absent. After the user authorized installing them, Rust 1.96.0, `rustfmt`, the project runtime/validation dependencies, and the editable PyO3 extension were installed. Once the reset kernel and its parity tests were added, `python scripts/run_tests.py full-audit` completed successfully: **1,804 tests passed** in 315.686 seconds. The focused reset/runtime set passed 83 tests. `cargo check`, `cargo fmt --check`, and `cargo test` also completed successfully; the crate currently defines no native Rust unit tests, so kernel behavior is covered by Python-to-Rust parity tests.
+
+The first full-audit run exposed eight subtest errors in one test helper: it copied the immutable actor grant mapping, then tried to access an `ActorRole` key with a plain string. The helper now selects the typed role key before changing its grant set; all 17 program-initialization tests pass. It also exposed two stale source fingerprints in committed freeze reports. The canonical freeze scripts refreshed those audit records against the current sources and installed Rust backend. The frozen physical contract, comparison evidence, API defaults, and numerical tolerance values were preserved; the Rust CPTP smoke is now recorded because the extension is available.
+
+## Migration implementation progress
+
+| Phase | Status | Implemented in this branch |
+| --- | --- | --- |
+| 0: audit | Complete | Source inventory, support classification, risk record, benchmark harness and measured baseline. |
+| 1: contract | Partial | Added strict `local_reset_sequence_v1` to the PyO3 call boundary. Unknown schema versions and unsupported backend IDs are rejected. Rust execution backend and schema version enter the reset model's `configuration_id`, while the default Python configuration ID stays unchanged. This does not yet deserialize or validate the full Python `attack_scenario_manifest_v2` in Rust. |
+| 2: physics core | Partial | Added a Rust batched local replacement/reset kernel for qubit and qutrit state matrices and connected it to both reset model implementations through an explicit `kernel_backend`. Existing Python remains the default. Reset count and target order are preserved. |
+| 3: runtime/API | Not started | FastAPI, state ownership, authorization, time, budget, result publication and React interfaces remain Python/TypeScript. |
+| 4: security analysis foundation | Partial | The kernel is plugged beneath the existing replaceable Python `ResetModel` interface; authorization, hidden state, observation projection, grader and budget remain Python-owned. The mechanism code itself does not get challenge-specific knowledge. Crosstalk and other attack/defense mechanisms have not moved to Rust or a Rust registry. |
+
+Reset-kernel measurements (`scripts/benchmark_reset_kernel.py`) show why the Python path remains the default. With 2 warm-ups and 7 repetitions at 4 qubits, 4 targets, 3 reset rounds, the Python path measured 0.174 ms and Rust/PyO3 0.172 ms. At 6 qubits, 6 targets, 2 rounds, Python measured 0.458 ms and Rust/PyO3 1.917 ms. At 8 qubits, 8 targets, 1 round, Python measured 4.538 ms and Rust/PyO3 31.400 ms. The maximum state difference across these runs was at most `1.4e-17`; Rust used one PyO3 call per full reset sequence. Python-traced allocations for Rust were higher, and native Rust memory was not measured. The current scalar Rust matrix loop is numerically compatible but loses to NumPy on the larger cases; this kernel should not be selected for performance until its layout/transfer strategy is improved and remeasured.
 
 ## Migration risks
 
@@ -87,10 +104,10 @@ This is an environment-limited baseline, not a clean repository-wide test result
 
 ## Recommended next vertical slices
 
-1. Define a versioned Rust experiment input/output contract compatible with `attack_scenario_manifest_v2` and current capability declarations. Validate unknown fields/model IDs explicitly; establish golden JSON fixtures from Python.
-2. Move one bounded, stateless physics operation with frozen inputs and established tolerances, then add cross-language parity and invariant tests. Benchmark all transfer and compute phases before deciding whether to keep PyO3, batch more work, or use IPC.
-3. Move a complete Reset-leakage experiment operation across one coarse Rust boundary while keeping Python API authorization and observation projection in place. Compare against existing Python scenario outputs and test that internal truth is absent from attacker-visible output.
-4. Add the declared two-region crosstalk case only after the same schema can express its resource bindings, overlap window, crosstalk assumptions, and supported topology. Reject wider topologies until implemented.
-5. Consider Rust ownership of runtime/API state only after the physics slice is stable and state persistence/replay requirements have a testable contract.
+1. Improve the reset kernel using a matrix layout and buffer interface that avoids Python float-list conversion; retain Python default until paired benchmark results show a useful range.
+2. Define a versioned Rust experiment input/output contract compatible with `attack_scenario_manifest_v2` and capability declarations. Reject unknown fields/model IDs; establish golden fixtures from Python.
+3. Move a complete Reset-leakage experiment operation across one coarse Rust boundary while keeping Python API authorization and observation projection in place. Compare exact scenario outputs and test that internal truth is absent from attacker-visible output.
+4. Add the declared two-region crosstalk case only after the shared schema can express resource bindings, overlap windows, assumptions, and supported topology. Reject wider topologies until implemented.
+5. Consider Rust ownership of runtime/API state only after the physics slice is stable and persistence/replay requirements have an acceptance test.
 
 These are migration steps, not completed work. This audit does not claim the Rust migration or shared Rust security runtime is complete.
