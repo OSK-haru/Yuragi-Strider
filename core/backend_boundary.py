@@ -8,6 +8,7 @@ from typing import Any
 
 PYTHON_DENSE_BACKEND = "python_dense"
 RUST_DENSE_PREVIEW_BACKEND = "rust_dense_preview"
+RUST_RESET_SEQUENCE_SCHEMA_VERSION = "local_reset_sequence_v1"
 SUPPORTED_SIMULATION_BACKENDS = {
     PYTHON_DENSE_BACKEND,
     RUST_DENSE_PREVIEW_BACKEND,
