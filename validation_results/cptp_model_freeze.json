@@ -1,7 +1,7 @@
 {
   "validation": "CPTP-MODEL-FREEZE-C10",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-27T17:37:39.519780+00:00",
+  "generated_at_utc": "2026-10-27T23:24:43.441425+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -143,8 +143,8 @@
     }
   },
   "source_revision": {
-    "git_commit": "c00dce73cc1f55c86d76fd81d7a1f0c5301d56ce",
-    "critical_source_tree_sha256": "8ac978a915f2a14d9dbe05b04b336b38b14580a622c3acef78fc47a6744f4f1e",
+    "git_commit": "c095853ddec3dd777e94cdc0ea075aaee4497c2c",
+    "critical_source_tree_sha256": "8eecc512a777736f46fdabd03cf0cf31b0daa24d54fc2fb38ec3f713f68854a6",
     "files": [
       {
         "file": "core/cptp.py",
@@ -189,12 +189,12 @@
       {
         "file": "core/rust_dense_kernel.py",
         "exists": true,
-        "sha256": "497d47827f6321578fcc3dfbe228f9238c65dd15e7f28a6658da20bb6428cea0"
+        "sha256": "b276c80c59fcd491fa0facd1e795127869d70eb8ba7a7ba4993a0142f7862c8e"
       },
       {
         "file": "rust_kernels/yuragi_strider_rust/src/lib.rs",
         "exists": true,
-        "sha256": "4cb2198a8ec9e2faeed6d470cbd5639c5254ca5e6e1ec082a5e063490c8e372f"
+        "sha256": "001e26ca2a2661be0aaa011306d9b9ed0f88f03596ecbd6053769304d3c835be"
       },
       {
         "file": "api/pulse_models.py",
