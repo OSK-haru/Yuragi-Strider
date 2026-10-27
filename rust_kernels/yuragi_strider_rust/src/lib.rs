@@ -352,10 +352,7 @@ fn binary_contrast_statistics_v1(
             "unsupported binary contrast schema version: {schema_version}"
         )));
     }
-    if !matches!(
-        observation_source,
-        "actor_visible" | "service_published"
-    ) {
+    if !matches!(observation_source, "actor_visible" | "service_published") {
         return Err(PyValueError::new_err(
             "binary analysis requires an approved observation source",
         ));
@@ -363,9 +360,7 @@ fn binary_contrast_statistics_v1(
     if trials_0 == 0 || trials_1 == 0 {
         return Err(PyValueError::new_err("class trial counts must be positive"));
     }
-    if trials_0 > BINARY_CONTRAST_MAX_EXACT_COUNT
-        || trials_1 > BINARY_CONTRAST_MAX_EXACT_COUNT
-    {
+    if trials_0 > BINARY_CONTRAST_MAX_EXACT_COUNT || trials_1 > BINARY_CONTRAST_MAX_EXACT_COUNT {
         return Err(PyValueError::new_err(
             "class trial counts must be exactly representable as f64",
         ));
@@ -387,9 +382,8 @@ fn binary_contrast_statistics_v1(
         None
     };
     let mean_probability = (p0 + p1) / 2.0;
-    let mutual_information = binary_entropy(mean_probability)
-        - 0.5 * binary_entropy(p0)
-        - 0.5 * binary_entropy(p1);
+    let mutual_information =
+        binary_entropy(mean_probability) - 0.5 * binary_entropy(p0) - 0.5 * binary_entropy(p1);
     let bayes_accuracy = 0.5 * (p0.max(p1) + (1.0 - p0).max(1.0 - p1));
 
     Ok((
