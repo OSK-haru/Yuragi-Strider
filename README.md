@@ -6,6 +6,8 @@ Gate-aware と Pulse は、温度・ノイズなどの環境が量子状態へ�
 
 現在の実装状況と文書の優先順位は
 [`docs_for_develop/README.md`](docs_for_develop/README.md)を参照してください。
+Rust移行と共通セキュリティ基盤の進捗・測定条件は
+[`docs/migration/phase-0-audit.md`](docs/migration/phase-0-audit.md)に記録しています。
 
 ## 標準構成
 
