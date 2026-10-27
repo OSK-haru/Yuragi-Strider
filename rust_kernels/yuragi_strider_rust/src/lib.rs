@@ -3,6 +3,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 const RESET_SEQUENCE_SCHEMA_VERSION: &str = "local_reset_sequence_v1";
+const BINARY_CONTRAST_SCHEMA_VERSION: &str = "security_binary_contrast_v1";
+const BINARY_CONTRAST_MAX_EXACT_COUNT: u64 = 1u64 << 53;
 
 #[pyfunction]
 fn backend_name() -> &'static str {
@@ -334,6 +336,83 @@ fn apply_local_reset_sequence_flat(
     }
     validate_finite_matrix("reset output", &evolved)?;
     Ok(evolved)
+}
+
+#[pyfunction]
+fn binary_contrast_statistics_v1(
+    schema_version: &str,
+    observation_source: &str,
+    trials_0: u64,
+    outcome_one_0: u64,
+    trials_1: u64,
+    outcome_one_1: u64,
+) -> PyResult<(f64, f64, f64, f64, Option<f64>, f64, f64)> {
+    if schema_version != BINARY_CONTRAST_SCHEMA_VERSION {
+        return Err(PyValueError::new_err(format!(
+            "unsupported binary contrast schema version: {schema_version}"
+        )));
+    }
+    if !matches!(
+        observation_source,
+        "actor_visible" | "service_published"
+    ) {
+        return Err(PyValueError::new_err(
+            "binary analysis requires an approved observation source",
+        ));
+    }
+    if trials_0 == 0 || trials_1 == 0 {
+        return Err(PyValueError::new_err("class trial counts must be positive"));
+    }
+    if trials_0 > BINARY_CONTRAST_MAX_EXACT_COUNT
+        || trials_1 > BINARY_CONTRAST_MAX_EXACT_COUNT
+    {
+        return Err(PyValueError::new_err(
+            "class trial counts must be exactly representable as f64",
+        ));
+    }
+    if outcome_one_0 > trials_0 || outcome_one_1 > trials_1 {
+        return Err(PyValueError::new_err(
+            "outcome-one counts cannot exceed class trial counts",
+        ));
+    }
+
+    let p0 = outcome_one_0 as f64 / trials_0 as f64;
+    let p1 = outcome_one_1 as f64 / trials_1 as f64;
+    let difference = p1 - p0;
+    let standard_error =
+        (p0 * (1.0 - p0) / trials_0 as f64 + p1 * (1.0 - p1) / trials_1 as f64).sqrt();
+    let z_score = if standard_error > 0.0 {
+        Some(difference / standard_error)
+    } else {
+        None
+    };
+    let mean_probability = (p0 + p1) / 2.0;
+    let mutual_information = binary_entropy(mean_probability)
+        - 0.5 * binary_entropy(p0)
+        - 0.5 * binary_entropy(p1);
+    let bayes_accuracy = 0.5 * (p0.max(p1) + (1.0 - p0).max(1.0 - p1));
+
+    Ok((
+        p0,
+        p1,
+        difference,
+        standard_error,
+        z_score,
+        mutual_information,
+        bayes_accuracy,
+    ))
+}
+
+fn binary_entropy(probability: f64) -> f64 {
+    let mut entropy = 0.0;
+    if probability > 0.0 {
+        entropy -= probability * probability.log2();
+    }
+    let complement = 1.0 - probability;
+    if complement > 0.0 {
+        entropy -= complement * complement.log2();
+    }
+    entropy
 }
 
 #[pyfunction]
@@ -2088,6 +2167,7 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gksl_piecewise_superoperator_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_evolve_flat, m)?)?;
     m.add_function(wrap_pyfunction!(apply_local_reset_sequence_flat, m)?)?;
+    m.add_function(wrap_pyfunction!(binary_contrast_statistics_v1, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_stages_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_step_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_evolve_cleaned_flat, m)?)?;
