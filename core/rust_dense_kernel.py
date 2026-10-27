@@ -6,6 +6,7 @@ import importlib
 import math
 from collections.abc import Sequence
 
+from core.backend_boundary import RUST_RESET_SEQUENCE_SCHEMA_VERSION
 from core.gates import Matrix
 
 
@@ -370,6 +371,70 @@ def rust_lindblad_rhs(
         flatten_collapse_ops(collapse_ops),
         len(collapse_ops),
         dimension,
+    )
+    return unflatten_complex_matrix(result, dimension)
+
+
+def rust_apply_local_reset_sequence(
+    state: Sequence[Sequence[complex]],
+    *,
+    subsystem_count: int,
+    local_dimension: int,
+    targets: Sequence[int],
+    success_probabilities: Sequence[float],
+    target_populations: Sequence[Sequence[float]],
+    reset_count: int,
+) -> Matrix:
+    """Apply a declared local replacement sequence in one Rust call.
+
+    The operation implements ``E(rho)=(1-s)rho+s*tau*Tr_q(rho)`` for each
+    target, preserving the existing most-significant-subsystem convention.
+    """
+
+    if type(subsystem_count) is not int or subsystem_count < 1:
+        raise ValueError("subsystem_count must be positive")
+    if type(local_dimension) is not int or local_dimension not in (2, 3):
+        raise ValueError("local_dimension must be 2 or 3")
+    if type(reset_count) is not int or reset_count < 0:
+        raise ValueError("reset_count must be a non-negative integer")
+    dimension = local_dimension ** subsystem_count
+    if _validate_square_matrix(state, "state") != dimension:
+        raise ValueError("state dimension does not match reset register")
+    checked_targets = tuple(targets)
+    if any(type(target) is not int for target in checked_targets):
+        raise ValueError("reset targets must be integers")
+    if any(type(value) not in (int, float) for value in success_probabilities):
+        raise ValueError("success probabilities must be numeric")
+    if any(type(value) not in (int, float) for row in target_populations for value in row):
+        raise ValueError("target populations must be numeric")
+    checked_successes = tuple(float(value) for value in success_probabilities)
+    checked_populations = tuple(tuple(float(value) for value in row) for row in target_populations)
+    if (not checked_targets or len(set(checked_targets)) != len(checked_targets)
+            or any(target < 0 or target >= subsystem_count for target in checked_targets)):
+        raise ValueError("reset targets must be unique and inside the register")
+    if len(checked_successes) != len(checked_targets):
+        raise ValueError("one success probability is required per reset target")
+    if len(checked_populations) != len(checked_targets):
+        raise ValueError("one target population vector is required per reset target")
+    for success, populations in zip(checked_successes, checked_populations, strict=True):
+        if not math.isfinite(success) or not 0.0 <= success <= 1.0:
+            raise ValueError("success probabilities must be finite and between zero and one")
+        if (len(populations) != local_dimension
+                or any(not math.isfinite(value) or value < 0.0 for value in populations)
+                or not math.isclose(sum(populations), 1.0, rel_tol=0.0, abs_tol=1e-12)):
+            raise ValueError("target populations must be a normalized local state")
+
+    flat_populations = [value for row in checked_populations for value in row]
+    rust_module = _load_rust_module()
+    result = rust_module.apply_local_reset_sequence_flat(
+        RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+        flatten_complex_matrix(state),
+        subsystem_count,
+        local_dimension,
+        list(checked_targets),
+        list(checked_successes),
+        flat_populations,
+        reset_count,
     )
     return unflatten_complex_matrix(result, dimension)
 
