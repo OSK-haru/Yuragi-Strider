@@ -439,6 +439,40 @@ def rust_apply_local_reset_sequence(
     return unflatten_complex_matrix(result, dimension)
 
 
+def rust_binary_contrast_statistics(
+    schema_version: str,
+    observation_source: str,
+    trials_0: int,
+    outcome_one_0: int,
+    trials_1: int,
+    outcome_one_1: int,
+) -> tuple[float, float, float, float, float | None, float, float]:
+    """Compute generic binary contrast metrics from approved aggregate counts."""
+
+    if type(schema_version) is not str or schema_version != "security_binary_contrast_v1":
+        raise ValueError("unsupported binary contrast schema version")
+    if type(observation_source) is not str or observation_source not in (
+        "actor_visible", "service_published",
+    ):
+        raise ValueError("binary analysis requires an approved observation source")
+    for name, value in (("trials_0", trials_0), ("trials_1", trials_1)):
+        if type(value) is not int or not 1 <= value <= 2**53:
+            raise ValueError(f"{name} must be a positive exactly representable integer")
+    for name, value, trials in (("outcome_one_0", outcome_one_0, trials_0),
+                                ("outcome_one_1", outcome_one_1, trials_1)):
+        if type(value) is not int or not 0 <= value <= trials:
+            raise ValueError(f"{name} must be between zero and its trial count")
+    rust_module = _load_rust_module()
+    operation = getattr(rust_module, "binary_contrast_statistics_v1", None)
+    if not callable(operation):
+        raise RuntimeError("Rust extension does not implement security_binary_contrast_v1")
+    result = operation(
+        schema_version, observation_source, trials_0, outcome_one_0,
+        trials_1, outcome_one_1,
+    )
+    return tuple(result)
+
+
 def rust_gksl_exponential_superoperator(
     hamiltonian: Sequence[Sequence[complex]],
     collapse_ops: Sequence[Sequence[Sequence[complex]]],
