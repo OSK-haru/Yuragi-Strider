@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 gemm = { version = "0.19.0", default-features = false, features = ["std", "rayon"] }
-pyo3 = "0.29.0"
+pyo3 = { version = "0.29.0", features = ["extension-module"] }
 
 [profile.release]
 lto = "thin"
