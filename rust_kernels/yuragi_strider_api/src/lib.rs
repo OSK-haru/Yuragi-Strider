@@ -1,0 +1,157 @@
+use axum::extract::Request;
+use axum::http::header::{
+    CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+};
+use axum::http::{HeaderValue, Method};
+use axum::middleware::{self, Next};
+use axum::response::Response;
+use axum::routing::get;
+use axum::{Json, Router};
+use serde_json::{Value, json};
+use tower_http::cors::{AllowOrigin, CorsLayer};
+
+const API_CONTENT_SECURITY_POLICY_VALUE: &str =
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+
+/// Build the API router. The supplied origins are the exact allowlist from
+/// `ALLOWED_ORIGINS`; an empty list preserves the current no-CORS behavior.
+pub fn api_router(allowed_origins: Vec<HeaderValue>) -> Router {
+    let mut router = Router::new().route("/api/health", get(health));
+
+    if !allowed_origins.is_empty() {
+        router = router.layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::list(allowed_origins))
+                .allow_methods([Method::GET, Method::POST])
+                .allow_headers(tower_http::cors::Any),
+        );
+    }
+
+    router.layer(middleware::from_fn(add_api_security_headers))
+}
+
+async fn health() -> Json<Value> {
+    Json(json!({
+        "status": "ok",
+        "pulse_models": [
+            "driven_coupled_transmon_network_rwa_experimental_v1",
+            "driven_transmon_qutrit_rwa_experimental_v1",
+            "driven_two_level_rwa_experimental_v1"
+        ],
+        "pulse_model_statuses": {
+            "driven_coupled_transmon_network_rwa_experimental_v1": "experimental",
+            "driven_transmon_qutrit_rwa_experimental_v1": "available",
+            "driven_two_level_rwa_experimental_v1": "available"
+        }
+    }))
+}
+
+async fn add_api_security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(API_CONTENT_SECURITY_POLICY_VALUE),
+    );
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    headers.insert(
+        "permissions-policy",
+        HeaderValue::from_static("camera=(), geolocation=(), microphone=()"),
+    );
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::api_router;
+    use axum::body::to_bytes;
+    use axum::http::header::{
+        ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_METHOD,
+        CONTENT_SECURITY_POLICY, ORIGIN,
+    };
+    use axum::http::{HeaderValue, Method, Request, StatusCode};
+    use serde_json::Value;
+    use tower::ServiceExt;
+
+    const HEALTH_CONTRACT: &str = include_str!("../contracts/api-health-v1.json");
+
+    #[tokio::test]
+    async fn health_response_matches_the_shared_wire_contract() {
+        let response = api_router(Vec::new())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/health")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[CONTENT_SECURITY_POLICY],
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        );
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(response.headers()["x-frame-options"], "DENY");
+        assert_eq!(response.headers()["referrer-policy"], "no-referrer");
+        assert_eq!(
+            response.headers()["permissions-policy"],
+            "camera=(), geolocation=(), microphone=()"
+        );
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let actual: Value = serde_json::from_slice(&bytes).unwrap();
+        let expected: Value = serde_json::from_str(HEALTH_CONTRACT).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn health_preflight_preserves_the_configured_cors_policy() {
+        let origin = HeaderValue::from_static("https://ui.example.test");
+        let response = api_router(vec![origin])
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/api/health")
+                    .header(ORIGIN, "https://ui.example.test")
+                    .header(ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.headers()[ACCESS_CONTROL_ALLOW_ORIGIN],
+            "https://ui.example.test"
+        );
+        assert!(
+            response.headers()[ACCESS_CONTROL_ALLOW_METHODS]
+                .to_str()
+                .unwrap()
+                .split(',')
+                .any(|method| method.trim() == "GET")
+        );
+    }
+
+    #[tokio::test]
+    async fn health_preflight_does_not_allow_an_unconfigured_origin() {
+        let response = api_router(vec![HeaderValue::from_static("https://ui.example.test")])
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/api/health")
+                    .header(ORIGIN, "https://untrusted.example.test")
+                    .header(ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(!response.headers().contains_key(ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+}

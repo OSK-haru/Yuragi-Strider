@@ -1,0 +1,13 @@
+{
+  "status": "ok",
+  "pulse_models": [
+    "driven_coupled_transmon_network_rwa_experimental_v1",
+    "driven_transmon_qutrit_rwa_experimental_v1",
+    "driven_two_level_rwa_experimental_v1"
+  ],
+  "pulse_model_statuses": {
+    "driven_coupled_transmon_network_rwa_experimental_v1": "experimental",
+    "driven_transmon_qutrit_rwa_experimental_v1": "available",
+    "driven_two_level_rwa_experimental_v1": "available"
+  }
+}

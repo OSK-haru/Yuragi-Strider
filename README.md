@@ -7,11 +7,12 @@ Gate-aware と Pulse は、温度・ノイズなどの環境が量子状態へ�
 現在の実装状況と文書の優先順位は
 [`docs_for_develop/README.md`](docs_for_develop/README.md)を参照してください。
 Rust移行と共通セキュリティ基盤の進捗・測定条件は
-[`docs/migration/phase-0-audit.md`](docs/migration/phase-0-audit.md)に記録しています。
+[`docs/migration/phase-0-audit.md`](docs/migration/phase-0-audit.md)と
+[`docs/migration/rust-api-contract.md`](docs/migration/rust-api-contract.md)に記録しています。
 
 ## 標準構成
 
-現行 UI は React/Vite、計算 API は FastAPI、標準シミュレーションコアはRustへ移行中です。QuTiP と Python 実装は独立検証に使用します。Circuit Studio の既定backendは現在 `python_dense` です。`rust_dense_v1` は明示選択でき、未対応の実行経路ではPythonへ黙ってフォールバックせずエラーにします。既存の保存済み `.qscope` は記録されたbackendを維持します。攻撃用の新規共有QPU profileはRust register runtimeを選び、過去manifestでbackend指定がないものと汎用runtimeはPythonを維持します。測定乱数、読み出し誤り、状態イベント、API orchestrationなどは段階移行中です。
+現行 UI は React/Vite、運用中の計算 API は FastAPI、標準シミュレーションコアはRustへ移行中です。Rust/Axum APIは `/api/health` の契約移植を始めた並行実装で、まだ運用トラフィックを受けていません。QuTiP と Python 実装は独立検証に使用します。Circuit Studio の既定backendは現在 `python_dense` です。`rust_dense_v1` は明示選択でき、未対応の実行経路ではPythonへ黙ってフォールバックせずエラーにします。既存の保存済み `.qscope` は記録されたbackendを維持します。攻撃用の新規共有QPU profileはRust register runtimeを選び、過去manifestでbackend指定がないものと汎用runtimeはPythonを維持します。測定乱数、読み出し誤り、状態イベント、API orchestrationなどは段階移行中です。
 
 | 層 | 実装 | 役割 |
 |---|---|---|
