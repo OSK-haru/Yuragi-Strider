@@ -10,7 +10,7 @@ The repository already has a substantial Python attack-simulation foundation and
 
 The migration should preserve the current Python contracts as the behavioral reference. In particular, `attack_scenario_manifest_v2`, frozen physical-model baselines, current numerical tolerances, and explicit statuses for experimental models must remain authoritative during the first Rust vertical slice.
 
-The owner's target is Rust ownership of the core and runtime. Remaining Python is limited to coarse-grained extension integrations through PyO3 and independent tests or validation. Existing Python service, scheduling and physics code is transitional and is not the target architecture. React/TypeScript remains the UI. Transition work must preserve the existing observation and authorization boundaries.
+The owner's target is a Rust standard core and runtime, with Python retained for optional extension features and independent testing or validation. Python extensions may implement substantial functionality and use scientific libraries; they are not limited to wrapper code. The standard Rust core must run without requiring a Python extension. When an extension is used, collect the information it needs and exchange it in coarse-grained batches through PyO3, avoiding repeated high-frequency conversions and calls. Long-lived simulation state should remain Rust-owned; transfer the requested data across the extension boundary. The precise extension hosting and distribution mechanism is not yet decided. Existing Python service, scheduling and standard physics code is transitional. React/TypeScript remains the UI, and observation and authorization boundaries must be preserved throughout migration.
 
 ## Current implementation inventory
 
