@@ -1,6 +1,17 @@
 use gemm::{Parallelism, c64, gemm};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
+use std::collections::HashMap;
+use yuragi_strider_core::statevector::{
+    StatevectorOperation, apply_binary_readout, execute_ideal_circuit,
+    execute_ideal_density_circuit,
+};
+
+const RESET_SEQUENCE_SCHEMA_VERSION: &str = "local_reset_sequence_v1";
+const BINARY_CONTRAST_SCHEMA_VERSION: &str = "security_binary_contrast_v1";
+const BINARY_CONTRAST_MAX_EXACT_COUNT: u64 = 1u64 << 53;
+const CROSSTALK_EVALUATION_SCHEMA_VERSION: &str = "crosstalk_disruption_v1";
 
 #[pyfunction]
 fn backend_name() -> &'static str {
@@ -193,6 +204,676 @@ fn rk4_evolve_flat(
     }
 
     Ok(evolved)
+}
+
+#[pyfunction]
+fn apply_local_reset_sequence_flat(
+    schema_version: &str,
+    rho: Vec<f64>,
+    subsystem_count: usize,
+    local_dimension: usize,
+    targets: Vec<usize>,
+    success_probabilities: Vec<f64>,
+    target_populations: Vec<f64>,
+    reset_count: usize,
+) -> PyResult<Vec<f64>> {
+    if schema_version != RESET_SEQUENCE_SCHEMA_VERSION {
+        return Err(PyValueError::new_err(format!(
+            "unsupported reset sequence schema version: {schema_version}"
+        )));
+    }
+    let mut state =
+        yuragi_strider_core::reset::ResetState::new(rho, subsystem_count, local_dimension)
+            .map_err(PyValueError::new_err)?;
+    let operation = yuragi_strider_core::reset::ResetOperation {
+        targets,
+        success_probabilities,
+        target_populations,
+        reset_count,
+    };
+    state.execute(&[operation]).map_err(PyValueError::new_err)?;
+    Ok(state.values().to_vec())
+}
+
+#[pyfunction]
+fn execute_ideal_circuit_v1(
+    logical_qubits: usize,
+    classical_bits: usize,
+    initial_states: Vec<String>,
+    operations: Vec<(
+        String,
+        Vec<usize>,
+        Vec<usize>,
+        f64,
+        usize,
+        u8,
+        Option<usize>,
+        Vec<(usize, u8)>,
+    )>,
+    readout_errors: Vec<(f64, f64)>,
+) -> PyResult<(Vec<f64>, Vec<f64>)> {
+    let operations = operations
+        .into_iter()
+        .map(
+            |(
+                kind,
+                targets,
+                controls,
+                theta_rad,
+                marked_index,
+                control_value,
+                control_state,
+                conditions,
+            )| StatevectorOperation {
+                kind,
+                targets,
+                controls,
+                theta_rad,
+                marked_index,
+                control_value,
+                control_state,
+                conditions,
+            },
+        )
+        .collect::<Vec<_>>();
+    let ideal = execute_ideal_circuit(
+        logical_qubits,
+        classical_bits,
+        &initial_states,
+        &operations,
+    )
+    .map_err(PyValueError::new_err)?;
+    let observed = if readout_errors.is_empty() {
+        ideal.clone()
+    } else {
+        apply_binary_readout(&ideal, logical_qubits, &readout_errors)
+            .map_err(PyValueError::new_err)?
+    };
+    Ok((ideal, observed))
+}
+
+#[pyfunction]
+fn apply_binary_readout_v1(
+    probabilities: Vec<f64>,
+    logical_qubits: usize,
+    assignment_errors: Vec<(f64, f64)>,
+) -> PyResult<Vec<f64>> {
+    apply_binary_readout(&probabilities, logical_qubits, &assignment_errors)
+        .map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+fn execute_ideal_density_circuit_v1(
+    logical_qubits: usize,
+    initial_states: Vec<String>,
+    operations: Vec<(
+        usize,
+        String,
+        Vec<usize>,
+        Vec<usize>,
+        f64,
+        usize,
+        u8,
+        Option<usize>,
+    )>,
+) -> PyResult<Vec<f64>> {
+    let operations = operations
+        .into_iter()
+        .map(
+            |(
+                step,
+                kind,
+                targets,
+                controls,
+                theta_rad,
+                marked_index,
+                control_value,
+                control_state,
+            )| {
+                (
+                    step,
+                    StatevectorOperation {
+                        kind,
+                        targets,
+                        controls,
+                        theta_rad,
+                        marked_index,
+                        control_value,
+                        control_state,
+                        conditions: Vec::new(),
+                    },
+                )
+            },
+        )
+        .collect::<Vec<_>>();
+    execute_ideal_density_circuit(logical_qubits, &initial_states, &operations)
+        .map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+fn select_snapshot_indices_v1(
+    candidates: Vec<(f64, String)>,
+    max_snapshots: usize,
+) -> PyResult<(Vec<usize>, usize)> {
+    yuragi_strider_core::snapshot_policy::select_snapshot_indices(
+        &candidates,
+        max_snapshots,
+    )
+    .map_err(PyValueError::new_err)
+}
+
+/// A Rust-owned density matrix; a whole reset schedule crosses PyO3 once.
+#[pyclass(name = "ResetSession")]
+struct PyResetSession {
+    state: yuragi_strider_core::reset::ResetState,
+}
+
+#[pymethods]
+impl PyResetSession {
+    #[new]
+    fn new(
+        schema_version: &str,
+        rho: Vec<f64>,
+        subsystem_count: usize,
+        local_dimension: usize,
+    ) -> PyResult<Self> {
+        if schema_version != "local_reset_state_v1" {
+            return Err(PyValueError::new_err(
+                "unsupported reset state schema version",
+            ));
+        }
+        Ok(Self {
+            state: yuragi_strider_core::reset::ResetState::new(
+                rho,
+                subsystem_count,
+                local_dimension,
+            )
+            .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    fn execute(
+        &mut self,
+        schema_version: &str,
+        operations: Vec<(Vec<usize>, Vec<f64>, Vec<f64>, usize)>,
+    ) -> PyResult<()> {
+        if schema_version != "local_reset_batch_v1" {
+            return Err(PyValueError::new_err(
+                "unsupported reset batch schema version",
+            ));
+        }
+        let operations = operations
+            .into_iter()
+            .map(
+                |(targets, success_probabilities, target_populations, reset_count)| {
+                    yuragi_strider_core::reset::ResetOperation {
+                        targets,
+                        success_probabilities,
+                        target_populations,
+                        reset_count,
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
+        self.state
+            .execute(&operations)
+            .map_err(PyValueError::new_err)
+    }
+
+    fn state_flat(&self) -> Vec<f64> {
+        self.state.values().to_vec()
+    }
+}
+
+/// Batched qubit register operations, with density state kept in the Rust core.
+#[pyclass(name = "RegisterSession")]
+struct PyRegisterSession {
+    state: yuragi_strider_core::register::DensityRegister,
+}
+
+#[pymethods]
+impl PyRegisterSession {
+    #[new]
+    fn new(schema_version: &str, rho: Vec<f64>, qubits: usize) -> PyResult<Self> {
+        if schema_version != "register_state_v1" {
+            return Err(PyValueError::new_err(
+                "unsupported register state schema version",
+            ));
+        }
+        Ok(Self {
+            state: yuragi_strider_core::register::DensityRegister::new(rho, qubits)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    /// Each tuple is (kind, operands, data, scalar); all records are one atomic batch.
+    fn execute(
+        &mut self,
+        schema_version: &str,
+        operations: Vec<(String, Vec<usize>, Vec<f64>, f64)>,
+    ) -> PyResult<Vec<Vec<usize>>> {
+        let converted = parse_register_batch(schema_version, operations)?;
+        let measurements = self
+            .state
+            .execute(&converted)
+            .map_err(PyValueError::new_err)?;
+        Ok(measurements
+            .into_iter()
+            .map(|bits| bits.into_iter().map(usize::from).collect())
+            .collect())
+    }
+
+    fn execute_with_checkpoints(
+        &mut self,
+        schema_version: &str,
+        operations: Vec<(String, Vec<usize>, Vec<f64>, f64)>,
+        checkpoints: Vec<usize>,
+    ) -> PyResult<(Vec<Vec<usize>>, Vec<Vec<f64>>)> {
+        let converted = parse_register_batch(schema_version, operations)?;
+        let (measurements, snapshots) = self
+            .state
+            .execute_with_checkpoints(&converted, &checkpoints)
+            .map_err(PyValueError::new_err)?;
+        Ok((
+            measurements
+                .into_iter()
+                .map(|bits| bits.into_iter().map(usize::from).collect())
+                .collect(),
+            snapshots,
+        ))
+    }
+
+    fn state_flat(&self) -> Vec<f64> {
+        self.state.values().to_vec()
+    }
+}
+
+fn parse_register_batch(
+    schema_version: &str,
+    operations: Vec<(String, Vec<usize>, Vec<f64>, f64)>,
+) -> PyResult<Vec<yuragi_strider_core::register::RegisterOperation>> {
+    use yuragi_strider_core::register::{IdleSpec, RegisterOperation};
+    use yuragi_strider_core::reset::ResetOperation;
+    if schema_version != "register_batch_v1" {
+        return Err(PyValueError::new_err(
+            "unsupported register batch schema version",
+        ));
+    }
+    let mut converted = Vec::with_capacity(operations.len());
+    for (kind, qubits, data, scalar) in operations {
+        let operation = match kind.as_str() {
+            "unitary" if scalar == 0.0 => RegisterOperation::Unitary {
+                qubits,
+                matrix: data,
+            },
+            "reset" if scalar == 0.0 && data.len() == qubits.len().saturating_mul(3) => {
+                let mut probabilities = Vec::with_capacity(qubits.len());
+                let mut populations = Vec::with_capacity(qubits.len() * 2);
+                for values in data.chunks_exact(3) {
+                    probabilities.push(values[0]);
+                    populations.extend_from_slice(&values[1..3]);
+                }
+                RegisterOperation::Reset(ResetOperation {
+                    targets: qubits,
+                    success_probabilities: probabilities,
+                    target_populations: populations,
+                    reset_count: 1,
+                })
+            }
+            "depolarize" if data.is_empty() => RegisterOperation::Depolarize {
+                qubits,
+                probability: scalar,
+            },
+            "dephase" if data.is_empty() && scalar == 0.0 => RegisterOperation::Dephase { qubits },
+            "idle" if data.len() == qubits.len().saturating_mul(3) => {
+                let specs = data
+                    .chunks_exact(3)
+                    .map(|values| IdleSpec {
+                        t1_us: values[0],
+                        tphi_us: values[1],
+                        equilibrium_excited_population: values[2],
+                    })
+                    .collect();
+                RegisterOperation::Idle {
+                    qubits,
+                    specs,
+                    elapsed_us: scalar,
+                }
+            }
+            "measure" if data.is_empty() => RegisterOperation::Measure {
+                qubits,
+                draw: scalar,
+            },
+            _ => {
+                return Err(PyValueError::new_err(
+                    "unknown or malformed register operation",
+                ));
+            }
+        };
+        converted.push(operation);
+    }
+    Ok(converted)
+}
+
+/// Execute a complete register batch through the shared qubit register kernel.
+#[pyfunction]
+fn execute_register_batch_flat(
+    schema_version: &str,
+    rho: Vec<f64>,
+    qubits: usize,
+    operations: Vec<(String, Vec<usize>, Vec<f64>, f64)>,
+) -> PyResult<(Vec<Vec<usize>>, Vec<f64>)> {
+    let converted = parse_register_batch(schema_version, operations)?;
+    let mut state = yuragi_strider_core::register::DensityRegister::new(rho, qubits)
+        .map_err(PyValueError::new_err)?;
+    let measurements = state
+        .execute(&converted)
+        .map_err(PyValueError::new_err)?
+        .into_iter()
+        .map(|bits| bits.into_iter().map(usize::from).collect())
+        .collect();
+    Ok((measurements, state.values().to_vec()))
+}
+
+#[pyfunction]
+fn binary_contrast_statistics_v1(
+    schema_version: &str,
+    observation_source: &str,
+    trials_0: u64,
+    outcome_one_0: u64,
+    trials_1: u64,
+    outcome_one_1: u64,
+) -> PyResult<(f64, f64, f64, f64, Option<f64>, f64, f64)> {
+    if schema_version != BINARY_CONTRAST_SCHEMA_VERSION {
+        return Err(PyValueError::new_err(format!(
+            "unsupported binary contrast schema version: {schema_version}"
+        )));
+    }
+    if !matches!(observation_source, "actor_visible" | "service_published") {
+        return Err(PyValueError::new_err(
+            "binary analysis requires an approved observation source",
+        ));
+    }
+    if trials_0 == 0 || trials_1 == 0 {
+        return Err(PyValueError::new_err("class trial counts must be positive"));
+    }
+    if trials_0 > BINARY_CONTRAST_MAX_EXACT_COUNT || trials_1 > BINARY_CONTRAST_MAX_EXACT_COUNT {
+        return Err(PyValueError::new_err(
+            "class trial counts must be exactly representable as f64",
+        ));
+    }
+    if outcome_one_0 > trials_0 || outcome_one_1 > trials_1 {
+        return Err(PyValueError::new_err(
+            "outcome-one counts cannot exceed class trial counts",
+        ));
+    }
+
+    let (p0, p1, standard_error) =
+        binary_group_statistics(outcome_one_0, trials_0, outcome_one_1, trials_1);
+    let difference = p1 - p0;
+    let z_score = if standard_error > 0.0 {
+        Some(difference / standard_error)
+    } else {
+        None
+    };
+    let mean_probability = (p0 + p1) / 2.0;
+    let mutual_information =
+        binary_entropy(mean_probability) - 0.5 * binary_entropy(p0) - 0.5 * binary_entropy(p1);
+    let bayes_accuracy = 0.5 * (p0.max(p1) + (1.0 - p0).max(1.0 - p1));
+
+    Ok((
+        p0,
+        p1,
+        difference,
+        standard_error,
+        z_score,
+        mutual_information,
+        bayes_accuracy,
+    ))
+}
+
+/// Pool public labelled reset-training observations and compute the shared
+/// contrast plus threshold fit in one coarse PyO3 call.
+#[pyfunction]
+fn reset_training_analysis_v1<'py>(
+    py: Python<'py>,
+    schema_version: &str,
+    observations: Vec<(u8, u64, u64)>,
+) -> PyResult<Bound<'py, PyDict>> {
+    if schema_version != BINARY_CONTRAST_SCHEMA_VERSION {
+        return Err(PyValueError::new_err(
+            "unsupported reset analysis schema version",
+        ));
+    }
+    let mut sample_count = [0u64; 2];
+    let mut shots = [0u64; 2];
+    let mut ones = [0u64; 2];
+    for (label, trial_count, outcome_one_count) in observations {
+        if label > 1
+            || trial_count == 0
+            || outcome_one_count > trial_count
+            || trial_count > BINARY_CONTRAST_MAX_EXACT_COUNT
+        {
+            return Err(PyValueError::new_err(
+                "invalid labelled reset training observation",
+            ));
+        }
+        let label = label as usize;
+        sample_count[label] = sample_count[label]
+            .checked_add(1)
+            .ok_or_else(|| PyValueError::new_err("observation count overflow"))?;
+        shots[label] = shots[label]
+            .checked_add(trial_count)
+            .ok_or_else(|| PyValueError::new_err("shot count overflow"))?;
+        ones[label] = ones[label]
+            .checked_add(outcome_one_count)
+            .ok_or_else(|| PyValueError::new_err("outcome count overflow"))?;
+    }
+    if sample_count.contains(&0) || shots.contains(&0) {
+        return Err(PyValueError::new_err(
+            "training requires observations for both labels",
+        ));
+    }
+    if shots
+        .iter()
+        .any(|count| *count > BINARY_CONTRAST_MAX_EXACT_COUNT)
+    {
+        return Err(PyValueError::new_err(
+            "training shot counts exceed the exact count range",
+        ));
+    }
+    let (p0, p1, standard_error) = binary_group_statistics(ones[0], shots[0], ones[1], shots[1]);
+    let threshold = (p0 + p1) / 2.0;
+    let difference = p1 - p0;
+    let z_score = if standard_error > 0.0 {
+        Some(difference / standard_error)
+    } else {
+        None
+    };
+    let mutual_information =
+        binary_entropy((p0 + p1) / 2.0) - 0.5 * binary_entropy(p0) - 0.5 * binary_entropy(p1);
+    let bayes_accuracy = 0.5 * (p0.max(p1) + (1.0 - p0).max(1.0 - p1));
+    let result = PyDict::new(py);
+    result.set_item("observation_count_by_label", sample_count.to_vec())?;
+    result.set_item("shots_by_label", shots.to_vec())?;
+    result.set_item("outcome_one_by_label", ones.to_vec())?;
+    result.set_item("threshold", threshold)?;
+    result.set_item("predict_one_when_at_or_above", p1 > p0)?;
+    result.set_item("probability_one_by_class", vec![p0, p1])?;
+    result.set_item("difference_class_1_minus_class_0", difference)?;
+    result.set_item("standard_error", standard_error)?;
+    result.set_item("z_score", z_score)?;
+    result.set_item("balanced_prior_mutual_information_bits", mutual_information)?;
+    result.set_item("balanced_prior_bayes_accuracy", bayes_accuracy)?;
+    Ok(result)
+}
+
+fn binary_group_statistics(
+    successes_0: u64,
+    trials_0: u64,
+    successes_1: u64,
+    trials_1: u64,
+) -> (f64, f64, f64) {
+    let p0 = successes_0 as f64 / trials_0 as f64;
+    let p1 = successes_1 as f64 / trials_1 as f64;
+    let standard_error =
+        (p0 * (1.0 - p0) / trials_0 as f64 + p1 * (1.0 - p1) / trials_1 as f64).sqrt();
+    (p0, p1, standard_error)
+}
+
+fn binary_entropy(probability: f64) -> f64 {
+    let mut entropy = 0.0;
+    if probability > 0.0 {
+        entropy -= probability * probability.log2();
+    }
+    let complement = 1.0 - probability;
+    if complement > 0.0 {
+        entropy -= complement * complement.log2();
+    }
+    entropy
+}
+
+/// Evaluate an entire private workload without returning its intermediate counts.
+#[pyfunction]
+fn evaluate_crosstalk_disruption_v1(
+    schema_version: &str,
+    runs: Vec<HashMap<String, u64>>,
+    success_outcome: &str,
+    baseline_successes: u64,
+    baseline_shots: u64,
+    significance_z: f64,
+    minimum_drop: f64,
+) -> PyResult<bool> {
+    if schema_version != CROSSTALK_EVALUATION_SCHEMA_VERSION {
+        return Err(PyValueError::new_err(
+            "unsupported crosstalk evaluation schema",
+        ));
+    }
+    if runs.is_empty()
+        || success_outcome.is_empty()
+        || baseline_shots == 0
+        || baseline_shots > BINARY_CONTRAST_MAX_EXACT_COUNT
+        || baseline_successes > baseline_shots
+        || !significance_z.is_finite()
+        || !minimum_drop.is_finite()
+    {
+        return Err(PyValueError::new_err("invalid crosstalk evaluation input"));
+    }
+    let mut attacked_successes = 0u64;
+    let mut attacked_shots = 0u64;
+    for run in &runs {
+        for (outcome, count) in run {
+            attacked_shots = attacked_shots
+                .checked_add(*count)
+                .ok_or_else(|| PyValueError::new_err("shot count overflow"))?;
+            if outcome == success_outcome {
+                attacked_successes = attacked_successes
+                    .checked_add(*count)
+                    .ok_or_else(|| PyValueError::new_err("success count overflow"))?;
+            }
+        }
+    }
+    if attacked_shots == 0 || attacked_shots > BINARY_CONTRAST_MAX_EXACT_COUNT {
+        return Err(PyValueError::new_err("invalid attacked shot count"));
+    }
+    let (p_attack, p_base, standard_error) = binary_group_statistics(
+        attacked_successes,
+        attacked_shots,
+        baseline_successes,
+        baseline_shots,
+    );
+    let drop = p_base - p_attack;
+    if standard_error == 0.0 {
+        return Ok(drop >= minimum_drop);
+    }
+    Ok(drop >= minimum_drop && drop / standard_error >= significance_z)
+}
+
+/// Owns private baseline and submission accounting for one challenge instance.
+#[pyclass]
+struct CrosstalkEvaluationRuntime {
+    success_outcome: String,
+    required_runs: usize,
+    max_attempts: u32,
+    attempts: u32,
+    baseline: Option<(u64, u64)>,
+    significance_z: f64,
+    minimum_drop: f64,
+}
+
+#[pymethods]
+impl CrosstalkEvaluationRuntime {
+    #[new]
+    fn new(
+        schema_version: &str,
+        success_outcome: String,
+        required_runs: usize,
+        max_attempts: u32,
+        significance_z: f64,
+        minimum_drop: f64,
+    ) -> PyResult<Self> {
+        if schema_version != CROSSTALK_EVALUATION_SCHEMA_VERSION
+            || success_outcome.is_empty()
+            || required_runs == 0
+            || max_attempts == 0
+            || !significance_z.is_finite()
+            || !minimum_drop.is_finite()
+        {
+            return Err(PyValueError::new_err(
+                "invalid crosstalk runtime configuration",
+            ));
+        }
+        Ok(Self {
+            success_outcome,
+            required_runs,
+            max_attempts,
+            attempts: 0,
+            baseline: None,
+            significance_z,
+            minimum_drop,
+        })
+    }
+
+    fn attempts_remaining(&self) -> u32 {
+        self.max_attempts - self.attempts
+    }
+
+    fn requires_baseline(&self, run_count: usize) -> bool {
+        run_count >= self.required_runs && self.baseline.is_none()
+    }
+
+    fn submit(
+        &mut self,
+        runs: Vec<HashMap<String, u64>>,
+        baseline: Option<(u64, u64)>,
+    ) -> PyResult<(u32, u32, bool, bool)> {
+        if self.attempts == self.max_attempts {
+            return Err(PyValueError::new_err("no submissions remain"));
+        }
+        if runs.len() < self.required_runs {
+            return Ok((self.attempts, self.attempts_remaining(), false, false));
+        }
+        if self.baseline.is_none() {
+            let (successes, shots) =
+                baseline.ok_or_else(|| PyValueError::new_err("baseline required"))?;
+            if shots == 0 || shots > BINARY_CONTRAST_MAX_EXACT_COUNT || successes > shots {
+                return Err(PyValueError::new_err("invalid baseline counts"));
+            }
+            self.baseline = Some((successes, shots));
+        }
+        let (successes, shots) = self.baseline.expect("validated baseline");
+        let passed = evaluate_crosstalk_disruption_v1(
+            CROSSTALK_EVALUATION_SCHEMA_VERSION,
+            runs,
+            &self.success_outcome,
+            successes,
+            shots,
+            self.significance_z,
+            self.minimum_drop,
+        )?;
+        self.attempts += 1;
+        Ok((self.attempts, self.attempts_remaining(), true, passed))
+    }
 }
 
 #[pyfunction]
@@ -1946,6 +2627,18 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gksl_exponential_superoperator_flat, m)?)?;
     m.add_function(wrap_pyfunction!(gksl_piecewise_superoperator_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_evolve_flat, m)?)?;
+    m.add_function(wrap_pyfunction!(apply_local_reset_sequence_flat, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_register_batch_flat, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_ideal_circuit_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(apply_binary_readout_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_ideal_density_circuit_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(select_snapshot_indices_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(binary_contrast_statistics_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(reset_training_analysis_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(evaluate_crosstalk_disruption_v1, m)?)?;
+    m.add_class::<CrosstalkEvaluationRuntime>()?;
+    m.add_class::<PyResetSession>()?;
+    m.add_class::<PyRegisterSession>()?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_stages_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_step_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_evolve_cleaned_flat, m)?)?;

@@ -556,11 +556,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "yuragi_strider_core"
+version = "0.1.0"
+
+[[package]]
 name = "yuragi_strider_rust"
 version = "0.1.0"
 dependencies = [
  "gemm",
  "pyo3",
+ "yuragi_strider_core",
 ]
 
 [[package]]

@@ -1,10 +1,28 @@
-# The image copies only requirements-runtime.txt, api/, core/ and
-# data/device_snapshots/ (see Dockerfile); keep everything else out of the
-# build context.
+# The image also builds the Rust extension from its Cargo sources.
 *
 !requirements-runtime.txt
 !api
 !core
 !data/device_snapshots
+!rust_kernels
+!rust_kernels/yuragi_strider_rust
+!rust_kernels/yuragi_strider_rust/Cargo.toml
+!rust_kernels/yuragi_strider_rust/Cargo.lock
+!rust_kernels/yuragi_strider_rust/pyproject.toml
+!rust_kernels/yuragi_strider_rust/src
+!rust_kernels/yuragi_strider_rust/src/**
+rust_kernels/yuragi_strider_rust/target
+!rust_kernels/yuragi_strider_core
+!rust_kernels/yuragi_strider_core/Cargo.toml
+!rust_kernels/yuragi_strider_core/src
+!rust_kernels/yuragi_strider_core/src/**
+rust_kernels/yuragi_strider_core/target
+!rust_kernels/yuragi_strider_api
+!rust_kernels/yuragi_strider_api/Cargo.toml
+!rust_kernels/yuragi_strider_api/Cargo.lock
+!rust_kernels/yuragi_strider_api/src
+!rust_kernels/yuragi_strider_api/src/**
+!rust_kernels/yuragi_strider_api/contracts
+!rust_kernels/yuragi_strider_api/contracts/**
 **/__pycache__
 **/*.pyc

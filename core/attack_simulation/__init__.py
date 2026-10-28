@@ -55,6 +55,7 @@ from core.attack_simulation.reset_leakage_analysis import (
     FrequencyThresholdTrainingError,
     FrequencyThresholdTrainingResult,
     LabeledBinaryObservation,
+    analyze_public_training_results,
     fit_frequency_threshold_estimator,
 )
 from core.attack_simulation.reset_leakage_settings import (
@@ -142,6 +143,7 @@ __all__ = (
     "SharedQpuRuntimeConfig",
     "RESET_LEAKAGE_V0_SETTINGS",
     "VictimPrepareOperation",
+    "analyze_public_training_results",
     "fit_frequency_threshold_estimator",
     "single_qubit_zero_snapshot",
 )

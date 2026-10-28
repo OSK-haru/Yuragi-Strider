@@ -1,7 +1,7 @@
 {
   "validation": "PHYSICAL-MODEL-BASELINE-V1",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-20T13:40:24.265986+00:00",
+  "generated_at_utc": "2026-10-28T09:44:03.496756+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -70,68 +70,68 @@
     }
   },
   "source_revision": {
-    "git_head": "48d0711bd6b0f1b083e40f1cd09dbbffaca00821",
-    "critical_source_tree_sha256": "f5f010300102fe4b19fc45d8a5ff38ffdea0ccbd95e2fb58e5c73190465a4c85",
+    "git_head": "a5c96b926b8d3580b1a58066ebc91cafde36a075",
+    "critical_source_tree_sha256": "affb95cb580c314beb099197e473b407782f6a759b03605ed693c9ca9a28848f",
     "files": [
       {
         "file": "core/capabilities.py",
         "exists": true,
-        "sha256": "22330a9cd13d48fa05db367018a68d426a6b243015090d701ceb58f9d128eb88"
+        "sha256": "9efb3b4025771908fa50c7e35d1fdb03d7aca7fab42ca06a0e4890866ba5d780"
       },
       {
         "file": "core/classical_branching.py",
         "exists": true,
-        "sha256": "06da641e384e556878f4271397121dccad55f1fe5ce90c518aafe318a5a326b5"
+        "sha256": "6fbe2eb33262de5f69ca79a3a9db479d889e3fabcc2ab5abeb85a69d61daa724"
       },
       {
         "file": "core/gates.py",
         "exists": true,
-        "sha256": "d35258c34765b81e99eb1d8e849c42384c10aa64f8153a623b03582cf86cbb11"
+        "sha256": "580a5fa5e4878ff3448b525f4b0f9e98a5fb51e42192b9d1f45eef6f7418eb2c"
       },
       {
         "file": "core/physical_environment.py",
         "exists": true,
-        "sha256": "9f6a5cd7fcc32ab6e7db5530c389f2bfb31b1119d18b6bc83f40227ea31b8df3"
+        "sha256": "3d2bd760333fa416cd8cea407c413e69218ae90115f5be8e11f4900ec2ae0182"
       },
       {
         "file": "core/results.py",
         "exists": true,
-        "sha256": "4ac8aa523061cd58e7bb042a31049f1d6aa9b9fbcc242d2256cfa66ae521970d"
+        "sha256": "0231699f4afbe72f76ede89227affb0761e65dcf5a310ac0a8e0a188de5494e5"
       },
       {
         "file": "core/simulator.py",
         "exists": true,
-        "sha256": "d5ab6ec79422de1ff1e3f81e1196abd6193c400ed4b991fd7b1a97535e7f223b"
+        "sha256": "bf94ff313cf9849a074f89eb8ee126e1aa7e3aaaed5df6c1fe9ef0f6ffd5fbc3"
       },
       {
         "file": "core/ui_response.py",
         "exists": true,
-        "sha256": "c53c52e38a3209e5ea679dedda65476877334d61916b33a563fb56ab92af2aac"
+        "sha256": "f0f6b02ebcedd636317a16e96b776edb287c412bedfe5e5d8c29e643bdd65b24"
       },
       {
         "file": "core/validation.py",
         "exists": true,
-        "sha256": "f77fea7eced41afbd6b477b3b014ecca2523eda207b3dc5f3c46f01d5f6d888d"
+        "sha256": "7f2d2df59650917b3da808da0ad882e47391f62f6e87e0b9f9d5d91885c47404"
       },
       {
         "file": "api/main.py",
         "exists": true,
-        "sha256": "72847c9e86da1a0000317fd75fb86689407c3bc0394168a53bdd3c74d3e8c85e"
+        "sha256": "85c68def208e1948ee8b7174a417e7c60f2e5012e2dccc35e6221e7fb9aed1f1"
       },
       {
         "file": "api/pulse_models.py",
         "exists": true,
-        "sha256": "4785b2782af7c7f261d59ff5992d231865f72bf8948f7fe992f42d2d8c6881d0"
+        "sha256": "16edf0ec806b3dbf25fbaacefef45adf047d048439c2d0b308a0b45777f165df"
       },
       {
         "file": "api/pulse_qutrit_service.py",
         "exists": true,
-        "sha256": "4aa950e307947ebea4170ac89cbbbc350c89fa3a3476e2bcb4b8b588c7baf8fe"
+        "sha256": "bd2ec7e49c156f996080e1e2723fddb2db795dc9fc3c0aa067762d8b19f337e7"
       },
       {
         "file": "api/pulse_transmon_network_service.py",
         "exists": true,
-        "sha256": "061e4ce215c1a01eaef3e448558345602fbaeb11816ea42d035549c6f44e5a5f"
+        "sha256": "4235bee4b03a0a7fcffa9589ff5f7fe53ea85c9ca33b8793e7d46ae1fa25a7cf"
       },
       {
         "file": "tests/test_per_qubit_calibration.py",
@@ -146,7 +146,7 @@
       {
         "file": "tests/test_pulse_api_transmon_network.py",
         "exists": true,
-        "sha256": "d36a7f5698c64b9ac8b96b3493417eee6f02581668b3b326bce906de0da881fc"
+        "sha256": "014faa2e9dc542096dc9881afa79a1f31b163840796f31507c5338484adbacec"
       },
       {
         "file": "validation_physics/model_baseline.py",
@@ -164,7 +164,7 @@
     {
       "file": "docs_for_develop/physics/model_identity.md",
       "exists": true,
-      "sha256": "be2fc12d2f013ae64a3b8d5f86c3a3a65dc41fbce4740a9f37c3c50edfa954d0"
+      "sha256": "afed4f16ab387c8f4983deebe453dfc7c991db350744ce7d919f4bc0023ea7b3"
     },
     {
       "file": "docs/validation/physical-model-baseline-v1.md",
@@ -174,16 +174,16 @@
     {
       "file": "validation_results/cptp_model_freeze.json",
       "exists": true,
-      "sha256": "d06b07eb2ae4508df198f7baab37cc6d3f11e5cc062c6e7a8a79298a614cb966"
+      "sha256": "32f081239c63a871b3c8b90dc284b9731c8c2a670d3ce1460e4e2cb9441b9b43"
     },
     {
       "file": "validation_results/pulse_transmon_network_qutip_audit.json",
       "exists": true,
-      "sha256": "953a14189c058d4f0a0c59cb82dbf03e21cdfb3e359b2aac1fb4caf45d7858aa"
+      "sha256": "2e622bdf6021e9f0e11e64463ebd5e8964940e9478fe99239c89c55010d082b0"
     }
   ],
   "environment": {
-    "python": "3.14.4",
+    "python": "3.12.14",
     "packages": {
       "numpy": "2.4.4",
       "fastapi": "0.138.1",

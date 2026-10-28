@@ -16,8 +16,10 @@ import numpy as np
 from core.backend_boundary import (
     PYTHON_DENSE_BACKEND,
     PYTHON_DENSE_BACKEND_NAME,
+    RUST_DENSE_BACKEND,
     RUST_DENSE_PREVIEW_BACKEND,
     backend_metadata,
+    requests_rust_backend,
 )
 from core.capabilities import (
     DEFAULT_SIMULATION_MODEL,
@@ -78,6 +80,11 @@ from core.physical_environment import (
 from core.results import SimulationConfig, SimulationResult
 from core.rust_dense_kernel import (
     RustDenseSession,
+)
+from core.rust_circuit_runtime import (
+    apply_readout_rust,
+    execute_ideal_circuit_rust,
+    execute_post_circuit_gates_rust,
 )
 from core.simulation_backends import (
     get_simulation_backend,
@@ -231,13 +238,13 @@ class _KernelStats:
     @property
     def wants_rust(self) -> bool:
         return (
-            self.requested_backend == RUST_DENSE_PREVIEW_BACKEND
+            requests_rust_backend(self.requested_backend)
             and not self.rust_kernel_fallback_used
         )
 
     def to_diagnostics(self) -> dict[str, object]:
         rust_kernel_mode = self.rust_kernel_mode
-        if self.requested_backend != RUST_DENSE_PREVIEW_BACKEND:
+        if not requests_rust_backend(self.requested_backend):
             rust_kernel_mode = "none"
         elif self.rust_kernel_fallback_used and not self.rust_kernel_used:
             rust_kernel_mode = "fallback_python"
@@ -411,6 +418,15 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         has_measurements=_has_measurements(config),
         evolution_method=config.evolution_method,
     )
+    if config.simulation_backend == RUST_DENSE_BACKEND:
+        unsupported: list[str] = []
+        if unsupported:
+            return _empty_result(config, [_runtime_error(
+                "RUST_BACKEND_UNSUPPORTED_PATH",
+                "The standard Rust backend cannot execute this simulation path yet.",
+                "; ".join(unsupported),
+                "Use an explicitly selected Python backend until this path is migrated.",
+            )])
     try:
         compilation = (
             GateCompilationResult(
@@ -458,7 +474,17 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             diagnostics={"statevector_timeline_mode": "endpoint_only_v1"},
         )
     else:
-        result = runner(execution_config)
+        try:
+            result = runner(execution_config)
+        except Exception as exc:
+            if config.simulation_backend == RUST_DENSE_BACKEND:
+                return _empty_result(config, [_runtime_error(
+                    "RUST_BACKEND_EXECUTION_FAILED",
+                    "The standard Rust backend failed during numerical execution.",
+                    str(exc),
+                    "Use an explicitly selected Python backend only for supported comparison workflows.",
+                )])
+            raise
     if main_method_fallback is not None:
         result.diagnostics["evolution_method_fallback"] = main_method_fallback
     result.diagnostics.update(
@@ -468,31 +494,61 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         result.diagnostics["large_density_matrix_execution"] = True
     if representation == "statevector":
         try:
-            statevector = execute_statevector_branches(config.circuit)
-            observed = _observed_probabilities(
-                statevector.output_probabilities,
-                config,
-            )
+            if requests_rust_backend(config.simulation_backend):
+                try:
+                    ideal, observed = execute_ideal_circuit_rust(
+                        config.circuit,
+                        config.readout_error,
+                    )
+                    statevector = None
+                    result.diagnostics.update({
+                        "rust_kernel_used": True,
+                        "rust_kernel_mode": "statevector_readout_batch_v1",
+                        "rust_kernel_call_count": 1,
+                    })
+                except (ValueError, RuntimeError, ImportError) as exc:
+                    if config.simulation_backend == RUST_DENSE_BACKEND:
+                        raise
+                    statevector = execute_statevector_branches(config.circuit)
+                    ideal = statevector.output_probabilities
+                    observed = _observed_probabilities(ideal, config)
+                    result.diagnostics.update({
+                        "rust_kernel_fallback_used": True,
+                        "rust_kernel_fallback_reason": str(exc),
+                    })
+            else:
+                statevector = execute_statevector_branches(config.circuit)
+                ideal = statevector.output_probabilities
+                observed = _observed_probabilities(ideal, config)
             result.output_probabilities = observed
-            result.purity[-1] = statevector_branch_purity(statevector)
+            result.purity[-1] = (
+                1.0 if statevector is None else statevector_branch_purity(statevector)
+            )
             result.measurement_counts = _sample_measurement_counts(
                 observed,
                 config.measurement_shots,
                 config.measurement_seed,
             )
             if _has_classical_conditions(config):
-                result.classical_branch_records = statevector.branches
+                branches = (
+                    [{
+                        "probability": 1.0,
+                        "classical_bits": [0] * config.circuit.classical_bits,
+                        "measurements": [],
+                    }]
+                    if statevector is None
+                    else statevector.branches
+                )
+                result.classical_branch_records = branches
                 result.classical_shot_preview = _sample_classical_shot_preview(
-                    statevector.branches,
-                    config.measurement_shots,
-                    config.measurement_seed,
+                    branches, config.measurement_shots, config.measurement_seed
                 )
                 result.diagnostics.update({
                     "classical_branching_mode": "statevector_branching_v1",
-                    "classical_branch_count": len(statevector.branches),
+                    "classical_branch_count": len(branches),
                     "classical_branching_noise_applied": False,
                 })
-        except ValueError as exc:
+        except (ValueError, RuntimeError, ImportError) as exc:
             return _empty_result(config, [
                 _runtime_error(
                     "STATEVECTOR_EXECUTION_FAILED",
@@ -560,6 +616,28 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     result.config = config
     result.diagnostics.update(compilation.diagnostics)
     _attach_backend_metadata(result, config)
+    if config.simulation_backend == RUST_DENSE_BACKEND and (
+        result.diagnostics.get("rust_kernel_fallback_used")
+        or not result.diagnostics.get("rust_kernel_used")
+    ):
+        reason = str(result.diagnostics.get("rust_kernel_fallback_reason", ""))
+        return _empty_result(config, [_runtime_error(
+            "RUST_BACKEND_EXECUTION_FAILED",
+            "The standard Rust backend did not complete this simulation.",
+            reason or "No Rust numerical kernel executed for this path.",
+            "Use an explicitly selected Python backend only for supported comparison workflows.",
+        )])
+    if config.simulation_backend == RUST_DENSE_BACKEND and (
+        result.diagnostics.get("rust_kernel_fallback_used")
+        or not result.diagnostics.get("rust_kernel_used")
+    ):
+        reason = str(result.diagnostics.get("rust_kernel_fallback_reason", ""))
+        return _empty_result(config, [_runtime_error(
+            "RUST_BACKEND_EXECUTION_FAILED",
+            "The standard Rust backend did not complete this simulation.",
+            reason or "No Rust numerical kernel executed for this path.",
+            "Use an explicitly selected Python backend only for supported comparison workflows.",
+        )])
     diagnostic_issues = diagnose_simulation_result(result)
     result.issues = diagnostic_issues
     result.warnings = _issue_warnings(diagnostic_issues)
@@ -632,10 +710,21 @@ def _observed_probabilities(
     readout_error = config.readout_error
     if readout_error is None or not readout_error.is_enabled:
         return dict(probabilities)
+    assignments = readout_error.assignment_errors(config.circuit.logical_qubits)
+    if requests_rust_backend(config.simulation_backend):
+        try:
+            return apply_readout_rust(
+                dict(probabilities),
+                config.circuit.logical_qubits,
+                assignments,
+            )
+        except (ValueError, RuntimeError, ImportError):
+            if config.simulation_backend == RUST_DENSE_BACKEND:
+                raise
     return apply_readout_error(
         probabilities,
         config.circuit.logical_qubits,
-        readout_error.assignment_errors(config.circuit.logical_qubits),
+        assignments,
     )
 
 
@@ -655,7 +744,7 @@ def _run_gate_aware_hamiltonian_lindblad(config: SimulationConfig) -> Simulation
     lindblad_started_at = perf_counter()
     rates, local_rates, solver_rates = _resolved_environment_rates(config)
     if (
-        config.simulation_backend == RUST_DENSE_PREVIEW_BACKEND
+        requests_rust_backend(config.simulation_backend)
         and config.evolution_method == FIXED_STEP_RK4
     ):
         cached_collapse_ops: Sequence[CachedCollapseOperator] = (
@@ -820,7 +909,7 @@ def _run_post_circuit_degradation(config: SimulationConfig) -> SimulationResult:
     lindblad_started_at = perf_counter()
     rates, local_rates, solver_rates = _resolved_environment_rates(config)
     if (
-        config.simulation_backend == RUST_DENSE_PREVIEW_BACKEND
+        requests_rust_backend(config.simulation_backend)
         and config.evolution_method == FIXED_STEP_RK4
     ):
         cached_collapse_ops: Sequence[CachedCollapseOperator] = (
@@ -1090,14 +1179,29 @@ def _simulate_circuit_post_circuit(
         actual_duration_us=duration_us,
         max_snapshots=100 if snapshot_plan.enabled else 10,
         plan=snapshot_plan,
+        simulation_backend=config.simulation_backend,
     )
     collector.capture_event(
         time_us=0.0,
         event_kind="initial",
         density_matrix=initial_state,
     )
-    noisy_state = _apply_circuit_operations(initial_state, config, n_qubits, caches)
-    ideal_state = _apply_circuit_operations(initial_state, config, n_qubits, caches)
+    if requests_rust_backend(config.simulation_backend):
+        try:
+            noisy_state = execute_post_circuit_gates_rust(config.circuit)
+            ideal_state = noisy_state
+            kernel_stats.rust_kernel_used = True
+            kernel_stats.rust_kernel_mode = "register_circuit_batch_v1"
+            kernel_stats.rust_kernel_call_count += 1
+        except Exception as exc:
+            if config.simulation_backend == RUST_DENSE_BACKEND:
+                raise
+            kernel_stats.record_sampled_batch_fallback(str(exc))
+            noisy_state = _apply_circuit_operations(initial_state, config, n_qubits, caches)
+            ideal_state = _apply_circuit_operations(initial_state, config, n_qubits, caches)
+    else:
+        noisy_state = _apply_circuit_operations(initial_state, config, n_qubits, caches)
+        ideal_state = _apply_circuit_operations(initial_state, config, n_qubits, caches)
     collector.capture_event(
         time_us=0.0,
         event_kind="after_circuit",
@@ -1116,29 +1220,82 @@ def _simulate_circuit_post_circuit(
     fidelities = [_state_fidelity(noisy_state, ideal_state)]
     purities = [_state_purity(noisy_state)]
     max_trace_error = _trace_error(noisy_state)
-    for start_time, end_time in zip(times, times[1:]):
-        dt = end_time - start_time
-        idle_started_at = perf_counter()
-        noisy_state = _evolve_stable(
+    idle_started_at = perf_counter()
+    sampled_batch = (
+        _try_rust_paired_sampled_batch(
             noisy_state,
+            ideal_state,
             hamiltonian,
             collapse_ops,
-            dt,
-            max_environment_rate_per_us,
+            0.0,
+            times[1:],
+            duration_us,
+            lambda interval: _substep_count(interval, max_environment_rate_per_us),
             kernel_stats,
-            profile,
+            include_boundary=True,
+            capture_time_predicate=lambda sample_time: (
+                is_planned_time(sample_time, planned_idle_samples)
+                or collector.request_for_time(sample_time) is not None
+                or abs(sample_time - duration_us) <= 1e-15
+            ),
         )
-        profile.idle_evolution_ms += (perf_counter() - idle_started_at) * 1000.0
-        if is_planned_time(end_time, planned_idle_samples):
-            collector.capture(
+        if kernel_stats.wants_rust and times[-1] > 0.0
+        else None
+    )
+    if sampled_batch is not None:
+        captured_states, rust_metrics, sample_times, sample_substeps = sampled_batch
+        if len(sample_times) != len(times) - 1:
+            raise RuntimeError("Rust sampled-batch did not cover the complete idle timeline")
+        for sample_index, metric in enumerate(rust_metrics):
+            fidelity, purity, trace_error, ideal_purity = metric
+            if abs(ideal_purity - 1.0) > 1e-8:
+                sampled_state, sampled_ideal = captured_states[sample_index]
+                fidelity = _state_fidelity(sampled_state, sampled_ideal)
+            fidelities.append(fidelity)
+            purities.append(purity)
+            max_trace_error = max(max_trace_error, trace_error)
+        for sample_index, (sampled_state, sampled_ideal) in captured_states.items():
+            sample_time = sample_times[sample_index]
+            if sample_index == len(rust_metrics) - 1:
+                noisy_state = sampled_state
+                ideal_state = sampled_ideal
+            if is_planned_time(sample_time, planned_idle_samples):
+                collector.capture(
+                    time_us=sample_time,
+                    kind="idle_sample",
+                    density_matrix=sampled_state,
+                )
+            collector.capture_requested_time(
+                time_us=sample_time,
+                density_matrix=sampled_state,
+            )
+        profile.total_rk4_substeps = sum(sample_substeps)
+    else:
+        for start_time, end_time in zip(times, times[1:]):
+            dt = end_time - start_time
+            noisy_state = _evolve_stable(
+                noisy_state,
+                hamiltonian,
+                collapse_ops,
+                dt,
+                max_environment_rate_per_us,
+                kernel_stats,
+                profile,
+            )
+            if is_planned_time(end_time, planned_idle_samples):
+                collector.capture(
+                    time_us=end_time,
+                    kind="idle_sample",
+                    density_matrix=noisy_state,
+                )
+            collector.capture_requested_time(
                 time_us=end_time,
-                kind="idle_sample",
                 density_matrix=noisy_state,
             )
-        collector.capture_requested_time(time_us=end_time, density_matrix=noisy_state)
-        fidelities.append(_state_fidelity(noisy_state, ideal_state))
-        purities.append(_state_purity(noisy_state))
-        max_trace_error = max(max_trace_error, _trace_error(noisy_state))
+            fidelities.append(_state_fidelity(noisy_state, ideal_state))
+            purities.append(_state_purity(noisy_state))
+            max_trace_error = max(max_trace_error, _trace_error(noisy_state))
+    profile.idle_evolution_ms += (perf_counter() - idle_started_at) * 1000.0
     collector.capture_event(
         time_us=duration_us,
         event_kind="final",
@@ -1209,6 +1366,7 @@ def _simulate_circuit_gate_aware_hamiltonian(
         actual_duration_us=actual_duration,
         max_snapshots=100 if snapshot_plan.enabled else 10,
         plan=snapshot_plan,
+        simulation_backend=config.simulation_backend,
     )
     collector.capture_event(
         time_us=0.0,
@@ -2165,6 +2323,8 @@ def _evolve_stable_with_substeps(
             )
             return evolved
         except Exception as exc:
+            if kernel_stats.requested_backend == RUST_DENSE_BACKEND:
+                raise RuntimeError("Rust dense execution failed") from exc
             kernel_stats.rust_kernel_fallback_used = True
             kernel_stats.rust_kernel_fallback_reason = str(exc)
             kernel_stats.rust_kernel_mode = "fallback_python"
@@ -2233,7 +2393,7 @@ def _try_rust_paired_sampled_batch(
     )
     if plan is None:
         return None
-    sample_times, sample_substeps, sub_dt, blocked_by_boundary = plan
+    sample_times, sample_substeps, sample_dts, blocked_by_boundary = plan
     try:
         session = _rust_dense_session(state, collapse_ops, kernel_stats)
         capture_flags = [
@@ -2245,11 +2405,13 @@ def _try_rust_paired_sampled_batch(
             state,
             ideal_state,
             [hamiltonian] * len(sample_substeps),
-            [sub_dt] * len(sample_substeps),
+            sample_dts,
             sample_substeps,
             capture_flags,
         )
     except Exception as exc:
+        if kernel_stats.requested_backend == RUST_DENSE_BACKEND:
+            raise RuntimeError("Rust sampled-batch execution failed") from exc
         kernel_stats.record_sampled_batch_fallback(str(exc))
         return None
     kernel_stats.record_sampled_batch(
@@ -2322,10 +2484,10 @@ def _sampled_batch_plan(
     stop_time: float,
     substep_counter,
     include_boundary: bool,
-) -> tuple[list[float], list[int], float, bool] | None:
+) -> tuple[list[float], list[int], list[float], bool] | None:
     sample_times: list[float] = []
     sample_substeps: list[int] = []
-    common_sub_dt: float | None = None
+    sample_dts: list[float] = []
     cursor = current_time
     blocked_by_boundary = False
 
@@ -2345,21 +2507,18 @@ def _sampled_batch_plan(
             break
         substeps = max(1, int(substep_counter(interval)))
         sub_dt = interval / substeps
-        if common_sub_dt is None:
-            common_sub_dt = sub_dt
-        elif not math.isclose(sub_dt, common_sub_dt, rel_tol=1e-12, abs_tol=1e-15):
-            break
 
         sample_times.append(target_time)
         sample_substeps.append(substeps)
+        sample_dts.append(sub_dt)
         cursor = target_time
         if reaches_boundary:
             blocked_by_boundary = True
             break
 
-    if not sample_times or common_sub_dt is None:
+    if not sample_times:
         return None
-    return sample_times, sample_substeps, common_sub_dt, blocked_by_boundary
+    return sample_times, sample_substeps, sample_dts, blocked_by_boundary
 
 
 def _evolve_one_substep(
@@ -2383,6 +2542,8 @@ def _evolve_one_substep(
             kernel_stats.rust_kernel_piecewise_segment_count += 1
             return clean_density_matrix(evolved)
         except Exception as exc:
+            if kernel_stats.requested_backend == RUST_DENSE_BACKEND:
+                raise RuntimeError("Rust dense execution failed") from exc
             kernel_stats.rust_kernel_fallback_used = True
             kernel_stats.rust_kernel_fallback_reason = str(exc)
             kernel_stats.rust_kernel_mode = "fallback_python"

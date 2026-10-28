@@ -377,6 +377,9 @@ class ProductEnvironmentFactory:
                 "qpu_service.dedicated_region.reset_model_configuration_id",
             })
         declared = {path for record in manifest.assumptions for path in record.target_paths}
+        runtime = manifest.qpu_service_config.get("runtime_execution")
+        if isinstance(runtime, Mapping) and "register_backend" in runtime:
+            required.add("qpu_service.runtime_execution.register_backend")
         return required <= declared
 
 
@@ -395,12 +398,15 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
         "concurrency_policy", "drive_crosstalk_strength", "drive_crosstalk_direction", "resource_binding",
         "max_local_qubits", "max_execution_work",
-    })
+    }, {"register_backend"})
     if runtime_raw["schema_version"] != "shared_qpu_runtime_v3":
         raise ValueError("unsupported frozen QPU runtime schema")
     _validate_runtime_profile(runtime_raw)
     runtime_fields = dict(runtime_raw)
     runtime_fields.pop("schema_version")
+    # Preserve the historical execution behavior of already frozen manifests.
+    # Newly assembled profiles serialize their selected backend explicitly.
+    runtime_fields.setdefault("register_backend", "python_dense")
     runtime_fields["reset_model_mode"] = str(runtime_fields["reset_model_mode"])
     runtime_fields["placement_policy"] = PlacementPolicy(runtime_fields["placement_policy"])
     binding_raw = runtime_fields["resource_binding"]

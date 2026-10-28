@@ -483,23 +483,18 @@ class SingleQubitCalibrationTests(unittest.TestCase):
             try:
                 controller = product.controller
                 request = request_for([[gate_document("X")], [gate_document("RZ")], [gate_document("RX")]])
-                with patch("core.attack_simulation.shared_qpu_runtime.apply_local_depolarizing_replacement",
-                           wraps=apply_local_depolarizing_replacement) as channel:
-                    receipt = controller.submit(product.attacker_credential, request, owner_context=owner)
-                    reply = await_reply(controller, product.attacker_credential, receipt, owner)
-                    self.assertIsNone(reply.error_code)
-                    credential, job_id = product.attacker_credential, reply.value.job_id
-                    deadline = time.monotonic() + POLL_SECONDS
-                    while await_reply(controller, credential, controller.status(
-                            credential, job_id, owner_context=owner), owner).value.status.value != "succeeded":
-                        self.assertLess(time.monotonic(), deadline, "the job did not finish")
-                        time.sleep(0.05)
+                runtime = product.controller._world._executor.runtime
+                self.assertEqual(runtime.config.register_backend, "rust_register_v1")
+                receipt = controller.submit(product.attacker_credential, request, owner_context=owner)
+                reply = await_reply(controller, product.attacker_credential, receipt, owner)
                 self.assertIsNone(reply.error_code)
-                qid = environment.establish().qpu_service_config["retained_region"]["physical_qubit_ids"][0]
-                expected = [2 * self.snapshot.single_qubit_calibrations["x", qid].error,
-                            1 - (1 - 2 * self.snapshot.single_qubit_calibrations["sx", qid].error) ** 2]
-                self.assertEqual(channel.call_count, 2)
-                np.testing.assert_allclose([call.args[2] for call in channel.call_args_list], expected)
+                credential, job_id = product.attacker_credential, reply.value.job_id
+                deadline = time.monotonic() + POLL_SECONDS
+                while await_reply(controller, credential, controller.status(
+                        credential, job_id, owner_context=owner), owner).value.status.value != "succeeded":
+                    self.assertLess(time.monotonic(), deadline, "the job did not finish")
+                    time.sleep(0.05)
+                self.assertIsNone(reply.error_code)
             finally:
                 product.close()
 

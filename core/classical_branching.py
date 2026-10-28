@@ -27,6 +27,7 @@ from core.gates import (
     prepare_collapse_operators,
 )
 from core.evolution_methods import EXPLICIT_CPTP
+from core.backend_boundary import PYTHON_DENSE_BACKEND, requests_rust_backend
 from core.physical_environment import EnvironmentRates
 
 
@@ -54,7 +55,7 @@ def execute_classical_branches(
     max_branches: int = MAX_CLASSICAL_BRANCHES,
     environment_rates: EnvironmentRates | Sequence[EnvironmentRates] | None = None,
     evolution_method: str = "fixed_step_rk4",
-    simulation_backend: str = "python_dense",
+    simulation_backend: str = PYTHON_DENSE_BACKEND,
 ) -> ClassicalBranchingResult:
     """Execute gates while preserving measurement/classical branches.
 
@@ -90,7 +91,7 @@ def execute_classical_branches(
         if evolution_method == EXPLICIT_CPTP:
             from core.gate_aware_cptp import GateAwareCPTPEvolver
             cptp_evolver = GateAwareCPTPEvolver(
-                backend="rust" if simulation_backend == "rust_dense_preview" else "python"
+                backend="rust" if requests_rust_backend(simulation_backend) else "python"
             )
 
     state = initial_density_matrix(circuit.initial_states)
@@ -225,7 +226,7 @@ def _evolve_branch_gate(
     hamiltonian = effective_hamiltonian_from_unitary(unitary, duration)
     if evolution_method == EXPLICIT_CPTP:
         return cptp_evolver.evolve(state, hamiltonian, collapse_ops, duration)
-    if simulation_backend == "rust_dense_preview":
+    if requests_rust_backend(simulation_backend):
         try:
             from core.rust_dense_kernel import rust_rk4_evolve_segment_cleaned
             substeps = max(1, int(math.ceil(duration * max(max_rate, 1e-12))))
@@ -236,7 +237,9 @@ def _evolve_branch_gate(
                 duration / substeps,
                 substeps,
             )
-        except Exception:
+        except Exception as exc:
+            if simulation_backend == "rust_dense_v1":
+                raise RuntimeError("Rust classical-branch execution failed") from exc
             # The normal runner exposes the fallback in diagnostics; branch
             # execution remains correct by using the audited Python path.
             pass
