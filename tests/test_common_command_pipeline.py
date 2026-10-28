@@ -38,7 +38,7 @@ def pipeline(*, reset_success=1.0, initial_bit=0, attacker_operations=OPERATIONS
              supported_gates=("I", "X", "H", "MEASURE"), program_layouts=None,
              initial_density=None, max_execution_work=536870912, max_instruction_executions=128,
              max_local_qubits=8, resource_binding=None, placement_policy="guaranteed_same_physical_qubit",
-             topology_binding=None):
+             topology_binding=None, register_backend="python_dense", idle_model=None, repetition_delay_us=0.0):
     if model is None:
         model = PhenomenologicalResetModel(ImperfectResetSpec(success_probability=reset_success))
     runtime_config = SharedQpuRuntimeConfig(
@@ -48,6 +48,8 @@ def pipeline(*, reset_success=1.0, initial_bit=0, attacker_operations=OPERATIONS
         max_local_qubits=max_local_qubits,
         resource_binding=resource_binding,
         placement_policy=placement_policy,
+        register_backend=register_backend,
+        repetition_delay_us=repetition_delay_us,
     )
     session = ScenarioSession(
         template=ScenarioTemplate(
@@ -80,7 +82,7 @@ def pipeline(*, reset_success=1.0, initial_bit=0, attacker_operations=OPERATIONS
     registry = ResetModelRegistry()
     registry.register(model)
     runtime = SharedQpuRuntime(
-        state_store=store, reset_models=registry, config=runtime_config,
+        state_store=store, reset_models=registry, config=runtime_config, idle_model=idle_model,
     )
     runtime.configure_job_authorization(JobAuthorizationPolicy.from_manifest(
         manifest, attacker_tenant_id="tenant-a", victim_tenant_id="tenant-v",

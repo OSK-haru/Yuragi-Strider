@@ -293,6 +293,136 @@ impl PyResetSession {
     }
 }
 
+/// Batched qubit register operations, with density state kept in the Rust core.
+#[pyclass(name = "RegisterSession")]
+struct PyRegisterSession {
+    state: yuragi_strider_core::register::DensityRegister,
+}
+
+#[pymethods]
+impl PyRegisterSession {
+    #[new]
+    fn new(schema_version: &str, rho: Vec<f64>, qubits: usize) -> PyResult<Self> {
+        if schema_version != "register_state_v1" {
+            return Err(PyValueError::new_err(
+                "unsupported register state schema version",
+            ));
+        }
+        Ok(Self {
+            state: yuragi_strider_core::register::DensityRegister::new(rho, qubits)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    /// Each tuple is (kind, operands, data, scalar); all records are one atomic batch.
+    fn execute(
+        &mut self,
+        schema_version: &str,
+        operations: Vec<(String, Vec<usize>, Vec<f64>, f64)>,
+    ) -> PyResult<Vec<Vec<usize>>> {
+        let converted = parse_register_batch(schema_version, operations)?;
+        let measurements = self
+            .state
+            .execute(&converted)
+            .map_err(PyValueError::new_err)?;
+        Ok(measurements
+            .into_iter()
+            .map(|bits| bits.into_iter().map(usize::from).collect())
+            .collect())
+    }
+
+    fn execute_with_checkpoints(
+        &mut self,
+        schema_version: &str,
+        operations: Vec<(String, Vec<usize>, Vec<f64>, f64)>,
+        checkpoints: Vec<usize>,
+    ) -> PyResult<(Vec<Vec<usize>>, Vec<Vec<f64>>)> {
+        let converted = parse_register_batch(schema_version, operations)?;
+        let (measurements, snapshots) = self
+            .state
+            .execute_with_checkpoints(&converted, &checkpoints)
+            .map_err(PyValueError::new_err)?;
+        Ok((
+            measurements
+                .into_iter()
+                .map(|bits| bits.into_iter().map(usize::from).collect())
+                .collect(),
+            snapshots,
+        ))
+    }
+
+    fn state_flat(&self) -> Vec<f64> {
+        self.state.values().to_vec()
+    }
+}
+
+fn parse_register_batch(
+    schema_version: &str,
+    operations: Vec<(String, Vec<usize>, Vec<f64>, f64)>,
+) -> PyResult<Vec<yuragi_strider_core::register::RegisterOperation>> {
+    use yuragi_strider_core::register::{IdleSpec, RegisterOperation};
+    use yuragi_strider_core::reset::ResetOperation;
+    if schema_version != "register_batch_v1" {
+        return Err(PyValueError::new_err(
+            "unsupported register batch schema version",
+        ));
+    }
+    let mut converted = Vec::with_capacity(operations.len());
+    for (kind, qubits, data, scalar) in operations {
+        let operation = match kind.as_str() {
+            "unitary" if scalar == 0.0 => RegisterOperation::Unitary {
+                qubits,
+                matrix: data,
+            },
+            "reset" if scalar == 0.0 && data.len() == qubits.len().saturating_mul(3) => {
+                let mut probabilities = Vec::with_capacity(qubits.len());
+                let mut populations = Vec::with_capacity(qubits.len() * 2);
+                for values in data.chunks_exact(3) {
+                    probabilities.push(values[0]);
+                    populations.extend_from_slice(&values[1..3]);
+                }
+                RegisterOperation::Reset(ResetOperation {
+                    targets: qubits,
+                    success_probabilities: probabilities,
+                    target_populations: populations,
+                    reset_count: 1,
+                })
+            }
+            "depolarize" if data.is_empty() => RegisterOperation::Depolarize {
+                qubits,
+                probability: scalar,
+            },
+            "dephase" if data.is_empty() && scalar == 0.0 => RegisterOperation::Dephase { qubits },
+            "idle" if data.len() == qubits.len().saturating_mul(3) => {
+                let specs = data
+                    .chunks_exact(3)
+                    .map(|values| IdleSpec {
+                        t1_us: values[0],
+                        tphi_us: values[1],
+                        equilibrium_excited_population: values[2],
+                    })
+                    .collect();
+                RegisterOperation::Idle {
+                    qubits,
+                    specs,
+                    elapsed_us: scalar,
+                }
+            }
+            "measure" if data.is_empty() => RegisterOperation::Measure {
+                qubits,
+                draw: scalar,
+            },
+            _ => {
+                return Err(PyValueError::new_err(
+                    "unknown or malformed register operation",
+                ));
+            }
+        };
+        converted.push(operation);
+    }
+    Ok(converted)
+}
+
 #[pyfunction]
 fn binary_contrast_statistics_v1(
     schema_version: &str,
@@ -2274,6 +2404,7 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(evaluate_crosstalk_disruption_v1, m)?)?;
     m.add_class::<CrosstalkEvaluationRuntime>()?;
     m.add_class::<PyResetSession>()?;
+    m.add_class::<PyRegisterSession>()?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_stages_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_step_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_evolve_cleaned_flat, m)?)?;

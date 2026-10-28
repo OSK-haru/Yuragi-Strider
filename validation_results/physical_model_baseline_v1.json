@@ -1,7 +1,7 @@
 {
   "validation": "PHYSICAL-MODEL-BASELINE-V1",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-28T00:51:57.951957+00:00",
+  "generated_at_utc": "2026-10-28T05:35:02.653603+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -70,7 +70,7 @@
     }
   },
   "source_revision": {
-    "git_head": "65c028e00a4386506dbe257f9c7790df08873f74",
+    "git_head": "ae454fb5e3c7066a0c3d415ee7c0942b8e25074b",
     "critical_source_tree_sha256": "b2bec00e45a8d2ca2cf1c5ae0f4a451e2b1ae90abaec031706abebb7a943d28c",
     "files": [
       {
@@ -174,7 +174,7 @@
     {
       "file": "validation_results/cptp_model_freeze.json",
       "exists": true,
-      "sha256": "f7de250ff7f7adc92487d7dd374ebe49c6a445e571738b6ad4022570fb2059f2"
+      "sha256": "d38da11b0ac37c20a5c7820624beb90d5ce906a4c63d0daca3eae3a3e0fef72e"
     },
     {
       "file": "validation_results/pulse_transmon_network_qutip_audit.json",

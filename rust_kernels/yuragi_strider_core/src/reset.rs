@@ -56,6 +56,14 @@ impl ResetState {
         &self.values
     }
 
+    pub(crate) fn replace_values(&mut self, values: Vec<f64>) -> Result<(), String> {
+        if values.len() != self.values.len() || values.iter().any(|x| !x.is_finite()) {
+            return Err("invalid register state output".into());
+        }
+        self.values = values;
+        Ok(())
+    }
+
     /// Execute all operations or leave the original state untouched on error.
     pub fn execute(&mut self, operations: &[ResetOperation]) -> Result<(), String> {
         for op in operations {

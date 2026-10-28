@@ -39,6 +39,8 @@ from core.attack_simulation.qpu_state import (
 from core.attack_simulation.placement import PlacementPolicy
 from core.attack_simulation.resource_binding import ResourceBinding
 from core.experimental_isolation_physics.reset_model import (
+    PhenomenologicalResetModel,
+    PerQubitPhenomenologicalResetModel,
     ResetModelMode,
     ResetModelResult,
     ResetModelRegistry,
@@ -89,6 +91,8 @@ class SharedQpuRuntimeConfig:
     drive_crosstalk_direction: str = "both"
     max_local_qubits: int = 8
     max_execution_work: int = 536870912
+    # Explicit experimental register engine; absent from old manifests means Python.
+    register_backend: str = "python_dense"
 
     def to_manifest_config(self) -> dict[str, object]:
         """Return every behavior-changing runtime value for pre-start freezing."""
@@ -123,9 +127,13 @@ class SharedQpuRuntimeConfig:
                  "strength": item.strength, "detuning_rad_per_us": item.detuning_rad_per_us}
                 for item in self.crosstalk_declarations
             ]
+        if self.register_backend != "python_dense":
+            config["register_backend"] = self.register_backend
         return config
 
     def __post_init__(self) -> None:
+        if type(self.register_backend) is not str or self.register_backend not in ("python_dense", "rust_register_v1"):
+            raise ValueError("unsupported register backend")
         if type(self.max_local_qubits) is not int or not 1 <= self.max_local_qubits <= MAX_DENSE_LOCAL_QUBITS:
             raise ValueError("local-region cap exceeds the dense adapter's capacity")
         if type(self.max_execution_work) is not int or not 1 <= self.max_execution_work <= 2147483648:
@@ -287,6 +295,23 @@ class SharedQpuRuntime:
             for ids, registry in self.regional_reset_models.items():
                 if not registry.supports_register(config.reset_model_id, len(ids)):
                     raise ValueError("regional reset model does not support its register")
+        self._rust_register_session = None
+        if config.register_backend == "rust_register_v1":
+            import importlib
+            try:
+                module = importlib.import_module("yuragi_strider_rust")
+            except ImportError as error:
+                raise RuntimeError("Rust register backend is unavailable") from error
+            self._rust_register_session = getattr(module, "RegisterSession", None)
+            if not callable(self._rust_register_session):
+                raise RuntimeError("Rust extension does not implement register_state_v1")
+            models = [reset_model] + [registry.get(config.reset_model_id)
+                                      for registry in self.regional_reset_models.values()]
+            for candidate in models:
+                if type(candidate) not in (PhenomenologicalResetModel, PerQubitPhenomenologicalResetModel):
+                    raise ValueError("Rust register backend does not support this reset model")
+                if type(candidate) is PhenomenologicalResetModel and candidate.spec.local_dimension != 2:
+                    raise ValueError("Rust register backend requires qubit reset models")
         self._next_event_sequence = snapshot.revision + 1
         self._job_authorization: JobAuthorizationPolicy | None = None
         self._scenario_workload_job_ids: set[str] = set()
@@ -574,6 +599,8 @@ class SharedQpuRuntime:
 
         ``shot_kicks`` are rotations from other jobs, applied before the instruction they are placed at.
         """
+        if self._rust_register_session is not None:
+            return self._run_before_measurement_rust(operation, slots, state, shot_index, shot_kicks)
         snapshot = self.state_store.read()
         duration = 0.0
         if shot_index and self.config.repetition_delay_us > 0.0:
@@ -638,6 +665,96 @@ class SharedQpuRuntime:
         state = np.array(state, dtype=complex)
         state.flags.writeable = False
         return state, assignment, duration
+
+    def _run_before_measurement_rust(self, operation: CircuitExecutionOperation, slots: tuple[int, ...],
+                                     state: np.ndarray, shot_index: int, shot_kicks: tuple[PlacedKick, ...]):
+        """Execute one prepared shot as one Rust batch; preserve reset validation checkpoints."""
+        snapshot = self.state_store.read()
+        count = len(snapshot.physical_qubit_ids)
+        dim = 1 << count
+        model = self._active_reset_models().get(self.config.reset_model_id)
+        commands: list[tuple[str, list[int], list[float], float]] = []
+        checkpoints: list[int] = []
+        assignment: dict[int, tuple[float, float]] = {}
+        duration = 0.0
+
+        def flat(matrix) -> list[float]:
+            return np.ascontiguousarray(matrix, dtype=np.complex128).view(np.float64).reshape(-1).tolist()
+
+        def idle(targets: tuple[int, ...], elapsed: float) -> None:
+            model_ = self._active_idle_model()
+            if model_ is None:
+                raise ValueError("idle model is unavailable")
+            ordered = sorted(targets)
+            data = [value for index in ordered for value in (
+                model_.qubits[index].t1_us, model_.qubits[index].tphi_us,
+                model_.qubits[index].equilibrium_excited_population,
+            )]
+            commands.append(("idle", ordered, data, elapsed))
+
+        def kick(placed: PlacedKick) -> None:
+            target = snapshot.physical_qubit_ids.index(placed.qubit)
+            commands.append(("unitary", [target], flat(kick_unitary(placed)), 0.0))
+
+        if shot_index and self.config.repetition_delay_us > 0.0:
+            elapsed = 0.0
+            wait_kicks = sorted((item for item in shot_kicks if item.wait_offset_us is not None),
+                                key=lambda item: item.wait_offset_us)
+            for placed in wait_kicks:
+                offset = placed.wait_offset_us
+                if offset > self.config.repetition_delay_us:
+                    raise ValueError("kick wait offset exceeds the repetition delay")
+                if offset > elapsed:
+                    idle(tuple(range(count)), offset - elapsed)
+                    elapsed = offset
+                kick(placed)
+            if elapsed < self.config.repetition_delay_us:
+                idle(tuple(range(count)), self.config.repetition_delay_us - elapsed)
+            duration += self.config.repetition_delay_us
+        if operation.initialization == "inherit":
+            errors = register_assignment_errors(model, subsystem_count=count, targets=slots)
+            assignment.update(enumerate(errors))
+        pending = [item for item in shot_kicks if item.wait_offset_us is None]
+        for index, instruction in enumerate(operation.instructions):
+            while pending and pending[0].position <= index:
+                kick(pending.pop(0))
+            operands = tuple(slots[q] for q in instruction.qubits)
+            if instruction.kind in {"initialize", "reset"}:
+                if type(model) is PhenomenologicalResetModel:
+                    specs = [model.spec for _ in operands]
+                elif type(model) is PerQubitPhenomenologicalResetModel:
+                    specs = [model.specs[target] for target in operands]
+                else:
+                    raise ValueError("Rust register backend does not support this reset model")
+                data = [value for spec in specs for value in (spec.success_probability, *spec.target_populations)]
+                commands.append(("reset", list(operands), data, 0.0))
+                checkpoints.append(len(commands) - 1)
+                errors = register_assignment_errors(model, subsystem_count=count, targets=operands)
+                assignment.update(zip(instruction.qubits, errors))
+                duration += self._active_service_durations()[0]
+            elif instruction.kind == "unitary":
+                if instruction.unitary is None:
+                    raise ValueError("compiled unitary is missing")
+                commands.append(("unitary", list(operands), flat(instruction.unitary), 0.0))
+                if instruction.depolarizing_probability:
+                    commands.append(("depolarize", list(operands), [], instruction.depolarizing_probability))
+                duration += instruction.duration_us
+            elif instruction.kind == "delay":
+                if instruction.wait_us > 0.0:
+                    idle(operands, instruction.wait_us)
+                duration += instruction.duration_us
+            elif instruction.kind != "measure":
+                raise ValueError("unknown compiled circuit instruction")
+        for placed in pending:
+            kick(placed)
+        session = self._rust_register_session("register_state_v1", flat(state), count)
+        _, states = session.execute_with_checkpoints("register_batch_v1", commands, checkpoints)
+        for values in states:
+            checkpoint = np.asarray(values, dtype=np.float64).view(np.complex128).reshape((dim, dim))
+            self.state_store.validate_state(freeze_register(checkpoint))
+        result = np.asarray(session.state_flat(), dtype=np.float64).view(np.complex128).reshape((dim, dim))
+        result.flags.writeable = False
+        return result, assignment, duration
 
     def _apply_kick(self, state: np.ndarray, placed: PlacedKick) -> np.ndarray:
         """A leaked rotation from another job's drive; it takes no time of its own."""

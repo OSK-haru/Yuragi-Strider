@@ -49,6 +49,7 @@ CRITICAL_SOURCE_FILES = (
     "core/rust_dense_kernel.py",
     "rust_kernels/yuragi_strider_core/Cargo.toml",
     "rust_kernels/yuragi_strider_core/src/lib.rs",
+    "rust_kernels/yuragi_strider_core/src/register.rs",
     "rust_kernels/yuragi_strider_core/src/reset.rs",
     "rust_kernels/yuragi_strider_rust/Cargo.toml",
     "rust_kernels/yuragi_strider_rust/Cargo.lock",

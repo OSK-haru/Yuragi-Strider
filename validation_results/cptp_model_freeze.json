@@ -1,7 +1,7 @@
 {
   "validation": "CPTP-MODEL-FREEZE-C10",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-28T00:51:56.926371+00:00",
+  "generated_at_utc": "2026-10-28T05:35:02.099891+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -143,8 +143,8 @@
     }
   },
   "source_revision": {
-    "git_commit": "65c028e00a4386506dbe257f9c7790df08873f74",
-    "critical_source_tree_sha256": "5354a96826bb6328f903b3d4b03c1f72ca16aba2b6546eb2b2240bfc1ed65c6f",
+    "git_commit": "ae454fb5e3c7066a0c3d415ee7c0942b8e25074b",
+    "critical_source_tree_sha256": "7b8933cae67ae3070bf540d88b70592a61f8cfdc65399062fca80698cf26231b",
     "files": [
       {
         "file": "core/cptp.py",
@@ -199,12 +199,17 @@
       {
         "file": "rust_kernels/yuragi_strider_core/src/lib.rs",
         "exists": true,
-        "sha256": "6039dcea76acac617b1292c8adc245e46fa7850690eb75d6e624a5028272e8ec"
+        "sha256": "13d1ff237e7a4dcbb8d39565d0d0407e40db03a848999c748dc7a43c49744708"
+      },
+      {
+        "file": "rust_kernels/yuragi_strider_core/src/register.rs",
+        "exists": true,
+        "sha256": "98e85e8f4f5afcafabd0b2fef33000f1ad96379cc882f53e06c8d5c739819f56"
       },
       {
         "file": "rust_kernels/yuragi_strider_core/src/reset.rs",
         "exists": true,
-        "sha256": "b663dc57d51c0caf061e701ac4d78cff4744614c3729ad43a5ed8c71a115c640"
+        "sha256": "a7559b54bc54c856bd6ec3c44f82bcbb290b03d34a150f3a919c69ddbee511cf"
       },
       {
         "file": "rust_kernels/yuragi_strider_rust/Cargo.toml",
@@ -219,7 +224,7 @@
       {
         "file": "rust_kernels/yuragi_strider_rust/src/lib.rs",
         "exists": true,
-        "sha256": "94fab29e4c0869a0a158484bef8be1da24b1d4aef954fbcb08a76fe37a7c652b"
+        "sha256": "63dadc87805d6a322cdfb92012ec4a25521b8c880fc28efe443dbb3fdccf3a88"
       },
       {
         "file": "api/pulse_models.py",
@@ -309,7 +314,7 @@
       {
         "file": "validation_cptp/model_freeze.py",
         "exists": true,
-        "sha256": "facb7c3206a0d7425fd7e342a3b3f6783e5fde4de1a6b36d8a23c21ae6ecc75a"
+        "sha256": "4888cacc969e8f53b2bd075df39513480eddada064e37967eee01420dda07a56"
       },
       {
         "file": "scripts/freeze_cptp_model.py",
