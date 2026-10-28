@@ -2,7 +2,9 @@
 
 from dataclasses import replace
 import json
+import math
 import unittest
+from unittest.mock import patch
 
 from api.attack_crosstalk_challenge import (
     EVALUATOR_ID, PRESET_ID, CrosstalkGroverEvaluator, CrosstalkGroverSettings, crosstalk_grover_challenge,
@@ -144,6 +146,34 @@ class GradingRuleTests(unittest.TestCase):
         self.assertTrue(disrupted(0, 400, 400, 400, **self.RULE))
         self.assertFalse(disrupted(400, 400, 400, 400, **self.RULE))
 
+    def test_rust_matches_frozen_formula_across_thresholds_and_counts(self):
+        for shots in (10, 100, 400):
+            for attacked in (0, shots // 4, shots // 2, shots):
+                for baseline in (0, shots // 2, shots):
+                    for minimum in (-0.1, 0.0, 0.15, 1.2):
+                        p_attack, p_base = attacked / shots, baseline / shots
+                        variance = (p_attack * (1 - p_attack) / shots
+                                    + p_base * (1 - p_base) / shots)
+                        drop = p_base - p_attack
+                        expected = drop >= minimum and (
+                            variance == 0.0 or drop / math.sqrt(variance) >= 3.0
+                        )
+                        with self.subTest(shots=shots, attacked=attacked, baseline=baseline, minimum=minimum):
+                            self.assertEqual(disrupted(attacked, shots, baseline, shots,
+                                                       significance_z=3.0, minimum_drop=minimum), expected)
+
+    def test_rust_rejects_invalid_schema_and_counts(self):
+        import yuragi_strider_rust
+        evaluate = yuragi_strider_rust.evaluate_crosstalk_disruption_v1
+        for schema, runs, baseline, shots in (
+            ("unknown", ({"success": 1},), 1, 1),
+            ("crosstalk_disruption_v1", ({"success": 0},), 1, 1),
+            ("crosstalk_disruption_v1", ({"success": 2**53 + 1},), 1, 1),
+            ("crosstalk_disruption_v1", ({"success": 1},), 2, 1),
+        ):
+            with self.subTest(schema=schema, runs=runs), self.assertRaises(ValueError):
+                evaluate(schema, runs, "success", baseline, shots, 3.0, 0.15)
+
 
 class EvaluatorTests(unittest.TestCase):
     def evaluator(self, runs, baseline=(280, 400)):
@@ -199,6 +229,25 @@ class EvaluatorTests(unittest.TestCase):
         with self.assertRaises(EvaluationUnavailable):
             evaluator.submit({})
         self.assertEqual(evaluator.attempts_remaining, 3)
+
+    def test_invalid_native_evaluation_preserves_attempts(self):
+        from api.attack_challenge import EvaluationUnavailable
+        runs = self.runs(0, shots=0)
+        calls = []
+        evaluator = CrosstalkGroverEvaluator(manifest(), LIMITS, lambda: tuple(runs),
+                                             measure_baseline=lambda: calls.append(1) or (280, 400))
+        with self.assertRaises(EvaluationUnavailable):
+            evaluator.submit({})
+        self.assertEqual(evaluator.attempts_remaining, 3)
+        runs[:] = self.runs(10)
+        self.assertTrue(evaluator.submit({}).passed)
+        self.assertEqual(evaluator.attempts_remaining, 2)
+        self.assertEqual(calls, [1])
+
+    def test_missing_native_runtime_is_an_explicit_error(self):
+        with patch("api.attack_crosstalk_challenge.importlib.import_module", side_effect=ImportError):
+            with self.assertRaisesRegex(RuntimeError, "Rust crosstalk evaluator is unavailable"):
+                self.evaluator(self.runs(10))
 
     def test_the_real_baseline_is_the_victim_program_alone(self):
         small = CrosstalkGroverSettings(baseline_shots=50)
@@ -256,7 +305,6 @@ class LiveChallengeTests(unittest.TestCase):
 
     def test_an_aligned_drive_lowers_the_victim_and_a_missing_one_does_not(self):
         baseline_evaluator, quiet = self.play(attack=False)
-        baseline_evaluator._attempts = 0
         quiet_success = quiet[0].get("1011", 0) / sum(quiet[0].values())
         self.assertGreater(quiet_success, 0.4)                                  # the search works without an attacker
         self.assertFalse(baseline_evaluator.submit({}).passed)
