@@ -89,6 +89,10 @@ mod tests {
     const HEALTH_CONTRACT: &str = include_str!("../contracts/api-health-v1.json");
     const BELL_DIRECT_CONTRACT: &str =
         include_str!("../contracts/circuit-compile-bell-logical-direct-v1.json");
+    const AUTO_DECOMPOSE_REQUEST: &str =
+        include_str!("../contracts/circuit-compile-auto-decompose-request-v1.json");
+    const AUTO_DECOMPOSE_CONTRACT: &str =
+        include_str!("../contracts/circuit-compile-auto-decompose-v1.json");
 
     #[tokio::test]
     async fn health_response_matches_the_shared_wire_contract() {
@@ -186,6 +190,27 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let actual: Value = serde_json::from_slice(&bytes).unwrap();
         let expected: Value = serde_json::from_str(BELL_DIRECT_CONTRACT).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn circuit_compile_route_serves_auto_decomposition() {
+        let response = api_router(Vec::new())
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/circuit/compile")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(AUTO_DECOMPOSE_REQUEST))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let actual: Value = serde_json::from_slice(&bytes).unwrap();
+        let expected: Value = serde_json::from_str(AUTO_DECOMPOSE_CONTRACT).unwrap();
         assert_eq!(actual, expected);
     }
 }

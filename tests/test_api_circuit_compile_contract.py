@@ -14,6 +14,8 @@ CONTRACT = (
     / "contracts"
     / "circuit-compile-bell-logical-direct-v1.json"
 )
+AUTO_REQUEST = CONTRACT.with_name("circuit-compile-auto-decompose-request-v1.json")
+AUTO_CONTRACT = CONTRACT.with_name("circuit-compile-auto-decompose-v1.json")
 
 
 class ApiCircuitCompileContractTests(unittest.TestCase):
@@ -28,6 +30,17 @@ class ApiCircuitCompileContractTests(unittest.TestCase):
 
         self.assertEqual(operation["responses"]["200"]["description"], "Successful Response")
         self.assertIn("application/json", operation["responses"]["200"]["content"])
+
+    def test_fastapi_auto_decompose_matches_all_eight_shared_rewrite_rules(self) -> None:
+        request = json.loads(AUTO_REQUEST.read_text(encoding="utf-8"))
+        expected = json.loads(AUTO_CONTRACT.read_text(encoding="utf-8"))
+        actual = compile_circuit_preview(CompilePreviewRequest(**request))
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            len(actual["compilation"]["decomposition_rules_used"]),
+            8,
+        )
 
 
 if __name__ == "__main__":

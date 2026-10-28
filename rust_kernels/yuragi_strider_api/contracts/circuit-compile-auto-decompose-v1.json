@@ -1,0 +1,1776 @@
+Warning: truncated output (original token count: 13109)
+Total output lines: 2314
+
+{
+  "compilation": {
+    "compiled_circuit": {
+      "annotations": [],
+      "classical_bits": 0,
+      "columns": [
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                0
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 0
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.33
+              },
+              "targets": [
+                0
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 1
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                0
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 2
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": -1.5707963267948966
+              },
+              "targets": [
+                1
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 3
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                1
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 4
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": -0.8
+              },
+              "targets": [
+                1
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 5
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                1
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 6
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 1.5707963267948966
+              },
+              "targets": [
+                1
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 7
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                2
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 8
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                2
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 9
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                2
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 10
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                1
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 11
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                1
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                0
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 12
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                1
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 13
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.35
+              },
+              "targets": [
+                0
+              ],
+              "type": "RZ"
+            },
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.35
+              },
+              "targets": [
+                2
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 14
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                2
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 15
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": -0.35
+              },
+              "targets": [
+                2
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 16
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                2
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 17
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                2
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 18
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                1
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                2
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 19
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": -0.7853981633974483
+              },
+              "targets": [
+                2
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 20
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                2
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 21
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.7853981633974483
+              },
+              "targets": [
+                2
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 22
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                1
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                2
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 23
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": -0.7853981633974483
+              },
+              "targets": [
+                2
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 24
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                2
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 25
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.7853981633974483
+              },
+              "targets": [
+                1
+              ],
+              "type": "RZ"
+            },
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.7853981633974483
+              },
+              "targets": [
+                2
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 26
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                2
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 27
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                1
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 28
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.7853981633974483
+              },
+              "targets": [
+                0
+              ],
+              "type": "RZ"
+            },
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": -0.7853981633974483
+              },
+              "targets": [
+                1
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 29
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                1
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 30
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                0
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 31
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.7853981633974483
+              },
+              "targets": [
+                1
+              ],
+              "type": "RZ"
+            },
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.7853981633974483
+              },
+              "targets": [
+                0
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 32
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                1
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                0
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 33
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": -0.7853981633974483
+              },
+              "targets": [
+                0
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 34
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                1
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                0
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 35
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.39269908169872414
+              },
+              "targets": [
+                2
+              ],
+              "type": "RZ"
+            },
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": 0.39269908169872414
+              },
+              "targets": [
+                0
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 36
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                2
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                0
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 37
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02,
+                "theta_rad": -0.39269908169872414
+              },
+              "targets": [
+                0
+              ],
+              "type": "RZ"
+            }
+          ],
+          "step": 38
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                2
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                0
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 39
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                1
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 40
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "condi…3109 tokens truncated… ]
+          },
+          {
+            "compiled_column": 4,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 5,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.8
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 6,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 7,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 1.5707963267948966
+            },
+            "targets": [
+              1
+            ]
+          }
+        ],
+        "controls": [],
+        "logical_column": 1,
+        "logical_gate_index": 0,
+        "rule_id": "ry_to_rz_h_rz_h_rz_v1",
+        "source_gate": "RY",
+        "targets": [
+          1
+        ]
+      },
+      {
+        "compiled_operations": [
+          {
+            "compiled_column": 8,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 9,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 10,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              2
+            ]
+          }
+        ],
+        "controls": [
+          0
+        ],
+        "logical_column": 2,
+        "logical_gate_index": 0,
+        "rule_id": "cz_to_h_cnot_h_v1",
+        "source_gate": "CZ",
+        "targets": [
+          2
+        ]
+      },
+      {
+        "compiled_operations": [
+          {
+            "compiled_column": 11,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 12,
+            "controls": [
+              1
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 13,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          }
+        ],
+        "controls": [],
+        "logical_column": 3,
+        "logical_gate_index": 0,
+        "rule_id": "swap_to_three_cnot_v1",
+        "source_gate": "SWAP",
+        "targets": [
+          0,
+          1
+        ]
+      },
+      {
+        "compiled_operations": [
+          {
+            "compiled_column": 14,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.35
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 14,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.35
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 15,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 16,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.35
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 17,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          }
+        ],
+        "controls": [
+          0
+        ],
+        "logical_column": 4,
+        "logical_gate_index": 0,
+        "rule_id": "cp_to_rz_cnot_v1",
+        "source_gate": "CP",
+        "targets": [
+          2
+        ]
+      },
+      {
+        "compiled_operations": [
+          {
+            "compiled_column": 18,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 19,
+            "controls": [
+              1
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 20,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 21,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 22,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 23,
+            "controls": [
+              1
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 24,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 25,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 26,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 26,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 27,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 28,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 29,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 29,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.7853981633974483
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 30,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          }
+        ],
+        "controls": [
+          0,
+          1
+        ],
+        "logical_column": 5,
+        "logical_gate_index": 0,
+        "rule_id": "ccx_to_h_cnot_rz_v1",
+        "source_gate": "CCX",
+        "targets": [
+          2
+        ]
+      },
+      {
+        "compiled_operations": [
+          {
+            "compiled_column": 31,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 32,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 32,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 33,
+            "controls": [
+              1
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 34,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.7853981633974483
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 35,
+            "controls": [
+              1
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 36,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.39269908169872414
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 36,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.39269908169872414
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 37,
+            "controls": [
+              2
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 38,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.39269908169872414
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 39,
+            "controls": [
+              2
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 40,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 41,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 41,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 42,
+            "controls": [
+              2
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 43,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.7853981633974483
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 44,
+            "controls": [
+              2
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 45,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 46,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 47,
+            "controls": [
+              2
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 48,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          }
+        ],
+        "controls": [],
+        "logical_column": 6,
+        "logical_gate_index": 0,
+        "rule_id": "qft_to_h_cp_swap_v1",
+        "source_gate": "QFT",
+        "targets": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "compiled_operations": [
+          {
+            "compiled_column": 49,
+            "controls": [],
+            "gate": "X",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 50,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 51,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 52,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 53,
+            "controls": [
+              1
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 54,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 55,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 56,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.7853981633974483
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 57,
+            "controls": [
+              1
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              2
+            ]
+          },
+          {
+            "compiled_column": 58,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 59,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 60,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": -0.7853981633974483
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 61,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          },
+          {
+            "compiled_column": 62,
+            "controls": [],
+            "gate": "RZ",
+            "params": {
+              "duration_us": 0.02,
+              "theta_rad": 0.7853981633974483
+            },
+            "targets": [
+              0
+            ]
+          },
+          {
+            "compiled_column": 63,
+            "controls": [],
+            "gate": "X",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              1
+            ]
+          }
+        ],
+        "controls": [],
+        "logical_column": 7,
+        "logical_gate_index": 0,
+        "rule_id": "oracle_to_x_mcz_graycode_v1",
+        "source_gate": "ORACLE",
+        "targets": [
+          0,
+          1,
+          2
+        ]
+      }
+    ]
+  }
+}
