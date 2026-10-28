@@ -29,8 +29,8 @@ class RustCircuitRuntimeNativeTest(unittest.TestCase):
         self.assertAlmostEqual(observed["00"], 0.5, places=12)
 
         assigned = apply_readout_rust(ideal, 2, [(0.1, 0.2), (0.3, 0.4)])
-        self.assertAlmostEqual(assigned["00"], 0.5 * 0.9 * 0.7, places=12)
-        self.assertAlmostEqual(assigned["11"], 0.5 * 0.1 * 0.3, places=12)
+        self.assertAlmostEqual(assigned["00"], 0.5 * (0.9 * 0.7 + 0.2 * 0.4), places=12)
+        self.assertAlmostEqual(assigned["11"], 0.5 * (0.1 * 0.3 + 0.8 * 0.6), places=12)
         self.assertAlmostEqual(sum(assigned.values()), 1.0, places=12)
 
     def test_post_circuit_measurement_removes_only_measured_coherence(self) -> None:
