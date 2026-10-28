@@ -433,7 +433,7 @@ class StateSnapshotCollector:
                     self.max_snapshots,
                 )
                 selected = [self._candidates[int(index)] for index in selected_indices]
-                self.selection_backend = RUST_DENSE_PREVIEW_BACKEND
+                self.selection_backend = self.simulation_backend
             except (ImportError, RuntimeError, ValueError, IndexError) as exc:
                 if self.simulation_backend == RUST_DENSE_BACKEND:
                     raise
