@@ -2,3 +2,4 @@
 
 pub mod register;
 pub mod reset;
+pub mod statevector;

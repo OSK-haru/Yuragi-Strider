@@ -3,6 +3,10 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
+use yuragi_strider_core::statevector::{
+    StatevectorOperation, apply_binary_readout, execute_ideal_circuit,
+    execute_ideal_density_circuit,
+};
 
 const RESET_SEQUENCE_SCHEMA_VERSION: &str = "local_reset_sequence_v1";
 const BINARY_CONTRAST_SCHEMA_VERSION: &str = "security_binary_contrast_v1";
@@ -229,6 +233,121 @@ fn apply_local_reset_sequence_flat(
     };
     state.execute(&[operation]).map_err(PyValueError::new_err)?;
     Ok(state.values().to_vec())
+}
+
+#[pyfunction]
+fn execute_ideal_circuit_v1(
+    logical_qubits: usize,
+    classical_bits: usize,
+    initial_states: Vec<String>,
+    operations: Vec<(
+        String,
+        Vec<usize>,
+        Vec<usize>,
+        f64,
+        usize,
+        u8,
+        Option<usize>,
+        Vec<(usize, u8)>,
+    )>,
+    readout_errors: Vec<(f64, f64)>,
+) -> PyResult<(Vec<f64>, Vec<f64>)> {
+    let operations = operations
+        .into_iter()
+        .map(
+            |(
+                kind,
+                targets,
+                controls,
+                theta_rad,
+                marked_index,
+                control_value,
+                control_state,
+                conditions,
+            )| StatevectorOperation {
+                kind,
+                targets,
+                controls,
+                theta_rad,
+                marked_index,
+                control_value,
+                control_state,
+                conditions,
+            },
+        )
+        .collect::<Vec<_>>();
+    let ideal = execute_ideal_circuit(
+        logical_qubits,
+        classical_bits,
+        &initial_states,
+        &operations,
+    )
+    .map_err(PyValueError::new_err)?;
+    let observed = if readout_errors.is_empty() {
+        ideal.clone()
+    } else {
+        apply_binary_readout(&ideal, logical_qubits, &readout_errors)
+            .map_err(PyValueError::new_err)?
+    };
+    Ok((ideal, observed))
+}
+
+#[pyfunction]
+fn apply_binary_readout_v1(
+    probabilities: Vec<f64>,
+    logical_qubits: usize,
+    assignment_errors: Vec<(f64, f64)>,
+) -> PyResult<Vec<f64>> {
+    apply_binary_readout(&probabilities, logical_qubits, &assignment_errors)
+        .map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+fn execute_ideal_density_circuit_v1(
+    logical_qubits: usize,
+    initial_states: Vec<String>,
+    operations: Vec<(
+        usize,
+        String,
+        Vec<usize>,
+        Vec<usize>,
+        f64,
+        usize,
+        u8,
+        Option<usize>,
+    )>,
+) -> PyResult<Vec<f64>> {
+    let operations = operations
+        .into_iter()
+        .map(
+            |(
+                step,
+                kind,
+                targets,
+                controls,
+                theta_rad,
+                marked_index,
+                control_value,
+                control_state,
+            )| {
+                (
+                    step,
+                    StatevectorOperation {
+                        kind,
+                        targets,
+                        controls,
+                        theta_rad,
+                        marked_index,
+                        control_value,
+                        control_state,
+                        conditions: Vec::new(),
+                    },
+                )
+            },
+        )
+        .collect::<Vec<_>>();
+    execute_ideal_density_circuit(logical_qubits, &initial_states, &operations)
+        .map_err(PyValueError::new_err)
 }
 
 /// A Rust-owned density matrix; a whole reset schedule crosses PyO3 once.
@@ -2498,6 +2617,9 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rk4_evolve_flat, m)?)?;
     m.add_function(wrap_pyfunction!(apply_local_reset_sequence_flat, m)?)?;
     m.add_function(wrap_pyfunction!(execute_register_batch_flat, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_ideal_circuit_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(apply_binary_readout_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_ideal_density_circuit_v1, m)?)?;
     m.add_function(wrap_pyfunction!(binary_contrast_statistics_v1, m)?)?;
     m.add_function(wrap_pyfunction!(reset_training_analysis_v1, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_crosstalk_disruption_v1, m)?)?;

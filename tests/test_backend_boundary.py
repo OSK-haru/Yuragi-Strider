@@ -37,6 +37,10 @@ class BackendBoundaryTest(unittest.TestCase):
             for value_a, value_b in zip(values_a, values_b):
                 self.assertAlmostEqual(value_a, value_b, places=10)
 
+    @unittest.skipUnless(
+        is_rust_backend_available(),
+        "Rust extension is not built in this environment",
+    )
     def test_rust_dense_preview_uses_rust_when_available(self) -> None:
         result = run_simulation(_config(simulation_backend="rust_dense_preview"))
 
@@ -93,11 +97,18 @@ class BackendBoundaryTest(unittest.TestCase):
         self.assertEqual(config.simulation_backend, "python_dense")
         self.assertEqual(result.diagnostics["backend_requested"], "python_dense")
 
-    def test_rust_backend_rejects_paths_that_still_use_python(self) -> None:
+    def test_rust_backend_statevector_path_is_no_longer_classified_as_unsupported(self) -> None:
         config = _config(simulation_backend=RUST_DENSE_BACKEND)
         config.circuit = CircuitConfig(logical_qubits=6, initial_states=["0"] * 6, columns=[])
         result = run_simulation(config)
-        self.assertIn("RUST_BACKEND_UNSUPPORTED_PATH", {item.code for item in result.issues})
+        issue_codes = {item.code for item in result.issues}
+        self.assertNotIn("RUST_BACKEND_UNSUPPORTED_PATH", issue_codes)
+        if is_rust_backend_available():
+            self.assertEqual(issue_codes, set())
+            self.assertTrue(result.diagnostics["rust_kernel_used"])
+            self.assertEqual(result.diagnostics["rust_kernel_call_count"], 1)
+        else:
+            self.assertIn("STATEVECTOR_EXECUTION_FAILED", issue_codes)
 
     def test_qscope_envelope_round_trips_backend_field(self) -> None:
         config = _config(simulation_backend="rust_dense_preview")

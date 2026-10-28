@@ -6,6 +6,12 @@ on:
       - "Dockerfile.rust-api"
       - ".dockerignore"
       - "rust_kernels/yuragi_strider_api/**"
+      - "rust_kernels/yuragi_strider_core/**"
+      - "rust_kernels/yuragi_strider_rust/**"
+      - "core/rust_circuit_runtime.py"
+      - "core/simulator.py"
+      - "tests/test_rust_circuit_runtime_boundary.py"
+      - "frontend/**"
       - ".github/workflows/rust-api.yml"
   push:
     branches:
@@ -14,6 +20,8 @@ on:
       - "Dockerfile.rust-api"
       - ".dockerignore"
       - "rust_kernels/yuragi_strider_api/**"
+      - "rust_kernels/yuragi_strider_core/**"
+      - "rust_kernels/yuragi_strider_rust/**"
       - ".github/workflows/rust-api.yml"
 
 permissions:
@@ -31,7 +39,31 @@ jobs:
           components: rustfmt
       - name: Check formatting
         run: cargo fmt --manifest-path rust_kernels/yuragi_strider_api/Cargo.toml -- --check
+      - name: Test shared Rust core
+        run: cargo test --locked --manifest-path rust_kernels/yuragi_strider_core/Cargo.toml
+      - name: Check PyO3 extension
+        run: cargo check --locked --manifest-path rust_kernels/yuragi_strider_rust/Cargo.toml
       - name: Test Rust API
         run: cargo test --locked --manifest-path rust_kernels/yuragi_strider_api/Cargo.toml
       - name: Build production image
         run: docker build --file Dockerfile.rust-api --tag yuragi-strider-rust-api:test .
+      - name: Build FastAPI image with the Rust extension
+        run: docker build --file Dockerfile --tag yuragi-strider-fastapi-rust:test .
+      - name: Test Rust circuit adapter contract
+        run: python -m unittest tests.test_rust_circuit_runtime_boundary
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Build Circuit Studio
+        run: npm run build
+        working-directory: frontend
