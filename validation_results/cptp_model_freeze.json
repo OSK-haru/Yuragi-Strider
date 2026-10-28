@@ -1,7 +1,7 @@
 {
   "validation": "CPTP-MODEL-FREEZE-C10",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-28T05:35:02.099891+00:00",
+  "generated_at_utc": "2026-10-28T05:39:30.488743+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -143,7 +143,7 @@
     }
   },
   "source_revision": {
-    "git_commit": "ae454fb5e3c7066a0c3d415ee7c0942b8e25074b",
+    "git_commit": "9f67db0342c53be408354c7c76dbcf70fe22c514",
     "critical_source_tree_sha256": "7b8933cae67ae3070bf540d88b70592a61f8cfdc65399062fca80698cf26231b",
     "files": [
       {
