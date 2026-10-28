@@ -2,7 +2,7 @@
 
 `yuragi_strider_core::register::DensityRegister` owns a qubit density matrix and applies an ordered batch atomically. Qubit zero is the most significant tensor factor. Failed batches leave the register unchanged. This bounded numerical primitive is not an authorization boundary, a public state API, or the complete QPU runtime: scheduling, observation budgets, tenant isolation, event commits and replay remain in the existing service.
 
-The temporary PyO3 `RegisterSession` accepts `register_state_v1` at construction and `register_batch_v1` at execution. A batch contains tuples `(kind, operands, data, scalar)`:
+The PyO3 `RegisterSession` accepts `register_state_v1` at construction and `register_batch_v1` at execution. A batch contains tuples `(kind, operands, data, scalar)`. `execute_register_batch_flat` applies the same versioned operation parser and `DensityRegister` kernel to a one-shot batch, returning measurement bits and the final flat state in one call. The qubit reset adapter uses this shared path when the extension provides it; qutrit resets retain their local-dimension-specific kernel, and older extensions retain the previous qubit-reset call as a compatibility fallback.
 
 | Kind | Data | Scalar |
 | --- | --- | --- |

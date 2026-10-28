@@ -35,6 +35,31 @@ class FixedDraw:
 
 
 class RustRegisterCoreTests(unittest.TestCase):
+    @unittest.skipUnless(
+        callable(getattr(yuragi_strider_rust, "execute_register_batch_flat", None)),
+        "one-shot common register batch API is not built",
+    )
+    def test_one_shot_batch_returns_measurements_and_final_state(self):
+        initial = np.diag([1.0, 0.0]).astype(complex)
+        x_gate = np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=complex)
+        measurements, final_state = yuragi_strider_rust.execute_register_batch_flat(
+            "register_batch_v1",
+            flat(initial),
+            1,
+            [
+                ("unitary", [0], flat(x_gate), 0.0),
+                ("reset", [0], [1.0, 1.0, 0.0], 0.0),
+                ("measure", [0], [], 0.5),
+            ],
+        )
+        self.assertEqual(measurements, [[0]])
+        np.testing.assert_allclose(
+            unflatten_complex_matrix(final_state, 2),
+            np.diag([1.0, 0.0]),
+            rtol=0.0,
+            atol=1e-14,
+        )
+
     def test_noncontiguous_reversed_operands_match_python_operator(self):
         rng = np.random.default_rng(919)
         ket = rng.normal(size=8) + 1j * rng.normal(size=8)

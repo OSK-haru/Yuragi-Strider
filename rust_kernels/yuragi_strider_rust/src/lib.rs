@@ -424,6 +424,26 @@ fn parse_register_batch(
     Ok(converted)
 }
 
+/// Execute a complete register batch through the shared qubit register kernel.
+#[pyfunction]
+fn execute_register_batch_flat(
+    schema_version: &str,
+    rho: Vec<f64>,
+    qubits: usize,
+    operations: Vec<(String, Vec<usize>, Vec<f64>, f64)>,
+) -> PyResult<(Vec<Vec<usize>>, Vec<f64>)> {
+    let converted = parse_register_batch(schema_version, operations)?;
+    let mut state = yuragi_strider_core::register::DensityRegister::new(rho, qubits)
+        .map_err(PyValueError::new_err)?;
+    let measurements = state
+        .execute(&converted)
+        .map_err(PyValueError::new_err)?
+        .into_iter()
+        .map(|bits| bits.into_iter().map(usize::from).collect())
+        .collect();
+    Ok((measurements, state.values().to_vec()))
+}
+
 #[pyfunction]
 fn binary_contrast_statistics_v1(
     schema_version: &str,
@@ -2477,6 +2497,7 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gksl_piecewise_superoperator_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_evolve_flat, m)?)?;
     m.add_function(wrap_pyfunction!(apply_local_reset_sequence_flat, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_register_batch_flat, m)?)?;
     m.add_function(wrap_pyfunction!(binary_contrast_statistics_v1, m)?)?;
     m.add_function(wrap_pyfunction!(reset_training_analysis_v1, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_crosstalk_disruption_v1, m)?)?;

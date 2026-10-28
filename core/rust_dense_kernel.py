@@ -6,7 +6,10 @@ import importlib
 import math
 from collections.abc import Sequence
 
-from core.backend_boundary import RUST_RESET_SEQUENCE_SCHEMA_VERSION
+from core.backend_boundary import (
+    RUST_REGISTER_BATCH_SCHEMA_VERSION,
+    RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+)
 from core.gates import Matrix
 
 
@@ -438,16 +441,51 @@ def rust_apply_local_reset_sequence(
 
     flat_populations = [value for row in checked_populations for value in row]
     rust_module = _load_rust_module()
-    result = rust_module.apply_local_reset_sequence_flat(
-        RUST_RESET_SEQUENCE_SCHEMA_VERSION,
-        flat_state,
-        subsystem_count,
-        local_dimension,
-        list(checked_targets),
-        list(checked_successes),
-        flat_populations,
-        reset_count,
-    )
+    if local_dimension == 2:
+        execute_batch = getattr(rust_module, "execute_register_batch_flat", None)
+        if callable(execute_batch):
+            reset_data = [
+                value
+                for success, populations in zip(
+                    checked_successes, checked_populations, strict=True
+                )
+                for value in (success, *populations)
+            ]
+            operations = [
+                ("reset", list(checked_targets), reset_data, 0.0)
+                for _ in range(reset_count)
+            ]
+            measurements, result = execute_batch(
+                RUST_REGISTER_BATCH_SCHEMA_VERSION,
+                flat_state,
+                subsystem_count,
+                operations,
+            )
+            if measurements:
+                raise RuntimeError("reset-only register batch returned measurements")
+        else:
+            # Keep compatibility with extensions built before the unified batch API.
+            result = rust_module.apply_local_reset_sequence_flat(
+                RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+                flat_state,
+                subsystem_count,
+                local_dimension,
+                list(checked_targets),
+                list(checked_successes),
+                flat_populations,
+                reset_count,
+            )
+    else:
+        result = rust_module.apply_local_reset_sequence_flat(
+            RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+            flat_state,
+            subsystem_count,
+            local_dimension,
+            list(checked_targets),
+            list(checked_successes),
+            flat_populations,
+            reset_count,
+        )
     return unflatten_complex_matrix(result, dimension)
 
 

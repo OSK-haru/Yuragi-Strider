@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock, patch
 
 import numpy as np
 import yuragi_strider_rust
@@ -31,6 +32,31 @@ from core.rust_dense_kernel import (
 
 @unittest.skipUnless(is_rust_kernel_available(), "yuragi_strider_rust is not importable")
 class RustResetKernelTests(unittest.TestCase):
+    def test_qubit_reset_adapter_uses_the_shared_register_batch_api_when_available(self):
+        state = ((1.0 + 0.0j, 0.0j), (0.0j, 0.0j))
+        operation = Mock(return_value=([], flatten_complex_matrix(state)))
+        fake_module = Mock(execute_register_batch_flat=operation)
+
+        with patch("core.rust_dense_kernel._load_rust_module", return_value=fake_module):
+            actual = rust_apply_local_reset_sequence(
+                state,
+                subsystem_count=1,
+                local_dimension=2,
+                targets=(0,),
+                success_probabilities=(0.4,),
+                target_populations=((0.25, 0.75),),
+                reset_count=2,
+            )
+
+        expected_operation = ("reset", [0], [0.4, 0.25, 0.75], 0.0)
+        operation.assert_called_once_with(
+            "register_batch_v1",
+            flatten_complex_matrix(state),
+            1,
+            [expected_operation, expected_operation],
+        )
+        self.assertEqual(actual, state)
+
     def test_rust_owned_session_batches_operations_and_rejects_partial_commit(self):
         amplitudes = np.asarray((1.0, 1.0j, 0.4, -0.2j), dtype=complex)
         amplitudes /= np.linalg.norm(amplitudes)
