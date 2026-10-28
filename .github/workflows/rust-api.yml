@@ -49,6 +49,8 @@ jobs:
         run: docker build --file Dockerfile.rust-api --tag yuragi-strider-rust-api:test .
       - name: Build FastAPI image with the Rust extension
         run: docker build --file Dockerfile --tag yuragi-strider-fastapi-rust:test .
+      - name: Install focused Python test dependency
+        run: python -m pip install numpy
       - name: Test Rust circuit adapter contract
         run: python -m unittest tests.test_rust_circuit_runtime_boundary
 
