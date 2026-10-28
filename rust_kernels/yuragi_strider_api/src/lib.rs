@@ -1,4 +1,4 @@
-use axum::extract::Request;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::header::{
     CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
 };
@@ -14,6 +14,37 @@ mod circuit_compile;
 
 const API_CONTENT_SECURITY_POLICY_VALUE: &str =
     "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+pub const MAX_API_REQUEST_BODY_BYTES: usize = 64 * 1024;
+
+/// Parse exact browser origins, optionally requiring HTTPS for a production deployment.
+pub fn parse_allowed_origins(raw: &str, require_https: bool) -> Result<Vec<HeaderValue>, String> {
+    let mut origins = Vec::new();
+    for item in raw.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+        let (scheme, authority) = item
+            .split_once("://")
+            .ok_or_else(|| format!("ALLOWED_ORIGINS contains an invalid origin: {item}"))?;
+        let scheme_valid = if require_https {
+            scheme == "https"
+        } else {
+            matches!(scheme, "http" | "https")
+        };
+        if !scheme_valid
+            || authority.is_empty()
+            || authority.chars().any(|character| {
+                character.is_ascii_whitespace()
+                    || matches!(character, '/' | '?' | '#' | '@' | '\\' | ',')
+            })
+        {
+            return Err(format!("ALLOWED_ORIGINS contains an invalid origin: {item}"));
+        }
+        let value = HeaderValue::from_str(item)
+            .map_err(|_| format!("ALLOWED_ORIGINS contains an invalid header value: {item}"))?;
+        if !origins.contains(&value) {
+            origins.push(value);
+        }
+    }
+    Ok(origins)
+}
 
 /// Build the API router. The supplied origins are the exact allowlist from
 /// `ALLOWED_ORIGINS`; an empty list preserves the current no-CORS behavior.
@@ -31,7 +62,9 @@ pub fn api_router(allowed_origins: Vec<HeaderValue>) -> Router {
         );
     }
 
-    router.layer(middleware::from_fn(add_api_security_headers))
+    router
+        .layer(DefaultBodyLimit::max(MAX_API_REQUEST_BODY_BYTES))
+        .layer(middleware::from_fn(add_api_security_headers))
 }
 
 async fn health() -> Json<Value> {
@@ -76,7 +109,7 @@ async fn add_api_security_headers(request: Request, next: Next) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::api_router;
+    use super::{MAX_API_REQUEST_BODY_BYTES, api_router, parse_allowed_origins};
     use axum::body::to_bytes;
     use axum::http::header::{
         ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_METHOD,
@@ -212,5 +245,40 @@ mod tests {
         let actual: Value = serde_json::from_slice(&bytes).unwrap();
         let expected: Value = serde_json::from_str(AUTO_DECOMPOSE_CONTRACT).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn circuit_compile_rejects_request_bodies_over_the_api_budget() {
+        let oversized = format!(
+            "{{\"padding\":\"{}\"}}",
+            "x".repeat(MAX_API_REQUEST_BODY_BYTES)
+        );
+        let response = api_router(Vec::new())
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/circuit/compile")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(oversized))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    }
+
+    #[test]
+    fn origin_configuration_is_exact_and_production_requires_https() {
+        assert_eq!(
+            parse_allowed_origins(" https://ui.example.test,https://ui.example.test ", true)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(parse_allowed_origins("http://localhost:5173", true).is_err());
+        assert!(parse_allowed_origins("https://ui.example.test/path", false).is_err());
+        assert!(parse_allowed_origins("*", false).is_err());
     }
 }

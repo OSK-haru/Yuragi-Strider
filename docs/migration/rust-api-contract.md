@@ -32,6 +32,40 @@ FastAPI continues to serve the production route. Axum is still a parallel
 implementation, not wired into production traffic. Exact Pydantic validation
 and error parity and the remaining API routes still need migration.
 
+## Production route-slice hardening
+
+`Dockerfile.rust-api` builds a non-root image for the Rust service. The binary
+accepts `RUST_API_PROFILE=development|staging|production`, `BIND_HOST`, `PORT`,
+and the exact comma-separated `ALLOWED_ORIGINS` list. Staging and production
+reject non-HTTPS origins. Empty origins mean same-origin/server-to-server use;
+TLS must terminate at the deployment proxy, and the service port should stay
+on the private service network. The server handles SIGTERM and Ctrl-C with
+graceful shutdown. JSON request bodies are limited to 64 KiB, matching the
+current FastAPI default request budget, and existing security headers remain
+enabled.
+
+This image can serve `/api/health` and `/api/circuit/compile` as a stateless
+route group behind a production proxy. It does not yet replace the FastAPI
+service: simulation, pulse and analysis endpoints, optional attack routes,
+their execution budgets, and FastAPI request-validation error contracts are
+not implemented in Axum. Keep their traffic on FastAPI and do not advertise
+the Rust process as the complete API until route coverage and focused parity
+tests are complete.
+
+Build and smoke-test the route-slice image with:
+
+```sh
+docker build -f Dockerfile.rust-api -t yuragi-strider-rust-api:local .
+docker run --rm -p 8001:8000 \
+  -e RUST_API_PROFILE=production \
+  -e ALLOWED_ORIGINS=https://your-ui.example \
+  yuragi-strider-rust-api:local
+```
+
+Then request `/api/health` and `/api/circuit/compile` through the TLS-terminating
+proxy. Same-origin deployments can leave `ALLOWED_ORIGINS` empty. Do not expose
+the container port directly to the public network.
+
 ## Cutover rule
 
 Move routes by cohesive behavior groups, with a contract fixture and focused

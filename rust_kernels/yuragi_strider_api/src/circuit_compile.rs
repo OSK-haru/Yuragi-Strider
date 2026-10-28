@@ -1,7 +1,8 @@
-//! First staged slice of `/api/circuit/compile`.
+//! Contract-tested implementation of `/api/circuit/compile`.
 //!
-//! `logical_direct` is implemented here. `auto_decompose` remains on FastAPI
-//! until all gate rewrite rules and source maps have been ported and verified.
+//! Both `logical_direct` and `auto_decompose` are supported for the bounded
+//! editor circuit shape. The public Axum handler adds request-body limits and
+//! transport security policy around this pure compiler.
 
 use serde_json::{Map, Value, json};
 
