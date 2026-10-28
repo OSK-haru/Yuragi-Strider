@@ -1,6 +1,7 @@
 """Integration of the explicit Rust register engine with the existing runtime."""
 
 import math
+import random
 import sys
 import unittest
 from unittest.mock import patch
@@ -15,6 +16,7 @@ from core.experimental_isolation_physics import ImperfectResetSpec, Phenomenolog
 from core.experimental_isolation_physics.idle_evolution import IndependentIdleModel, IdleQubitSpec
 from core.experimental_isolation_physics.reset_model import PerQubitPhenomenologicalResetModel
 from core.gates import density_from_ket
+from core.register_operations import sample_measurement
 from tests.test_common_command_pipeline import pipeline
 from tests.test_local_program_runtime import program_json, submit
 
@@ -65,6 +67,24 @@ class RustRegisterRuntimeTests(unittest.TestCase):
                 self.assertEqual(validate.call_count, 1)
                 np.testing.assert_allclose(actual[0], expected[0], atol=2e-13, rtol=0)
                 self.assertEqual(actual[1:], expected[1:])
+
+                draw = random.Random(operation.sampling_seed).random()
+                reference, bits = sample_measurement(expected[0], (0, 1), random.Random(operation.sampling_seed))
+                trailing = (kicks[1],)
+                for placed in trailing:
+                    reference = rust_runtime._apply_kick(reference, placed)
+                with patch.object(rust_runtime.state_store, "validate_state",
+                                  wraps=rust_runtime.state_store.validate_state) as validate:
+                    measured = rust_runtime._run_before_measurement(
+                        operation, (0, 1), np.asarray(initial), 1, kicks,
+                        measurement_draw=draw, trailing_kicks=trailing,
+                    )
+                self.assertEqual(validate.call_count, 1)
+                self.assertEqual(len(measured), 5)
+                np.testing.assert_allclose(measured[0], reference, atol=2e-13, rtol=0)
+                self.assertEqual(measured[1:3], expected[1:])
+                self.assertEqual(measured[3], bits)
+                np.testing.assert_allclose(measured[4], expected[0], atol=2e-13, rtol=0)
 
     def test_missing_extension_and_unknown_reset_model_fail_before_execution(self):
         with patch.dict(sys.modules, {"yuragi_strider_rust": None}):

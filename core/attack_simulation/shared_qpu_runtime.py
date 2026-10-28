@@ -562,24 +562,40 @@ class SharedQpuRuntime:
             cached = None if shot_kicks else _find_reusable(
                 cache, shot_index > 0, entry_state, self.config.entry_reuse_tolerance)
             if cached is None:
-                cached = self._run_before_measurement(operation, slots, entry_state, shot_index, shot_kicks)
+                if self._rust_register_session is not None:
+                    measurement_draw = generator.random() if measured_slots else None
+                    cached = self._run_before_measurement(
+                        operation, slots, entry_state, shot_index, shot_kicks,
+                        measurement_draw=measurement_draw,
+                        trailing_kicks=(kicks.trailing if measured_slots
+                                        and shot_index == operation.shots - 1 else ()),
+                    )
+                else:
+                    cached = self._run_before_measurement(operation, slots, entry_state, shot_index, shot_kicks)
                 computed += 1
                 if not shot_kicks:
+                    reusable = ((cached[4], cached[1], cached[2]) if len(cached) == 5 else cached)
                     if len(cache) >= _entry_cache_size(entry_state):
                         cache.pop(0)
-                    cache.append((shot_index > 0, entry_state, cached))
+                    cache.append((shot_index > 0, entry_state, reusable))
             else:
                 reused += 1
-            state, assignment, duration = cached
+            if len(cached) == 5:
+                state, assignment, duration, bits, _cache_state = cached
+                measurement_done = True
+            else:
+                state, assignment, duration = cached
+                measurement_done = False
             classical = [0] * operation.classical_bits
             # The validated final block has distinct, commuting targets and no later gates.
             # Sample its joint distribution once.
-            state, bits = sample_measurement(state, measured_slots, generator)
+            if not measurement_done:
+                state, bits = sample_measurement(state, measured_slots, generator)
             for q, bit, target in zip(measured_qubits, bits, classical_targets):
                 p10, p01 = assignment[q]
                 classical[target] = int(generator.random() < p10) if bit == 0 else int(generator.random() >= p01)
             duration += measurement_duration
-            if shot_index == operation.shots - 1:
+            if shot_index == operation.shots - 1 and not measurement_done:
                 for placed in kicks.trailing:
                     state = self._apply_kick(state, placed)
             self._commit_event(
@@ -594,13 +610,18 @@ class SharedQpuRuntime:
     last_entry_reuse: tuple[int, int] = (0, 0)
 
     def _run_before_measurement(self, operation: CircuitExecutionOperation, slots: tuple[int, ...],
-                                state: np.ndarray, shot_index: int, shot_kicks: tuple[PlacedKick, ...] = ()):
+                                state: np.ndarray, shot_index: int, shot_kicks: tuple[PlacedKick, ...] = (),
+                                *, measurement_draw: float | None = None,
+                                trailing_kicks: tuple[PlacedKick, ...] = ()):
         """One shot up to, not including, the final measurement; returns (state, readout, time).
 
         ``shot_kicks`` are rotations from other jobs, applied before the instruction they are placed at.
         """
         if self._rust_register_session is not None:
-            return self._run_before_measurement_rust(operation, slots, state, shot_index, shot_kicks)
+            return self._run_before_measurement_rust(
+                operation, slots, state, shot_index, shot_kicks,
+                measurement_draw=measurement_draw, trailing_kicks=trailing_kicks,
+            )
         snapshot = self.state_store.read()
         duration = 0.0
         if shot_index and self.config.repetition_delay_us > 0.0:
@@ -667,14 +688,16 @@ class SharedQpuRuntime:
         return state, assignment, duration
 
     def _run_before_measurement_rust(self, operation: CircuitExecutionOperation, slots: tuple[int, ...],
-                                     state: np.ndarray, shot_index: int, shot_kicks: tuple[PlacedKick, ...]):
-        """Execute one prepared shot as one Rust batch; preserve reset validation checkpoints."""
+                                     state: np.ndarray, shot_index: int, shot_kicks: tuple[PlacedKick, ...],
+                                     *, measurement_draw: float | None = None,
+                                     trailing_kicks: tuple[PlacedKick, ...] = ()):
+        """Execute a shot as one Rust batch, including final collapse when requested."""
         snapshot = self.state_store.read()
         count = len(snapshot.physical_qubit_ids)
         dim = 1 << count
         model = self._active_reset_models().get(self.config.reset_model_id)
         commands: list[tuple[str, list[int], list[float], float]] = []
-        checkpoints: list[int] = []
+        reset_checkpoints: list[int] = []
         assignment: dict[int, tuple[float, float]] = {}
         duration = 0.0
 
@@ -728,7 +751,7 @@ class SharedQpuRuntime:
                     raise ValueError("Rust register backend does not support this reset model")
                 data = [value for spec in specs for value in (spec.success_probability, *spec.target_populations)]
                 commands.append(("reset", list(operands), data, 0.0))
-                checkpoints.append(len(commands) - 1)
+                reset_checkpoints.append(len(commands) - 1)
                 errors = register_assignment_errors(model, subsystem_count=count, targets=operands)
                 assignment.update(zip(instruction.qubits, errors))
                 duration += self._active_service_durations()[0]
@@ -747,13 +770,31 @@ class SharedQpuRuntime:
                 raise ValueError("unknown compiled circuit instruction")
         for placed in pending:
             kick(placed)
+        measured_slots = tuple(
+            slots[qubit]
+            for instruction in operation.instructions if instruction.kind == "measure"
+            for qubit in instruction.qubits
+        )
+        cache_checkpoint = len(commands) - 1 if commands else None
+        if measurement_draw is not None and measured_slots:
+            commands.append(("measure", list(measured_slots), [], measurement_draw))
+        for placed in trailing_kicks:
+            kick(placed)
+        checkpoints = sorted(set(reset_checkpoints + ([] if cache_checkpoint is None else [cache_checkpoint])))
         session = self._rust_register_session("register_state_v1", flat(state), count)
-        _, states = session.execute_with_checkpoints("register_batch_v1", commands, checkpoints)
-        for values in states:
-            checkpoint = np.asarray(values, dtype=np.float64).view(np.complex128).reshape((dim, dim))
+        measurements, states = session.execute_with_checkpoints("register_batch_v1", commands, checkpoints)
+        checkpoint_states = dict(zip(checkpoints, states))
+        for index in reset_checkpoints:
+            checkpoint = np.asarray(checkpoint_states[index], dtype=np.float64).view(np.complex128).reshape((dim, dim))
             self.state_store.validate_state(freeze_register(checkpoint))
         result = np.asarray(session.state_flat(), dtype=np.float64).view(np.complex128).reshape((dim, dim))
         result.flags.writeable = False
+        if measurement_draw is not None and measured_slots:
+            cache_state = (np.asarray(checkpoint_states[cache_checkpoint], dtype=np.float64)
+                           .view(np.complex128).reshape((dim, dim))
+                           if cache_checkpoint is not None else np.asarray(state, dtype=complex))
+            cache_state.flags.writeable = False
+            return result, assignment, duration, tuple(measurements[-1]), cache_state
         return result, assignment, duration
 
     def _apply_kick(self, state: np.ndarray, placed: PlacedKick) -> np.ndarray:
