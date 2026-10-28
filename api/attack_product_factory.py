@@ -404,6 +404,9 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
     _validate_runtime_profile(runtime_raw)
     runtime_fields = dict(runtime_raw)
     runtime_fields.pop("schema_version")
+    # Preserve the historical execution behavior of already frozen manifests.
+    # Newly assembled profiles serialize their selected backend explicitly.
+    runtime_fields.setdefault("register_backend", "python_dense")
     runtime_fields["reset_model_mode"] = str(runtime_fields["reset_model_mode"])
     runtime_fields["placement_policy"] = PlacementPolicy(runtime_fields["placement_policy"])
     binding_raw = runtime_fields["resource_binding"]

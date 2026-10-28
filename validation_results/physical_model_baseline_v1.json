@@ -1,7 +1,7 @@
 {
   "validation": "PHYSICAL-MODEL-BASELINE-V1",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-28T05:39:31.043601+00:00",
+  "generated_at_utc": "2026-10-28T09:44:03.496756+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -70,8 +70,8 @@
     }
   },
   "source_revision": {
-    "git_head": "9f67db0342c53be408354c7c76dbcf70fe22c514",
-    "critical_source_tree_sha256": "b2bec00e45a8d2ca2cf1c5ae0f4a451e2b1ae90abaec031706abebb7a943d28c",
+    "git_head": "a5c96b926b8d3580b1a58066ebc91cafde36a075",
+    "critical_source_tree_sha256": "affb95cb580c314beb099197e473b407782f6a759b03605ed693c9ca9a28848f",
     "files": [
       {
         "file": "core/capabilities.py",
@@ -81,7 +81,7 @@
       {
         "file": "core/classical_branching.py",
         "exists": true,
-        "sha256": "770f85a4fe9d67375ddac55530117ad89ed7c0d9582d910b2bdd4be60cc4af66"
+        "sha256": "6fbe2eb33262de5f69ca79a3a9db479d889e3fabcc2ab5abeb85a69d61daa724"
       },
       {
         "file": "core/gates.py",
@@ -96,12 +96,12 @@
       {
         "file": "core/results.py",
         "exists": true,
-        "sha256": "966ec2a4cd8df841e3767f4b8c048bfbf9cf8a6935ebbbf001424fc44cf50329"
+        "sha256": "0231699f4afbe72f76ede89227affb0761e65dcf5a310ac0a8e0a188de5494e5"
       },
       {
         "file": "core/simulator.py",
         "exists": true,
-        "sha256": "91e7f057d4b50649915016d1f077dd5812f56292103933ecbf0497dc815ff4e0"
+        "sha256": "bf94ff313cf9849a074f89eb8ee126e1aa7e3aaaed5df6c1fe9ef0f6ffd5fbc3"
       },
       {
         "file": "core/ui_response.py",
@@ -116,7 +116,7 @@
       {
         "file": "api/main.py",
         "exists": true,
-        "sha256": "c05007699ad2343b3a3dbcc961288e987240358ebdfefd204b1819c835ce2f3e"
+        "sha256": "85c68def208e1948ee8b7174a417e7c60f2e5012e2dccc35e6221e7fb9aed1f1"
       },
       {
         "file": "api/pulse_models.py",

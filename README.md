@@ -11,7 +11,7 @@ Rust移行と共通セキュリティ基盤の進捗・測定条件は
 
 ## 標準構成
 
-現行 UI は React/Vite、計算 API は FastAPI、シミュレーション本体は Python/NumPy と Rust です。QuTiP と Python 実装は独立検証に使用します。Crosstalk 課題の評価には Rust 拡張が必要です。dense physics の Rust backend は選択式です。現在はシナリオ設定で選ぶ `rust_register_v1` preview が既存runnerのショット内操作列と測定収縮を処理します。測定用乱数、読み出し誤り、状態イベントは既存 Python runtime が管理します。
+現行 UI は React/Vite、計算 API は FastAPI、標準シミュレーションコアはRustへ移行中です。QuTiP と Python 実装は独立検証に使用します。Circuit Studio の既定backendは現在 `python_dense` です。`rust_dense_v1` は明示選択でき、未対応の実行経路ではPythonへ黙ってフォールバックせずエラーにします。既存の保存済み `.qscope` は記録されたbackendを維持します。攻撃用の新規共有QPU profileはRust register runtimeを選び、過去manifestでbackend指定がないものと汎用runtimeはPythonを維持します。測定乱数、読み出し誤り、状態イベント、API orchestrationなどは段階移行中です。
 
 | 層 | 実装 | 役割 |
 |---|---|---|
@@ -122,7 +122,7 @@ Rust toolchain が利用できる環境で、Python 仮想環境へローカル�
 .\.venv\Scripts\python.exe -c "import yuragi_strider_rust; print(yuragi_strider_rust.backend_name())"
 ```
 
-標準の dense backend は `python_dense` です。検証済みシナリオの `qpu_service.runtime_execution.register_backend` に `rust_register_v1` を指定すると、準備済みショットの操作列と測定収縮をRustで実行します。このpreviewは既定では無効で、対象のUI選択肢はまだありません。Rust拡張が未導入・旧版の場合、または未対応のresetモデルでは明示的に失敗します。API境界、対応範囲、未移行機能は [Rust register execution contract](docs/migration/rust-register-contract.md) を参照してください。Crosstalk 課題の評価はRust拡張を使用し、未導入または旧版の場合は明示的に失敗します。Docker イメージは拡張をビルドして同梱します。
+Circuit Studio の dense backend は現在 `python_dense` を既定にしています。`rust_dense_v1` は厳格な選択肢で、Rust拡張がない場合、または statevector・post-circuit degradation など未移植経路を要求した場合は明示的に失敗します。既定切替はこれらの経路をRustへ移した後に行います。攻撃用の新規共有QPU profileは `rust_register_v1` を選び、Rust拡張が未導入・旧版の場合や未対応resetモデルでは明示的に失敗します。未移植機能と境界は [Rust register execution contract](docs/migration/rust-register-contract.md) を参照してください。Crosstalk 課題の評価はRust拡張を使用し、Docker イメージは拡張をビルドして同梱します。
 
 ## ディレクトリ構成
 

@@ -845,7 +845,7 @@ class PulseToolboxRequest(BaseModel):
 
 class SimulateRequest(BaseModel):
     circuit_preset: Literal["bell", "teleportation", "bit_flip_repetition"] | None = None
-    simulation_backend: Literal["python_dense", "rust_dense_preview"]
+    simulation_backend: Literal["python_dense", "rust_dense_preview", "rust_dense_v1"]
     evolution_method: Literal["fixed_step_rk4", "explicit_cptp"] = (
         "fixed_step_rk4"
     )
@@ -946,7 +946,7 @@ class ProcessCharacterizationRequest(SimulateRequest):
 
 
 class T1SweepRequest(BaseModel):
-    simulation_backend: Literal["python_dense", "rust_dense_preview"] = "python_dense"
+    simulation_backend: Literal["python_dense", "rust_dense_preview", "rust_dense_v1"] = "python_dense"
     evolution_method: Literal["fixed_step_rk4", "explicit_cptp"] = "fixed_step_rk4"
     maximum_delay_us: float = Field(default=300.0, gt=0.0, le=MAX_API_DURATION_US)
     point_count: int = Field(default=31, ge=5, le=101)
@@ -1021,7 +1021,7 @@ class T1SweepResponse(BaseModel):
 
 
 class RamseySweepRequest(BaseModel):
-    simulation_backend: Literal["python_dense", "rust_dense_preview"] = "python_dense"
+    simulation_backend: Literal["python_dense", "rust_dense_preview", "rust_dense_v1"] = "python_dense"
     evolution_method: Literal["fixed_step_rk4", "explicit_cptp"] = "fixed_step_rk4"
     maximum_delay_us: float = Field(default=300.0, gt=0.0, le=MAX_API_DURATION_US)
     point_count: int = Field(default=61, ge=9, le=101)

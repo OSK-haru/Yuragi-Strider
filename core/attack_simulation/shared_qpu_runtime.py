@@ -91,7 +91,8 @@ class SharedQpuRuntimeConfig:
     drive_crosstalk_direction: str = "both"
     max_local_qubits: int = 8
     max_execution_work: int = 536870912
-    # Explicit experimental register engine; absent from old manifests means Python.
+    # Generic runtimes retain the compatibility default. Product profiles
+    # select Rust explicitly and freeze that choice in their manifest.
     register_backend: str = "python_dense"
 
     def to_manifest_config(self) -> dict[str, object]:

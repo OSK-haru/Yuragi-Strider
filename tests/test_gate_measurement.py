@@ -264,6 +264,7 @@ class GateAwareMeasurementApiTests(unittest.TestCase):
             environment=EnvironmentConfig(input_mode="physical", ideal_reference=True),
             duration_us=1.0,
             time_steps=3,
+            simulation_backend=PYTHON_DENSE_BACKEND,
         )
         result = run_simulation(config)
         self.assertFalse(result.issues)
@@ -360,6 +361,7 @@ def _measurement_config(evolution_method: str) -> SimulationConfig:
         time_steps=21,
         fidelity_threshold=0.9,
         evolution_method=evolution_method,
+        simulation_backend=PYTHON_DENSE_BACKEND,
         measurement_shots=4096,
         measurement_seed=37,
         snapshot_options={

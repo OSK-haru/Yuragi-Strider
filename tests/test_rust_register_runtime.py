@@ -24,7 +24,12 @@ from tests.test_local_program_runtime import program_json, submit
 class RustRegisterRuntimeTests(unittest.TestCase):
     def test_backend_is_explicitly_frozen_and_unknown_values_are_rejected(self):
         base = dict(reset_model_id="r", reset_model_configuration_id="c")
+        self.assertEqual(SharedQpuRuntimeConfig(**base).register_backend, "python_dense")
         self.assertNotIn("register_backend", SharedQpuRuntimeConfig(**base).to_manifest_config())
+        self.assertEqual(SharedQpuRuntimeConfig(**base, register_backend="rust_register_v1")
+                         .to_manifest_config()["register_backend"], "rust_register_v1")
+        self.assertNotIn("register_backend", SharedQpuRuntimeConfig(
+            **base, register_backend="python_dense").to_manifest_config())
         self.assertEqual(SharedQpuRuntimeConfig(**base, register_backend="rust_register_v1")
                          .to_manifest_config()["register_backend"], "rust_register_v1")
         with self.assertRaisesRegex(ValueError, "unsupported register backend"):

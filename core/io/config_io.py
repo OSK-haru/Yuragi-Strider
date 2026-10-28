@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.errors import ValidationIssue
+from core.backend_boundary import PYTHON_DENSE_BACKEND
 from core.results import EnvironmentConfig, SimulationConfig
 from core.validation import has_blocking_issues, validate_simulation_config
 
@@ -77,7 +78,8 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
             time_steps=simulation.get("time_steps", 101),
             fidelity_threshold=simulation.get("fidelity_threshold", 0.9),
             model=simulation.get("model", "weak_coupling_lindblad"),
-            simulation_backend=simulation.get("simulation_backend", "python_dense"),
+            # Existing .qscope files keep their recorded Python behavior.
+            simulation_backend=simulation.get("simulation_backend", PYTHON_DENSE_BACKEND),
         )
     else:
         config = SimulationConfig.from_dict(data)

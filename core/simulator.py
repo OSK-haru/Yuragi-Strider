@@ -16,8 +16,10 @@ import numpy as np
 from core.backend_boundary import (
     PYTHON_DENSE_BACKEND,
     PYTHON_DENSE_BACKEND_NAME,
+    RUST_DENSE_BACKEND,
     RUST_DENSE_PREVIEW_BACKEND,
     backend_metadata,
+    requests_rust_backend,
 )
 from core.capabilities import (
     DEFAULT_SIMULATION_MODEL,
@@ -231,13 +233,13 @@ class _KernelStats:
     @property
     def wants_rust(self) -> bool:
         return (
-            self.requested_backend == RUST_DENSE_PREVIEW_BACKEND
+            requests_rust_backend(self.requested_backend)
             and not self.rust_kernel_fallback_used
         )
 
     def to_diagnostics(self) -> dict[str, object]:
         rust_kernel_mode = self.rust_kernel_mode
-        if self.requested_backend != RUST_DENSE_PREVIEW_BACKEND:
+        if not requests_rust_backend(self.requested_backend):
             rust_kernel_mode = "none"
         elif self.rust_kernel_fallback_used and not self.rust_kernel_used:
             rust_kernel_mode = "fallback_python"
@@ -411,6 +413,19 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         has_measurements=_has_measurements(config),
         evolution_method=config.evolution_method,
     )
+    if config.simulation_backend == RUST_DENSE_BACKEND:
+        unsupported: list[str] = []
+        if representation == "statevector":
+            unsupported.append("the adaptive statevector path has not been ported to Rust")
+        if config.model == POST_CIRCUIT_DEGRADATION_MODEL:
+            unsupported.append("post-circuit degradation has not been ported to Rust")
+        if unsupported:
+            return _empty_result(config, [_runtime_error(
+                "RUST_BACKEND_UNSUPPORTED_PATH",
+                "The standard Rust backend cannot execute this simulation path yet.",
+                "; ".join(unsupported),
+                "Use an explicitly selected Python backend until this path is migrated.",
+            )])
     try:
         compilation = (
             GateCompilationResult(
@@ -458,7 +473,17 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             diagnostics={"statevector_timeline_mode": "endpoint_only_v1"},
         )
     else:
-        result = runner(execution_config)
+        try:
+            result = runner(execution_config)
+        except Exception as exc:
+            if config.simulation_backend == RUST_DENSE_BACKEND:
+                return _empty_result(config, [_runtime_error(
+                    "RUST_BACKEND_EXECUTION_FAILED",
+                    "The standard Rust backend failed during numerical execution.",
+                    str(exc),
+                    "Use an explicitly selected Python backend only for supported comparison workflows.",
+                )])
+            raise
     if main_method_fallback is not None:
         result.diagnostics["evolution_method_fallback"] = main_method_fallback
     result.diagnostics.update(
@@ -560,6 +585,28 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     result.config = config
     result.diagnostics.update(compilation.diagnostics)
     _attach_backend_metadata(result, config)
+    if config.simulation_backend == RUST_DENSE_BACKEND and (
+        result.diagnostics.get("rust_kernel_fallback_used")
+        or not result.diagnostics.get("rust_kernel_used")
+    ):
+        reason = str(result.diagnostics.get("rust_kernel_fallback_reason", ""))
+        return _empty_result(config, [_runtime_error(
+            "RUST_BACKEND_EXECUTION_FAILED",
+            "The standard Rust backend did not complete this simulation.",
+            reason or "No Rust numerical kernel executed for this path.",
+            "Use an explicitly selected Python backend only for supported comparison workflows.",
+        )])
+    if config.simulation_backend == RUST_DENSE_BACKEND and (
+        result.diagnostics.get("rust_kernel_fallback_used")
+        or not result.diagnostics.get("rust_kernel_used")
+    ):
+        reason = str(result.diagnostics.get("rust_kernel_fallback_reason", ""))
+        return _empty_result(config, [_runtime_error(
+            "RUST_BACKEND_EXECUTION_FAILED",
+            "The standard Rust backend did not complete this simulation.",
+            reason or "No Rust numerical kernel executed for this path.",
+            "Use an explicitly selected Python backend only for supported comparison workflows.",
+        )])
     diagnostic_issues = diagnose_simulation_result(result)
     result.issues = diagnostic_issues
     result.warnings = _issue_warnings(diagnostic_issues)
@@ -655,7 +702,7 @@ def _run_gate_aware_hamiltonian_lindblad(config: SimulationConfig) -> Simulation
     lindblad_started_at = perf_counter()
     rates, local_rates, solver_rates = _resolved_environment_rates(config)
     if (
-        config.simulation_backend == RUST_DENSE_PREVIEW_BACKEND
+        requests_rust_backend(config.simulation_backend)
         and config.evolution_method == FIXED_STEP_RK4
     ):
         cached_collapse_ops: Sequence[CachedCollapseOperator] = (
@@ -820,7 +867,7 @@ def _run_post_circuit_degradation(config: SimulationConfig) -> SimulationResult:
     lindblad_started_at = perf_counter()
     rates, local_rates, solver_rates = _resolved_environment_rates(config)
     if (
-        config.simulation_backend == RUST_DENSE_PREVIEW_BACKEND
+        requests_rust_backend(config.simulation_backend)
         and config.evolution_method == FIXED_STEP_RK4
     ):
         cached_collapse_ops: Sequence[CachedCollapseOperator] = (
@@ -2165,6 +2212,8 @@ def _evolve_stable_with_substeps(
             )
             return evolved
         except Exception as exc:
+            if kernel_stats.requested_backend == RUST_DENSE_BACKEND:
+                raise RuntimeError("Rust dense execution failed") from exc
             kernel_stats.rust_kernel_fallback_used = True
             kernel_stats.rust_kernel_fallback_reason = str(exc)
             kernel_stats.rust_kernel_mode = "fallback_python"
@@ -2250,6 +2299,8 @@ def _try_rust_paired_sampled_batch(
             capture_flags,
         )
     except Exception as exc:
+        if kernel_stats.requested_backend == RUST_DENSE_BACKEND:
+            raise RuntimeError("Rust sampled-batch execution failed") from exc
         kernel_stats.record_sampled_batch_fallback(str(exc))
         return None
     kernel_stats.record_sampled_batch(
@@ -2383,6 +2434,8 @@ def _evolve_one_substep(
             kernel_stats.rust_kernel_piecewise_segment_count += 1
             return clean_density_matrix(evolved)
         except Exception as exc:
+            if kernel_stats.requested_backend == RUST_DENSE_BACKEND:
+                raise RuntimeError("Rust dense execution failed") from exc
             kernel_stats.rust_kernel_fallback_used = True
             kernel_stats.rust_kernel_fallback_reason = str(exc)
             kernel_stats.rust_kernel_mode = "fallback_python"
