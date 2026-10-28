@@ -11,7 +11,7 @@ Rust移行と共通セキュリティ基盤の進捗・測定条件は
 
 ## 標準構成
 
-現行 UI は React/Vite、計算 API は FastAPI、シミュレーション本体は Python/NumPy です。QuTiP は本番計算には使わず、独立ソルバーとの検証にだけ使用します。Rust カーネルは任意の preview 機能で、未導入でも Python backend で動作します。
+現行 UI は React/Vite、計算 API は FastAPI、シミュレーション本体は Python/NumPy と Rust です。QuTiP は独立検証に使用します。Crosstalk 課題の評価には Rust 拡張が必要です。dense physics の Rust backend は選択式です。
 
 | 層 | 実装 | 役割 |
 |---|---|---|
@@ -19,7 +19,7 @@ Rust移行と共通セキュリティ基盤の進捗・測定条件は
 | API | FastAPI、Pydantic、Uvicorn | 入力検証とシミュレーション API |
 | 計算コア | Python、NumPy | 密度行列、Lindblad 型時間発展、指標計算 |
 | 独立検証 | QuTiP、SciPy、Matplotlib | 物理モデルの比較検証と plot（任意） |
-| 高速化 preview | Rust、PyO3、maturin | 任意の dense kernel |
+| Rust 拡張 | Rust、PyO3、maturin | Crosstalk 評価、選択式 dense kernel |
 
 対応規模は、論理量子ビット 1〜18、ノイズありの密度行列計算は 8 まで、
 明示的 CPTP は 5 までです。理想環境かつ測定なしの回路は 5 を超えると
@@ -30,7 +30,7 @@ Rust移行と共通セキュリティ基盤の進捗・測定条件は
 - Git
 - Python `3.14.4`（監査済み環境。`.python-version` に記録）
 - Node.js `24.15.0` / npm `11.x`（`.nvmrc` と `frontend/package-lock.json` を使用）
-- Rust `1.96.0` は preview backend をビルドする場合のみ
+- Rust `1.99.1` と maturin（Rust 拡張のビルド用）
 
 Windows PowerShell の例を以下に示します。macOS/Linux では仮想環境の Python を `.venv/bin/python` に読み替えてください。
 
@@ -42,6 +42,7 @@ cd Yuragi-Strider
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements-runtime.txt
+.\.venv\Scripts\python.exe -m pip install -e .\rust_kernels\yuragi_strider_rust
 cd frontend
 npm ci
 cd ..
@@ -112,7 +113,7 @@ QuTiP を使う独立検証も含める場合:
 .\.venv\Scripts\python.exe -m unittest tests.test_validation_qutip_comparison
 ```
 
-## 任意の Rust preview backend
+## Rust 拡張と dense preview backend
 
 Rust toolchain が利用できる環境で、Python 仮想環境へローカル拡張をビルドします。
 
@@ -121,7 +122,7 @@ Rust toolchain が利用できる環境で、Python 仮想環境へローカル�
 .\.venv\Scripts\python.exe -c "import yuragi_strider_rust; print(yuragi_strider_rust.backend_name())"
 ```
 
-標準 backend は `python_dense` です。Rust 拡張がなくても通常利用とテストは可能で、Rust 専用テストは自動的に skip されます。
+標準の dense backend は `python_dense` です。Crosstalk 課題の評価は Rust 拡張を使用し、未導入または旧版の場合は明示的に失敗します。Docker イメージは拡張をビルドして同梱します。
 
 ## ディレクトリ構成
 
@@ -136,7 +137,7 @@ Rust toolchain が利用できる環境で、Python 仮想環境へローカル�
 - `validation_hardware/`: 実機データとの比較検証
 - `validation_results/`: 機械可読な検証結果
 - `scripts/`: 独立検証、benchmark、診断 script
-- `rust_kernels/`: 任意の PyO3/maturin 拡張
+- `rust_kernels/`: PyO3/maturin 拡張と Rust の計算・評価処理
 - `formalweb/website/`: Docusaurus 製の公開ドキュメントサイト
 - `packaging/`, `desktop_app.py`: 任意の Windows desktop 配布用ランチャー
 - `docs/development/`: 配布・運用手順
