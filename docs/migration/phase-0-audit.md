@@ -111,6 +111,29 @@ New product QPU profiles select `rust_register_v1`, while new Circuit Studio req
 
 Earlier reset-kernel measurements (`scripts/benchmark_reset_kernel.py`) showed Python/NumPy and Rust/PyO3 at 0.174/0.172 ms for 4 qubits, 0.458/1.917 ms for 6 qubits, and 4.538/31.400 ms for 8 qubits. Those measurements preceded the core extraction. In the separate `scripts/benchmark_reset_session.py` comparison, four reset sequences over 8 qubits took a median 140.306 ms when the state crossed the Python boundary after every sequence, and 40.589 ms when one Rust-owned session executed the batch and returned the final state; 2 warm-ups and 7 repetitions, maximum output difference `0.0`. Both timings include initial and final Python conversions. This is one bounded benchmark and does not measure a complete job or native Rust memory.
 
+### Paired Python/Rust boundary measurements (2026-10-28)
+
+The current release extension was benchmarked with Python 3.12.14 on Linux x86_64. Python and Rust received identical data; Rust timings include PyO3 input and output conversion. The reset-sequence comparison used 3 warm-ups and 15 repetitions. Rust made one PyO3 call for the full local reset sequence. Results were:
+
+| Case | Python median | Rust through PyO3 | Rust/Python | Maximum output difference |
+| --- | ---: | ---: | ---: | ---: |
+| Local reset sequence, 4 qubits | 0.135 ms | 0.120 ms | 0.88x | 1.11e-16 |
+| Local reset sequence, 6 qubits | 0.946 ms | 3.142 ms | 3.32x | 5.55e-17 |
+| Local reset sequence, 8 qubits | 10.963 ms | 36.196 ms | 3.30x | 2.08e-17 |
+
+This comparison does not support switching the local reset kernel to Rust for larger density matrices in its current representation. Python/NumPy outperformed the current Rust/PyO3 kernel at 6 and 8 qubits, despite batching the sequence into one call. The wrapper reports larger Python-traced peak allocations for Rust at those sizes; this excludes native Rust allocations.
+
+The repeatable analysis benchmark is `scripts/benchmark_analysis_boundary.py` (3 warm-ups, 20 repetitions). It separates the binary-statistics kernel from the complete report adapter and compares Reset analysis on public mappings:
+
+| Case | Python median | Rust through PyO3 | Rust/Python | PyO3 calls |
+| --- | ---: | ---: | ---: | ---: |
+| Binary contrast kernel | 0.976 µs | 0.381 µs | 0.39x | 1 |
+| Binary contrast report adapter | 3.195 µs | 3.385 µs | 1.06x | 1 |
+| Reset analysis, 1,000 observations | 3.868 ms | 4.116 ms | 1.06x | 1 |
+| Reset analysis, 10,000 observations | 43.781 ms | 57.785 ms | 1.32x | 1 |
+
+The outputs matched exactly in these runs. The Rust binary-statistics kernel is faster in isolation, while complete adapters are slightly slower because their work is small relative to input conversion and Python report construction. Reset batching keeps the call count fixed at one, but currently constructs a Python tuple for each observation before that call; on this workload, that conversion cost grows with the batch. This is direct evidence that fewer boundary crossings alone do not guarantee a faster end-to-end path. Keep Python/NumPy as the default when it wins the paired full-path benchmark; prioritize Rust-owned batches when state reuse, substantial native computation, or reduced repeated serialization compensates for boundary costs. Re-run on deployment hardware before using these figures as an acceptance threshold. The benchmark excludes API, queueing, and network costs.
+
 ## Migration risks
 
 1. **Contract drift:** current scenario and authorization rules are rich Python dataclasses and policy code. A parallel Rust schema could silently diverge unless tested from shared golden JSON fixtures.
