@@ -2,6 +2,7 @@
 
 import importlib
 import unittest
+from unittest.mock import patch
 
 from core.attack_simulation import (
     BinaryObservation,
@@ -90,12 +91,31 @@ class ResetLeakageAnalysisTests(unittest.TestCase):
             {"phase": "training", "known_label": 0, "shots": 10, "counts": {"0": 8, "1": 2}},
             {"phase": "training", "known_label": 1, "shots": 10, "counts": {"0": 2, "1": 8}},
         )
-        reference = analyze_public_training_results(results, **metadata)
-        native = analyze_public_training_results(results, backend="rust", **metadata)
+        reference = analyze_public_training_results(results, backend="python", **metadata)
+        native = analyze_public_training_results(results, **metadata)
         self.assertAlmostEqual(reference.balanced_prior_mutual_information_bits,
                                native.balanced_prior_mutual_information_bits, places=14)
         self.assertAlmostEqual(reference.difference_class_1_minus_class_0,
                                native.difference_class_1_minus_class_0, places=14)
+
+    def test_default_reset_analysis_batches_observations_in_one_rust_call(self):
+        results = (
+            {"phase": "training", "known_label": 0, "shots": 10, "counts": {"0": 8, "1": 2}},
+            {"phase": "training", "known_label": 1, "shots": 10, "counts": {"0": 2, "1": 8}},
+        )
+        summary = (1, 1, 10, 2, 10, 8, 0.5, True, 0.2, 0.8, 0.6,
+                   0.17888543819998318, 3.3541019662496847, 0.2780719051126377, 0.8)
+        with patch(
+            "core.attack_simulation.reset_leakage_analysis.rust_reset_training_analysis",
+            return_value=summary,
+        ) as operation:
+            report = analyze_public_training_results(
+                results, manifest_id="m", mechanism_version="1",
+                model_configuration_id="c", dataset_id="d", measurement_id="r",
+            )
+
+        operation.assert_called_once_with([(0, 10, 2), (1, 10, 8)])
+        self.assertEqual(report.probability_one_by_class, (0.2, 0.8))
 
     def test_fits_threshold_from_public_training_results(self) -> None:
         training = fit_frequency_threshold_estimator((

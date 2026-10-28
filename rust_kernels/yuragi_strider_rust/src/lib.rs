@@ -1,6 +1,7 @@
 use gemm::{Parallelism, c64, gemm};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use std::collections::HashMap;
 
 const RESET_SEQUENCE_SCHEMA_VERSION: &str = "local_reset_sequence_v1";
@@ -478,6 +479,82 @@ fn binary_contrast_statistics_v1(
         mutual_information,
         bayes_accuracy,
     ))
+}
+
+/// Pool public labelled reset-training observations and compute the shared
+/// contrast plus threshold fit in one coarse PyO3 call.
+#[pyfunction]
+fn reset_training_analysis_v1<'py>(
+    py: Python<'py>,
+    schema_version: &str,
+    observations: Vec<(u8, u64, u64)>,
+) -> PyResult<Bound<'py, PyDict>> {
+    if schema_version != BINARY_CONTRAST_SCHEMA_VERSION {
+        return Err(PyValueError::new_err(
+            "unsupported reset analysis schema version",
+        ));
+    }
+    let mut sample_count = [0u64; 2];
+    let mut shots = [0u64; 2];
+    let mut ones = [0u64; 2];
+    for (label, trial_count, outcome_one_count) in observations {
+        if label > 1
+            || trial_count == 0
+            || outcome_one_count > trial_count
+            || trial_count > BINARY_CONTRAST_MAX_EXACT_COUNT
+        {
+            return Err(PyValueError::new_err(
+                "invalid labelled reset training observation",
+            ));
+        }
+        let label = label as usize;
+        sample_count[label] = sample_count[label]
+            .checked_add(1)
+            .ok_or_else(|| PyValueError::new_err("observation count overflow"))?;
+        shots[label] = shots[label]
+            .checked_add(trial_count)
+            .ok_or_else(|| PyValueError::new_err("shot count overflow"))?;
+        ones[label] = ones[label]
+            .checked_add(outcome_one_count)
+            .ok_or_else(|| PyValueError::new_err("outcome count overflow"))?;
+    }
+    if sample_count.contains(&0) || shots.contains(&0) {
+        return Err(PyValueError::new_err(
+            "training requires observations for both labels",
+        ));
+    }
+    if shots
+        .iter()
+        .any(|count| *count > BINARY_CONTRAST_MAX_EXACT_COUNT)
+    {
+        return Err(PyValueError::new_err(
+            "training shot counts exceed the exact count range",
+        ));
+    }
+    let (p0, p1, standard_error) = binary_group_statistics(ones[0], shots[0], ones[1], shots[1]);
+    let threshold = (p0 + p1) / 2.0;
+    let difference = p1 - p0;
+    let z_score = if standard_error > 0.0 {
+        Some(difference / standard_error)
+    } else {
+        None
+    };
+    let mutual_information =
+        binary_entropy((p0 + p1) / 2.0) - 0.5 * binary_entropy(p0) - 0.5 * binary_entropy(p1);
+    let bayes_accuracy = 0.5 * (p0.max(p1) + (1.0 - p0).max(1.0 - p1));
+    let result = PyDict::new(py);
+    result.set_item("observation_count_by_label", sample_count.to_vec())?;
+    result.set_item("shots_by_label", shots.to_vec())?;
+    result.set_item("outcome_one_by_label", ones.to_vec())?;
+    result.set_item("threshold", threshold)?;
+    result.set_item("predict_one_when_at_or_above", p1 > p0)?;
+    result.set_item("probability_one_by_class", vec![p0, p1])?;
+    result.set_item("difference_class_1_minus_class_0", difference)?;
+    result.set_item("standard_error", standard_error)?;
+    result.set_item("z_score", z_score)?;
+    result.set_item("balanced_prior_mutual_information_bits", mutual_information)?;
+    result.set_item("balanced_prior_bayes_accuracy", bayes_accuracy)?;
+    Ok(result)
 }
 
 fn binary_group_statistics(
@@ -2401,6 +2478,7 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rk4_evolve_flat, m)?)?;
     m.add_function(wrap_pyfunction!(apply_local_reset_sequence_flat, m)?)?;
     m.add_function(wrap_pyfunction!(binary_contrast_statistics_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(reset_training_analysis_v1, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_crosstalk_disruption_v1, m)?)?;
     m.add_class::<CrosstalkEvaluationRuntime>()?;
     m.add_class::<PyResetSession>()?;

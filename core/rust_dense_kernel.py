@@ -473,6 +473,45 @@ def rust_binary_contrast_statistics(
     return tuple(result)
 
 
+def rust_reset_training_analysis(
+    observations: Sequence[tuple[int, int, int]],
+) -> tuple[int, int, int, int, int, int, float, bool, float, float, float, float, float | None, float, float]:
+    """Pool labelled public results and calculate Reset metrics in one Rust call."""
+
+    normalized: list[tuple[int, int, int]] = []
+    for label, shots, ones in observations:
+        if type(label) is not int or label not in (0, 1):
+            raise ValueError("reset training labels must be zero or one")
+        if type(shots) is not int or not 1 <= shots <= 2**53:
+            raise ValueError("reset training shots must be positive exact integers")
+        if type(ones) is not int or not 0 <= ones <= shots:
+            raise ValueError("reset training outcomes must be between zero and shots")
+        normalized.append((label, shots, ones))
+    if not normalized:
+        raise ValueError("reset training observations must not be empty")
+    rust_module = _load_rust_module()
+    operation = getattr(rust_module, "reset_training_analysis_v1", None)
+    if not callable(operation):
+        raise RuntimeError("Rust extension does not implement reset_training_analysis_v1")
+    result = operation("security_binary_contrast_v1", normalized)
+    if not isinstance(result, dict):
+        raise RuntimeError("Rust reset analysis returned an invalid result shape")
+    counts = result.get("observation_count_by_label")
+    shots = result.get("shots_by_label")
+    ones = result.get("outcome_one_by_label")
+    probabilities = result.get("probability_one_by_class")
+    if any(not isinstance(values, list) or len(values) != 2 for values in (counts, shots, ones, probabilities)):
+        raise RuntimeError("Rust reset analysis returned invalid class aggregates")
+    return (
+        counts[0], counts[1], shots[0], ones[0], shots[1], ones[1],
+        result["threshold"], result["predict_one_when_at_or_above"],
+        probabilities[0], probabilities[1],
+        result["difference_class_1_minus_class_0"], result["standard_error"],
+        result["z_score"], result["balanced_prior_mutual_information_bits"],
+        result["balanced_prior_bayes_accuracy"],
+    )
+
+
 def rust_gksl_exponential_superoperator(
     hamiltonian: Sequence[Sequence[complex]],
     collapse_ops: Sequence[Sequence[Sequence[complex]]],
