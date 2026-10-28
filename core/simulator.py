@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 26050)
-Total output lines: 2643
-
 """Stable core simulation entry point."""
 
 from __future__ import annotations
@@ -1182,6 +1179,7 @@ def _simulate_circuit_post_circuit(
         actual_duration_us=duration_us,
         max_snapshots=100 if snapshot_plan.enabled else 10,
         plan=snapshot_plan,
+        simulation_backend=config.simulation_backend,
     )
     collector.capture_event(
         time_us=0.0,
@@ -1245,7 +1243,106 @@ def _simulate_circuit_post_circuit(
         else None
     )
     if sampled_batch is not None:
-        captured_states, rust_met…1050 tokens truncated…  max_environment_rate_per_us: float = 0.0,
+        captured_states, rust_metrics, sample_times, sample_substeps = sampled_batch
+        if len(sample_times) != len(times) - 1:
+            raise RuntimeError("Rust sampled-batch did not cover the complete idle timeline")
+        for sample_index, metric in enumerate(rust_metrics):
+            fidelity, purity, trace_error, ideal_purity = metric
+            if abs(ideal_purity - 1.0) > 1e-8:
+                sampled_state, sampled_ideal = captured_states[sample_index]
+                fidelity = _state_fidelity(sampled_state, sampled_ideal)
+            fidelities.append(fidelity)
+            purities.append(purity)
+            max_trace_error = max(max_trace_error, trace_error)
+        for sample_index, (sampled_state, sampled_ideal) in captured_states.items():
+            sample_time = sample_times[sample_index]
+            if sample_index == len(rust_metrics) - 1:
+                noisy_state = sampled_state
+                ideal_state = sampled_ideal
+            if is_planned_time(sample_time, planned_idle_samples):
+                collector.capture(
+                    time_us=sample_time,
+                    kind="idle_sample",
+                    density_matrix=sampled_state,
+                )
+            collector.capture_requested_time(
+                time_us=sample_time,
+                density_matrix=sampled_state,
+            )
+        profile.total_rk4_substeps = sum(sample_substeps)
+    else:
+        for start_time, end_time in zip(times, times[1:]):
+            dt = end_time - start_time
+            noisy_state = _evolve_stable(
+                noisy_state,
+                hamiltonian,
+                collapse_ops,
+                dt,
+                max_environment_rate_per_us,
+                kernel_stats,
+                profile,
+            )
+            if is_planned_time(end_time, planned_idle_samples):
+                collector.capture(
+                    time_us=end_time,
+                    kind="idle_sample",
+                    density_matrix=noisy_state,
+                )
+            collector.capture_requested_time(
+                time_us=end_time,
+                density_matrix=noisy_state,
+            )
+            fidelities.append(_state_fidelity(noisy_state, ideal_state))
+            purities.append(_state_purity(noisy_state))
+            max_trace_error = max(max_trace_error, _trace_error(noisy_state))
+    profile.idle_evolution_ms += (perf_counter() - idle_started_at) * 1000.0
+    collector.capture_event(
+        time_us=duration_us,
+        event_kind="final",
+        density_matrix=noisy_state,
+    )
+    state_snapshots, snapshot_diagnostics = collector.finalize()
+
+    profile.segment_setup_ms = 0.0
+    profile.gate_segments_count = len(config.circuit.columns)
+    profile.idle_segments_count = 1 if duration_us > 0.0 else 0
+    profile.segments_count = profile.gate_segments_count + profile.idle_segments_count
+    profile.total_gate_duration_us = _total_gate_duration_us(config)
+    profile.total_idle_duration_us = duration_us
+    profile.total_segment_duration_us = profile.total_gate_duration_us + profile.total_idle_duration_us
+    profile.total_rk4_substeps = _integration_substeps(
+        duration_us,
+        time_steps,
+        max_environment_rate_per_us,
+    )
+    profile.total_rhs_evaluations = 4 * profile.total_rk4_substeps
+    profile.has_gate_segments = profile.gate_segments_count > 0
+    profile.has_idle_after_circuit = profile.idle_segments_count > 0
+    profile.idle_only = not profile.has_gate_segments and profile.has_idle_after_circuit
+    profile.time_steps = time_steps
+
+    return _SimulationSeries(
+        times=times,
+        fidelity=fidelities,
+        purity=purities,
+        final_noisy_state=noisy_state,
+        final_ideal_state=ideal_state,
+        metadata={
+            "max_trace_error": max_trace_error,
+            "state_history_retained": False,
+            "state_history_storage_mode": "streaming_metrics_only",
+            **snapshot_diagnostics.to_dict(),
+        },
+        state_snapshots=state_snapshots,
+    )
+
+
+def _simulate_circuit_gate_aware_hamiltonian(
+    config: SimulationConfig,
+    duration_us: float,
+    time_steps: int,
+    collapse_ops: Sequence[CachedCollapseOperator],
+    max_environment_rate_per_us: float = 0.0,
     caches: _SimulationCaches | None = None,
     kernel_stats: _KernelStats | None = None,
     profile: _CoreProfilingStats | None = None,
@@ -1269,6 +1366,7 @@ def _simulate_circuit_post_circuit(
         actual_duration_us=actual_duration,
         max_snapshots=100 if snapshot_plan.enabled else 10,
         plan=snapshot_plan,
+        simulation_backend=config.simulation_backend,
     )
     collector.capture_event(
         time_us=0.0,

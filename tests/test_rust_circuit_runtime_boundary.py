@@ -4,11 +4,13 @@ from unittest.mock import patch
 
 from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.results import ReadoutErrorConfig
+from core.backend_boundary import RUST_DENSE_PREVIEW_BACKEND
 from core.rust_circuit_runtime import (
     apply_readout_rust,
     execute_ideal_circuit_rust,
     execute_post_circuit_gates_rust,
 )
+from core.state_snapshots import StateSnapshotCollector
 
 
 class RustCircuitRuntimeBoundaryTest(unittest.TestCase):
@@ -100,6 +102,66 @@ class RustCircuitRuntimeBoundaryTest(unittest.TestCase):
         with patch("core.rust_circuit_runtime.importlib.import_module", return_value=module):
             execute_ideal_circuit_rust(circuit, None)
         self.assertEqual(captured["args"][3][0][3], 0.0)
+
+    def test_snapshot_policy_is_selected_by_one_rust_call(self) -> None:
+        captured = {}
+
+        def select(candidates, max_snapshots):
+            captured["candidates"] = candidates
+            captured["max_snapshots"] = max_snapshots
+            return [0, 1], 0
+
+        collector = StateSnapshotCollector(
+            actual_duration_us=1.0,
+            max_snapshots=2,
+            simulation_backend=RUST_DENSE_PREVIEW_BACKEND,
+        )
+        collector.capture_event(
+            time_us=0.0,
+            event_kind="initial",
+            density_matrix=((1.0 + 0.0j,),),
+        )
+        collector.capture(
+            time_us=1.0,
+            kind="final",
+            density_matrix=((1.0 + 0.0j,),),
+        )
+        with patch(
+            "core.state_snapshots.importlib.import_module",
+            return_value=types.SimpleNamespace(select_snapshot_indices_v1=select),
+        ):
+            snapshots, diagnostics = collector.finalize()
+
+        self.assertEqual(captured["candidates"], [(0.0, "initial"), (1.0, "final")])
+        self.assertEqual(captured["max_snapshots"], 2)
+        self.assertEqual([snapshot.kind for snapshot in snapshots], ["initial", "final"])
+        self.assertEqual(diagnostics.selection_backend, RUST_DENSE_PREVIEW_BACKEND)
+
+    def test_preview_snapshot_policy_falls_back_with_a_reason(self) -> None:
+        collector = StateSnapshotCollector(
+            actual_duration_us=1.0,
+            max_snapshots=2,
+            simulation_backend=RUST_DENSE_PREVIEW_BACKEND,
+        )
+        collector.capture_event(
+            time_us=0.0,
+            event_kind="initial",
+            density_matrix=((1.0 + 0.0j,),),
+        )
+        collector.capture_event(
+            time_us=1.0,
+            event_kind="final",
+            density_matrix=((1.0 + 0.0j,),),
+        )
+        with patch(
+            "core.state_snapshots.importlib.import_module",
+            side_effect=ImportError("Rust extension unavailable"),
+        ):
+            snapshots, diagnostics = collector.finalize()
+
+        self.assertEqual(len(snapshots), 2)
+        self.assertEqual(diagnostics.selection_backend, "python_dense")
+        self.assertIn("Rust extension unavailable", diagnostics.selection_fallback_reason)
 
 
 if __name__ == "__main__":

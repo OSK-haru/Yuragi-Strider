@@ -9,6 +9,7 @@ on:
       - "rust_kernels/yuragi_strider_core/**"
       - "rust_kernels/yuragi_strider_rust/**"
       - "core/rust_circuit_runtime.py"
+      - "core/state_snapshots.py"
       - "core/simulator.py"
       - "tests/test_rust_circuit_runtime_boundary.py"
       - "frontend/**"

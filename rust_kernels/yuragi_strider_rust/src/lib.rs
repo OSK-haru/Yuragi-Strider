@@ -350,6 +350,18 @@ fn execute_ideal_density_circuit_v1(
         .map_err(PyValueError::new_err)
 }
 
+#[pyfunction]
+fn select_snapshot_indices_v1(
+    candidates: Vec<(f64, String)>,
+    max_snapshots: usize,
+) -> PyResult<(Vec<usize>, usize)> {
+    yuragi_strider_core::snapshot_policy::select_snapshot_indices(
+        &candidates,
+        max_snapshots,
+    )
+    .map_err(PyValueError::new_err)
+}
+
 /// A Rust-owned density matrix; a whole reset schedule crosses PyO3 once.
 #[pyclass(name = "ResetSession")]
 struct PyResetSession {
@@ -2620,6 +2632,7 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(execute_ideal_circuit_v1, m)?)?;
     m.add_function(wrap_pyfunction!(apply_binary_readout_v1, m)?)?;
     m.add_function(wrap_pyfunction!(execute_ideal_density_circuit_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(select_snapshot_indices_v1, m)?)?;
     m.add_function(wrap_pyfunction!(binary_contrast_statistics_v1, m)?)?;
     m.add_function(wrap_pyfunction!(reset_training_analysis_v1, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_crosstalk_disruption_v1, m)?)?;

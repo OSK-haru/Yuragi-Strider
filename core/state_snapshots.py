@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+import importlib
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Literal
 
 from core.gates import Matrix
+from core.backend_boundary import PYTHON_DENSE_BACKEND, RUST_DENSE_BACKEND, RUST_DENSE_PREVIEW_BACKEND
 
 
 MAX_STATE_SNAPSHOTS = 10
@@ -253,6 +255,8 @@ class SnapshotDiagnostics:
     exact_capture_count: int = 0
     nearest_capture_count: int = 0
     max_time_error_us: float = 0.0
+    selection_backend: str = PYTHON_DENSE_BACKEND
+    selection_fallback_reason: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -271,6 +275,8 @@ class SnapshotDiagnostics:
             "state_snapshot_nearest_capture_count": float(self.nearest_capture_count),
             "state_snapshot_max_time_error_us": float(self.max_time_error_us),
             "state_snapshot_hard_cap": float(self.max_count),
+            "state_snapshot_selection_backend": self.selection_backend,
+            "state_snapshot_selection_fallback_reason": self.selection_fallback_reason,
         }
 
 
@@ -294,10 +300,14 @@ class StateSnapshotCollector:
         actual_duration_us: float,
         max_snapshots: int = MAX_STATE_SNAPSHOTS,
         plan: SnapshotPlan | None = None,
+        simulation_backend: str = PYTHON_DENSE_BACKEND,
     ) -> None:
         self.actual_duration_us = float(actual_duration_us)
         self.max_snapshots = int(max_snapshots)
         self.plan = plan
+        self.simulation_backend = str(simulation_backend)
+        self.selection_backend = PYTHON_DENSE_BACKEND
+        self.selection_fallback_reason = ""
         self._candidates: list[_SnapshotCandidate] = []
         self._requested_uniform_count = sum(
             request.kind == "uniform_time" for request in plan.requests
@@ -411,8 +421,30 @@ class StateSnapshotCollector:
 
     def finalize(self) -> tuple[list[StateSnapshot], SnapshotDiagnostics]:
         candidate_count = len(self._candidates)
-        deduped = _dedupe_by_time(self._candidates)
-        selected = _select_bounded(deduped, self.max_snapshots)
+        deduplicated_count = 0
+        if self.simulation_backend in {RUST_DENSE_BACKEND, RUST_DENSE_PREVIEW_BACKEND}:
+            try:
+                module = importlib.import_module("yuragi_strider_rust")
+                selector = getattr(module, "select_snapshot_indices_v1", None)
+                if selector is None:
+                    raise RuntimeError("Rust extension does not provide select_snapshot_indices_v1")
+                selected_indices, deduplicated_count = selector(
+                    [(candidate.time_us, candidate.kind) for candidate in self._candidates],
+                    self.max_snapshots,
+                )
+                selected = [self._candidates[int(index)] for index in selected_indices]
+                self.selection_backend = RUST_DENSE_PREVIEW_BACKEND
+            except (ImportError, RuntimeError, ValueError, IndexError) as exc:
+                if self.simulation_backend == RUST_DENSE_BACKEND:
+                    raise
+                self.selection_fallback_reason = str(exc)
+                deduped = _dedupe_by_time(self._candidates)
+                deduplicated_count = max(0, candidate_count - len(deduped))
+                selected = _select_bounded(deduped, self.max_snapshots)
+        else:
+            deduped = _dedupe_by_time(self._candidates)
+            deduplicated_count = max(0, candidate_count - len(deduped))
+            selected = _select_bounded(deduped, self.max_snapshots)
         selected.sort(key=lambda snapshot: snapshot.time_us)
 
         snapshots = [
@@ -443,11 +475,13 @@ class StateSnapshotCollector:
             requested_custom_count=self._requested_custom_count,
             event_candidate_count=self._event_candidate_count,
             candidate_count=candidate_count,
-            deduplicated_count=max(0, candidate_count - len(deduped)),
-            dropped_by_cap_count=max(0, len(deduped) - len(selected)),
+            deduplicated_count=deduplicated_count,
+            dropped_by_cap_count=max(0, candidate_count - deduplicated_count - len(selected)),
             exact_capture_count=self._exact_capture_count,
             nearest_capture_count=self._nearest_capture_count,
             max_time_error_us=self._max_time_error_us,
+            selection_backend=self.selection_backend,
+            selection_fallback_reason=self.selection_fallback_reason,
         )
 
 
