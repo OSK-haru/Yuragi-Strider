@@ -1,0 +1,114 @@
+{
+  "compilation": {
+    "compiled_circuit": {
+      "annotations": [],
+      "classical_bits": 0,
+      "columns": [
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [],
+              "params": {
+                "duration_us": 0.02
+              },
+              "targets": [
+                0
+              ],
+              "type": "H"
+            }
+          ],
+          "step": 0
+        },
+        {
+          "gates": [
+            {
+              "classical_targets": [],
+              "condition": null,
+              "conditions": [],
+              "controls": [
+                0
+              ],
+              "params": {
+                "duration_us": 0.2
+              },
+              "targets": [
+                1
+              ],
+              "type": "CNOT"
+            }
+          ],
+          "step": 1
+        }
+      ],
+      "initial_states": [
+        "0",
+        "0"
+      ],
+      "logical_qubits": 2
+    },
+    "compiled_depth": 2,
+    "compiled_duration_us": 0.22,
+    "compiled_gate_count": 2,
+    "decomposition_rules_used": [],
+    "logical_depth": 2,
+    "logical_duration_us": 0.22,
+    "logical_gate_count": 2,
+    "mode": "logical_direct",
+    "native_gate_set_id": "gate_aware_hxyzst_rz_cnot_v3",
+    "source_map": [
+      {
+        "compiled_operations": [
+          {
+            "compiled_column": 0,
+            "controls": [],
+            "gate": "H",
+            "params": {
+              "duration_us": 0.02
+            },
+            "targets": [
+              0
+            ]
+          }
+        ],
+        "controls": [],
+        "logical_column": 0,
+        "logical_gate_index": 0,
+        "rule_id": null,
+        "source_gate": "H",
+        "targets": [
+          0
+        ]
+      },
+      {
+        "compiled_operations": [
+          {
+            "compiled_column": 1,
+            "controls": [
+              0
+            ],
+            "gate": "CNOT",
+            "params": {
+              "duration_us": 0.2
+            },
+            "targets": [
+              1
+            ]
+          }
+        ],
+        "controls": [
+          0
+        ],
+        "logical_column": 1,
+        "logical_gate_index": 0,
+        "rule_id": null,
+        "source_gate": "CNOT",
+        "targets": [
+          1
+        ]
+      }
+    ]
+  }
+}

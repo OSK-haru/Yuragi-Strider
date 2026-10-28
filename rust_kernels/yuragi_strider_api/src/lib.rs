@@ -4,11 +4,13 @@ use axum::http::header::{
 };
 use axum::http::{HeaderValue, Method};
 use axum::middleware::{self, Next};
-use axum::response::Response;
-use axum::routing::get;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use tower_http::cors::{AllowOrigin, CorsLayer};
+
+mod circuit_compile;
 
 const API_CONTENT_SECURITY_POLICY_VALUE: &str =
     "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
@@ -16,7 +18,9 @@ const API_CONTENT_SECURITY_POLICY_VALUE: &str =
 /// Build the API router. The supplied origins are the exact allowlist from
 /// `ALLOWED_ORIGINS`; an empty list preserves the current no-CORS behavior.
 pub fn api_router(allowed_origins: Vec<HeaderValue>) -> Router {
-    let mut router = Router::new().route("/api/health", get(health));
+    let mut router = Router::new()
+        .route("/api/health", get(health))
+        .route("/api/circuit/compile", post(compile_circuit));
 
     if !allowed_origins.is_empty() {
         router = router.layer(
@@ -44,6 +48,13 @@ async fn health() -> Json<Value> {
             "driven_two_level_rwa_experimental_v1": "available"
         }
     }))
+}
+
+async fn compile_circuit(Json(request): Json<Value>) -> Response {
+    match circuit_compile::compile_preview(&request) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => (error.status, Json(json!({"detail": error.detail}))).into_response(),
+    }
 }
 
 async fn add_api_security_headers(request: Request, next: Next) -> Response {
@@ -76,6 +87,8 @@ mod tests {
     use tower::ServiceExt;
 
     const HEALTH_CONTRACT: &str = include_str!("../contracts/api-health-v1.json");
+    const BELL_DIRECT_CONTRACT: &str =
+        include_str!("../contracts/circuit-compile-bell-logical-direct-v1.json");
 
     #[tokio::test]
     async fn health_response_matches_the_shared_wire_contract() {
@@ -153,5 +166,26 @@ mod tests {
             .unwrap();
 
         assert!(!response.headers().contains_key(ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+
+    #[tokio::test]
+    async fn circuit_compile_route_returns_the_shared_bell_preview_contract() {
+        let response = api_router(Vec::new())
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/circuit/compile")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"circuit_preset":"bell"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let actual: Value = serde_json::from_slice(&bytes).unwrap();
+        let expected: Value = serde_json::from_str(BELL_DIRECT_CONTRACT).unwrap();
+        assert_eq!(actual, expected);
     }
 }

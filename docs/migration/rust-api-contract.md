@@ -19,6 +19,22 @@ The shared fixture is intentionally the wire contract, not a second source for
 runtime capability declarations. If the pulse capability catalog changes, the
 FastAPI and Rust route tests must both be updated with the reviewed contract.
 
+## Circuit compile preview slice
+
+The Axum server also implements `POST /api/circuit/compile` for the
+`logical_direct` mode and the `bell`, `teleportation`, and
+`bit_flip_repetition` presets. The bell preset response is frozen in
+`contracts/circuit-compile-bell-logical-direct-v1.json`; focused Python and Rust
+tests compare their output to this shared fixture. The route validates the
+bounded circuit shape before returning a preview.
+
+Rust `auto_decompose` remains unavailable and returns an explicit `501` with
+`RUST_COMPILER_MODE_PENDING`. FastAPI continues to serve the production route
+and all compilation modes. This Rust route is parallel and is not wired into
+production traffic. Do not describe the compile API as migrated until the full
+decomposition rule set, exact validation/error behavior, and parity tests have
+moved.
+
 ## Cutover rule
 
 Move routes by cohesive behavior groups, with a contract fixture and focused
