@@ -150,7 +150,7 @@ Reset課題専用v0の採用値は、成功確率`0.90`、標準`32 shots/case`�
 | 主体非依存operation | 部分実装 | 限定回路compilerが`CircuitExecutionOperation`へ変換し、両主体が同じ送信要求を使う。Reset既存内部operationの置換は未完了 |
 | 共通Application API | 部分実装 | in-process jobサービスにdevice照会・回路送信・job操作を接続。Reset既存runnerもjobサービスを共有するが、HTTP／UI境界は未実装 |
 | 疑似ターミナル | 部分実装 | actor別のbounded回路namespaceから`device`／`program submit`／`job status/result/cancel`を実行。host shell・任意コード・HTTP／画面は未実装 |
-| 共通local analysis | 部分実装 | `core.security_analysis.binary_contrast`の`security_binary_contrast_v1`は、actor-visible／service-published由来の二値集計だけから成功率差、標準誤差、z値、等事前確率下の相互情報量とBayes精度を算出する。Python参照実装と明示選択のRust実装がある。request provenanceは認証境界ではなく、将来のadapterが認可済み結果投影だけから構築する必要がある。端末・UIからの利用と既存Reset/Crosstalk分析への適用は未接続 |
+| 共通local analysis | 部分実装 | `security_binary_contrast_v1`は二値集計から成功率差、標準誤差、z値、等事前確率下の相互情報量とBayes精度を算出する。Reset公開訓練結果を既知ラベルごとに集計するadapterを追加した。標準誤差はshot間の独立を仮定し、単一shotの統計量は課題のcase単位の合否ではない。provenanceとphaseは認証境界ではなく、呼び出し側が認可済みの結果を渡す必要がある。既存runner・端末・UIやCrosstalkからの接続は未実装 |
 | 統計量provenance | 部分実装 | request/reportがmanifest、機構版、model configuration、dataset、measurement ID、measurement conditions、assumption IDs、sourceを保持する。完全なseed・実験記録、共通保存、actor-derived結果投影は未実装 |
 
 役割別operationはReset縦切りを成立させる内部足場であり、公開APIとして固定しない。現runtimeは、通常の`submit`経由で被害者準備operationを拒否し、内部専用経路に限って投入する。端末の中立回路要求は仮想資格情報からprincipalとtenantを導出し、利用者bodyから役割・配置・seedを受け取らない。内部専用経路を利用者へ公開してはならない。
@@ -163,7 +163,7 @@ Resetのheadless受入は、公開training由来の推定器、hidden判定、�
 1. **完了:** Reset headless pipelineの受入を閉じる。
 2. **部分実装:** in-process job操作の認可・結果投影、主体非依存の限定回路要求を接続。Reset runner移行、外部認証、HTTP APIを実装する。
 3. **部分実装:** 同じApplication API上の疑似ターミナルに共通コマンドを接続。被害者runnerのin-process接続は実装済み。Web workspaceへの接続が残る。任意コード実行はSandbox設計後に追加する（所有者指示）。
-4. **部分実装:** 二値集計の共通local analysisとprovenance recordを追加。返却結果を受けるclient、UI、Reset/Crosstalkへの接続、および実験記録のseed・保存は未完了。
+4. **部分実装:** 二値集計の共通local analysis、provenance record、Reset公開訓練結果のadapterを追加。既存runnerやclient、UI、Crosstalkへの接続、および実験記録のseed・保存は未完了。
 5. 同じAPIを使うUIを実装する。
 
 共通操作境界は、少なくとも次を満たすまで完成扱いにしない。
