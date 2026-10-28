@@ -32,11 +32,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt --manifest-path rust_kernels/yuragi_strider_api/Cargo.toml -- --check
       - name: Test Rust API
-        run: cargo test --manifest-path rust_kernels/yuragi_strider_api/Cargo.toml
-      - name: Capture resolved lockfile for repository update
-        run: |
-          printf 'LOCKFILE_BASE64_BEGIN\n'
-          base64 --wrap=0 rust_kernels/yuragi_strider_api/Cargo.lock
-          printf '\nLOCKFILE_BASE64_END\n'
+        run: cargo test --locked --manifest-path rust_kernels/yuragi_strider_api/Cargo.toml
       - name: Build production image
         run: docker build --file Dockerfile.rust-api --tag yuragi-strider-rust-api:test .
