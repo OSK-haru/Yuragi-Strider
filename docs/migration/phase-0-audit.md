@@ -111,6 +111,20 @@ New product QPU profiles select `rust_register_v1`, while new Circuit Studio req
 
 Earlier reset-kernel measurements (`scripts/benchmark_reset_kernel.py`) showed Python/NumPy and Rust/PyO3 at 0.174/0.172 ms for 4 qubits, 0.458/1.917 ms for 6 qubits, and 4.538/31.400 ms for 8 qubits. Those measurements preceded the core extraction. In the separate `scripts/benchmark_reset_session.py` comparison, four reset sequences over 8 qubits took a median 140.306 ms when the state crossed the Python boundary after every sequence, and 40.589 ms when one Rust-owned session executed the batch and returned the final state; 2 warm-ups and 7 repetitions, maximum output difference `0.0`. Both timings include initial and final Python conversions. This is one bounded benchmark and does not measure a complete job or native Rust memory.
 
+The expanded three-way comparison in `scripts/benchmark_reset_session.py` uses the same 8-qubit initial state, four reset sequences, and full matrix result, with 3 warm-ups and 15 repetitions. Python/NumPy took 14.974 ms; stateless Rust, returning the full state to Python after each sequence, took 101.854 ms; a Rust-owned session took 20.691 ms. Both Rust results differed from Python by at most 2.08e-17. The stateless Rust path made four PyO3 kernel calls. The session path made three calls including constructor, batch execution, and final state readback.
+
+Stage medians for the Rust-owned session were 1.308 ms for setup and initial flattening, 8.760 ms for batched execution, and 13.177 ms to copy and reconstruct the full output matrix. Python input conversion, NumPy computation, and final tuple conversion took 2.178, 12.421, and 1.016 ms. Stage medians are independent samples and need not sum exactly to full-path medians. Keeping Rust state removes most repeated crossings and makes the Rust path about 4.9x faster than stateless Rust, but returning the full matrix still makes it about 1.38x slower than Python/NumPy. A production runtime should return only the requested measurement projection or summary when callers do not need the full density matrix; that compact-result path is not implemented or measured yet.
+
+Varying sequence count at 8 qubits confirms the batching effect and the output cost. With the same full-matrix result, 3 warm-ups, and 15 repetitions:
+
+| Reset sequences | Python/NumPy | Stateless Rust | Rust-owned session |
+| ---: | ---: | ---: | ---: |
+| 1 | 6.734 ms | 28.327 ms | 14.248 ms |
+| 4 | 14.974 ms | 101.854 ms | 20.691 ms |
+| 16 | 48.704 ms | 463.014 ms | 48.786 ms |
+
+The Rust-owned session nearly matches Python/NumPy at 16 sequences and is about 9.5x faster than stateless Rust. For one sequence, session setup and full-state readback outweigh the saved boundary crossings. The comparison supports keeping mutable simulation state in Rust across a whole job and returning a compact requested result. The current environment has no Rust compiler, so adding and rebuilding a compact-readout API was deferred; no uncompiled Rust change is included.
+
 ### Paired Python/Rust boundary measurements (2026-10-28)
 
 The current release extension was benchmarked with Python 3.12.14 on Linux x86_64. Python and Rust received identical data; Rust timings include PyO3 input and output conversion. The reset-sequence comparison used 5 warm-ups and 31 repetitions. Rust made one PyO3 call for the full local reset sequence. Results were:
