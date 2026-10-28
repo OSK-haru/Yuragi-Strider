@@ -23,11 +23,22 @@ def is_rust_kernel_available() -> bool:
 def flatten_complex_matrix(matrix: Sequence[Sequence[complex]]) -> list[float]:
     """Return row-major interleaved complex values for a square matrix."""
 
-    dimension = _validate_square_matrix(matrix, "matrix")
+    if not isinstance(matrix, Sequence) or isinstance(matrix, (str, bytes)):
+        raise ValueError("matrix must be a square matrix")
+    dimension = len(matrix)
+    if dimension <= 0:
+        raise ValueError("matrix must be non-empty")
     flat: list[float] = []
-    for row in matrix:
+    for row_index, row in enumerate(matrix):
+        if not isinstance(row, Sequence) or isinstance(row, (str, bytes)):
+            raise ValueError(f"matrix[{row_index}] must be a row sequence")
+        if len(row) != dimension:
+            raise ValueError("matrix must be square and non-ragged")
         for value in row:
-            complex_value = complex(value)
+            try:
+                complex_value = complex(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("matrix entries must be complex-compatible") from exc
             flat.extend([float(complex_value.real), float(complex_value.imag)])
     if len(flat) != 2 * dimension * dimension:
         raise ValueError("matrix flattening produced an unexpected length")
@@ -398,7 +409,8 @@ def rust_apply_local_reset_sequence(
     if type(reset_count) is not int or reset_count < 0:
         raise ValueError("reset_count must be a non-negative integer")
     dimension = local_dimension ** subsystem_count
-    if _validate_square_matrix(state, "state") != dimension:
+    flat_state = flatten_complex_matrix(state)
+    if len(flat_state) != 2 * dimension * dimension:
         raise ValueError("state dimension does not match reset register")
     checked_targets = tuple(targets)
     if any(type(target) is not int for target in checked_targets):
@@ -428,7 +440,7 @@ def rust_apply_local_reset_sequence(
     rust_module = _load_rust_module()
     result = rust_module.apply_local_reset_sequence_flat(
         RUST_RESET_SEQUENCE_SCHEMA_VERSION,
-        flatten_complex_matrix(state),
+        flat_state,
         subsystem_count,
         local_dimension,
         list(checked_targets),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import statistics
 import sys
@@ -17,8 +18,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.register_operations import apply_local_replacement, freeze_register
 from core.rust_dense_kernel import (
+    RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+    flatten_complex_matrix,
     is_rust_kernel_available,
     rust_apply_local_reset_sequence,
+    unflatten_complex_matrix,
 )
 
 
@@ -64,6 +68,7 @@ def main() -> int:
     targets = tuple(range(args.qubits))
     probabilities = tuple(0.2 + 0.05 * (target % 4) for target in targets)
     populations = tuple((1.0 - (0.05 + 0.02 * (target % 3)), 0.05 + 0.02 * (target % 3)) for target in targets)
+    flat_populations = [value for pair in populations for value in pair]
 
     def python_run() -> object:
         state = np.asarray(rho, dtype=complex)
@@ -83,6 +88,23 @@ def main() -> int:
             reset_count=args.reset_count,
         )
 
+    rust_module = importlib.import_module("yuragi_strider_rust")
+    flattened_rho = flatten_complex_matrix(rho)
+
+    def rust_call_with_flat_input() -> list[float]:
+        return rust_module.apply_local_reset_sequence_flat(
+            RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+            flattened_rho,
+            args.qubits,
+            2,
+            list(targets),
+            list(probabilities),
+            flat_populations,
+            args.reset_count,
+        )
+
+    flat_result = rust_call_with_flat_input()
+
     python_result = np.asarray(python_run(), dtype=complex)
     rust_result = np.asarray(rust_run(), dtype=complex)
     matrix_f64_values = 2 * dimension * dimension
@@ -99,10 +121,20 @@ def main() -> int:
         "repeats": args.repeats,
         "python_end_to_end_median_ms": _median_ms(python_run, args.warmups, args.repeats),
         "rust_pyo3_end_to_end_median_ms": _median_ms(rust_run, args.warmups, args.repeats),
+        "python_input_validation_and_flatten_median_ms": _median_ms(
+            lambda: flatten_complex_matrix(rho), args.warmups, args.repeats,
+        ),
+        "preflattened_pyo3_call_and_kernel_median_ms": _median_ms(
+            rust_call_with_flat_input, args.warmups, args.repeats,
+        ),
+        "python_output_reconstruction_median_ms": _median_ms(
+            lambda: unflatten_complex_matrix(flat_result, dimension), args.warmups, args.repeats,
+        ),
         "python_tracemalloc_peak_bytes": _python_peak_bytes(python_run),
         "rust_wrapper_python_tracemalloc_peak_bytes": _python_peak_bytes(rust_run),
         "native_rust_memory_peak_bytes": None,
         "pyo3_calls_per_sequence": 1,
+        "preflattened_rust_call_also_uses_pyo3": True,
         "matrix_f64_values_including_input_and_result": matrix_f64_values * 2,
         "parameter_f64_values": parameter_f64_values,
         "target_index_values": len(targets),

@@ -113,15 +113,24 @@ Earlier reset-kernel measurements (`scripts/benchmark_reset_kernel.py`) showed P
 
 ### Paired Python/Rust boundary measurements (2026-10-28)
 
-The current release extension was benchmarked with Python 3.12.14 on Linux x86_64. Python and Rust received identical data; Rust timings include PyO3 input and output conversion. The reset-sequence comparison used 3 warm-ups and 15 repetitions. Rust made one PyO3 call for the full local reset sequence. Results were:
+The current release extension was benchmarked with Python 3.12.14 on Linux x86_64. Python and Rust received identical data; Rust timings include PyO3 input and output conversion. The reset-sequence comparison used 5 warm-ups and 31 repetitions. Rust made one PyO3 call for the full local reset sequence. Results were:
 
 | Case | Python median | Rust through PyO3 | Rust/Python | Maximum output difference |
 | --- | ---: | ---: | ---: | ---: |
-| Local reset sequence, 4 qubits | 0.135 ms | 0.120 ms | 0.88x | 1.11e-16 |
-| Local reset sequence, 6 qubits | 0.946 ms | 3.142 ms | 3.32x | 5.55e-17 |
-| Local reset sequence, 8 qubits | 10.963 ms | 36.196 ms | 3.30x | 2.08e-17 |
+| Local reset sequence, 4 qubits | 0.177 ms | 0.139 ms | 0.79x | 1.11e-16 |
+| Local reset sequence, 6 qubits | 0.621 ms | 1.805 ms | 2.91x | 5.55e-17 |
+| Local reset sequence, 8 qubits | 11.788 ms | 34.424 ms | 2.92x | 2.08e-17 |
 
 This comparison does not support switching the local reset kernel to Rust for larger density matrices in its current representation. Python/NumPy outperformed the current Rust/PyO3 kernel at 6 and 8 qubits, despite batching the sequence into one call. The wrapper reports larger Python-traced peak allocations for Rust at those sizes; this excludes native Rust allocations.
+
+The boundary breakdown from `scripts/benchmark_reset_kernel.py` shows why one call is not enough to make this path faster:
+
+| Case | Python validation + flatten | Pre-flattened PyO3 call + Rust kernel | Python reconstruction | Full Rust wrapper |
+| --- | ---: | ---: | ---: | ---: |
+| 6 qubits | 0.599 ms | 0.510 ms | 0.645 ms | 1.805 ms |
+| 8 qubits | 8.941 ms | 10.054 ms | 10.484 ms | 34.424 ms |
+
+The pre-flattened call still includes Python-list-to-`Vec<f64>` and `Vec<f64>`-to-list conversions, so it is not a pure Rust-kernel measurement. For 8 qubits, the matrix is 256 by 256 complex values, or 131,072 interleaved `f64` values per direction. Flattening and rebuilding Python complex tuples together take about 19.4 ms in this run. The adapter also validated the input once before calling a flattener that validated it again; `flatten_complex_matrix` now validates and converts in one pass, and the duplicate outer scan was removed. An interleaved 5-warm-up/41-sample comparison of the old and revised wrappers measured 1.802/1.562 ms at 6 qubits and 34.684/31.332 ms at 8 qubits. This reduced wrapper time by 13.3% and 9.7%, while the complete 8-qubit path remains slower than Python/NumPy. The remaining cost comes mainly from Python object conversion/reconstruction and the Rust-owned copies; the current benchmark cannot isolate pure native kernel time.
 
 The repeatable analysis benchmark is `scripts/benchmark_analysis_boundary.py` (3 warm-ups, 20 repetitions). It separates the binary-statistics kernel from the complete report adapter and compares Reset analysis on public mappings:
 
@@ -132,7 +141,6 @@ The repeatable analysis benchmark is `scripts/benchmark_analysis_boundary.py` (3
 | Reset analysis, 1,000 observations | 3.868 ms | 4.116 ms | 1.06x | 1 |
 | Reset analysis, 10,000 observations | 43.781 ms | 57.785 ms | 1.32x | 1 |
 
-The outputs matched exactly in these runs. The Rust binary-statistics kernel is faster in isolation, while complete adapters are slightly slower because their work is small relative to input conversion and Python report construction. Reset batching keeps the call count fixed at one, but currently constructs a Python tuple for each observation before that call; on this workload, that conversion cost grows with the batch. This is direct evidence that fewer boundary crossings alone do not guarantee a faster end-to-end path. Keep Python/NumPy as the default when it wins the paired full-path benchmark; prioritize Rust-owned batches when state reuse, substantial native computation, or reduced repeated serialization compensates for boundary costs. Re-run on deployment hardware before using these figures as an acceptance threshold. The benchmark excludes API, queueing, and network costs.
 
 ## Migration risks
 
