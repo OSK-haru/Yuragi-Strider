@@ -217,127 +217,80 @@ fn apply_local_reset_sequence_flat(
             "unsupported reset sequence schema version: {schema_version}"
         )));
     }
-    if subsystem_count == 0 {
-        return Err(PyValueError::new_err(
-            "subsystem_count must be greater than 0",
-        ));
-    }
-    if local_dimension != 2 && local_dimension != 3 {
-        return Err(PyValueError::new_err("local_dimension must be 2 or 3"));
-    }
-    if targets.is_empty() {
-        return Err(PyValueError::new_err("targets must not be empty"));
-    }
-    if targets.iter().any(|target| *target >= subsystem_count) {
-        return Err(PyValueError::new_err(
-            "reset target is outside the register",
-        ));
-    }
-    if targets
-        .iter()
-        .collect::<std::collections::HashSet<_>>()
-        .len()
-        != targets.len()
-    {
-        return Err(PyValueError::new_err("reset targets must be unique"));
-    }
-    if success_probabilities.len() != targets.len() {
-        return Err(PyValueError::new_err(
-            "success_probabilities length must equal targets length",
-        ));
-    }
-    let expected_populations = targets
-        .len()
-        .checked_mul(local_dimension)
-        .ok_or_else(|| PyValueError::new_err("target population count is too large"))?;
-    if target_populations.len() != expected_populations {
-        return Err(PyValueError::new_err(
-            "target_populations length must equal targets length * local_dimension",
-        ));
-    }
-    if success_probabilities
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0 || *value > 1.0)
-    {
-        return Err(PyValueError::new_err(
-            "success probabilities must be finite and between zero and one",
-        ));
-    }
-    if target_populations
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0)
-    {
-        return Err(PyValueError::new_err(
-            "target populations must be finite and non-negative",
-        ));
-    }
-    for target_index in 0..targets.len() {
-        let start = target_index * local_dimension;
-        let total: f64 = target_populations[start..start + local_dimension]
-            .iter()
-            .sum();
-        if (total - 1.0).abs() > 1e-12 {
+    let mut state =
+        yuragi_strider_core::reset::ResetState::new(rho, subsystem_count, local_dimension)
+            .map_err(PyValueError::new_err)?;
+    let operation = yuragi_strider_core::reset::ResetOperation {
+        targets,
+        success_probabilities,
+        target_populations,
+        reset_count,
+    };
+    state.execute(&[operation]).map_err(PyValueError::new_err)?;
+    Ok(state.values().to_vec())
+}
+
+/// A Rust-owned density matrix; a whole reset schedule crosses PyO3 once.
+#[pyclass(name = "ResetSession")]
+struct PyResetSession {
+    state: yuragi_strider_core::reset::ResetState,
+}
+
+#[pymethods]
+impl PyResetSession {
+    #[new]
+    fn new(
+        schema_version: &str,
+        rho: Vec<f64>,
+        subsystem_count: usize,
+        local_dimension: usize,
+    ) -> PyResult<Self> {
+        if schema_version != "local_reset_state_v1" {
             return Err(PyValueError::new_err(
-                "each target population vector must sum to one",
+                "unsupported reset state schema version",
             ));
         }
+        Ok(Self {
+            state: yuragi_strider_core::reset::ResetState::new(
+                rho,
+                subsystem_count,
+                local_dimension,
+            )
+            .map_err(PyValueError::new_err)?,
+        })
     }
-    let full_dimension = local_dimension
-        .checked_pow(u32::try_from(subsystem_count).map_err(|_| {
-            PyValueError::new_err("subsystem_count exceeds the supported exponent range")
-        })?)
-        .ok_or_else(|| PyValueError::new_err("register dimension is too large"))?;
-    let element_count = matrix_element_count(full_dimension)?;
-    validate_matrix_len("rho", rho.len(), element_count, full_dimension)?;
-    validate_finite_matrix("rho", &rho)?;
 
-    let mut evolved = rho;
-    for _ in 0..reset_count {
-        for (operation_index, target) in targets.iter().enumerate() {
-            let stride =
-                local_dimension
-                    .checked_pow(u32::try_from(subsystem_count - target - 1).map_err(|_| {
-                        PyValueError::new_err("reset target exponent is out of range")
-                    })?)
-                    .ok_or_else(|| PyValueError::new_err("reset target stride is too large"))?;
-            let populations_start = operation_index * local_dimension;
-            let populations =
-                &target_populations[populations_start..populations_start + local_dimension];
-            let survival = 1.0 - success_probabilities[operation_index];
-            let mut next = vec![0.0; element_count];
-
-            for row in 0..full_dimension {
-                let row_level = (row / stride) % local_dimension;
-                let row_without_target = row - row_level * stride;
-                for column in 0..full_dimension {
-                    let source = 2 * (row * full_dimension + column);
-                    next[source] = survival * evolved[source];
-                    next[source + 1] = survival * evolved[source + 1];
-
-                    let column_level = (column / stride) % local_dimension;
-                    if row_level == column_level {
-                        let column_without_target = column - column_level * stride;
-                        let mut traced_real = 0.0;
-                        let mut traced_imag = 0.0;
-                        for level in 0..local_dimension {
-                            let traced_row = row_without_target + level * stride;
-                            let traced_column = column_without_target + level * stride;
-                            let traced_index = 2 * (traced_row * full_dimension + traced_column);
-                            traced_real += evolved[traced_index];
-                            traced_imag += evolved[traced_index + 1];
-                        }
-                        let weight =
-                            success_probabilities[operation_index] * populations[row_level];
-                        next[source] += weight * traced_real;
-                        next[source + 1] += weight * traced_imag;
-                    }
-                }
-            }
-            evolved = next;
+    fn execute(
+        &mut self,
+        schema_version: &str,
+        operations: Vec<(Vec<usize>, Vec<f64>, Vec<f64>, usize)>,
+    ) -> PyResult<()> {
+        if schema_version != "local_reset_batch_v1" {
+            return Err(PyValueError::new_err(
+                "unsupported reset batch schema version",
+            ));
         }
+        let operations = operations
+            .into_iter()
+            .map(
+                |(targets, success_probabilities, target_populations, reset_count)| {
+                    yuragi_strider_core::reset::ResetOperation {
+                        targets,
+                        success_probabilities,
+                        target_populations,
+                        reset_count,
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
+        self.state
+            .execute(&operations)
+            .map_err(PyValueError::new_err)
     }
-    validate_finite_matrix("reset output", &evolved)?;
-    Ok(evolved)
+
+    fn state_flat(&self) -> Vec<f64> {
+        self.state.values().to_vec()
+    }
 }
 
 #[pyfunction]
@@ -2320,6 +2273,7 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(binary_contrast_statistics_v1, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_crosstalk_disruption_v1, m)?)?;
     m.add_class::<CrosstalkEvaluationRuntime>()?;
+    m.add_class::<PyResetSession>()?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_stages_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_step_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_evolve_cleaned_flat, m)?)?;

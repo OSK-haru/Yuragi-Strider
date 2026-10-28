@@ -22,13 +22,50 @@ from core.register_operations import (
     freeze_register,
 )
 from core.rust_dense_kernel import (
+    flatten_complex_matrix,
     is_rust_kernel_available,
     rust_apply_local_reset_sequence,
+    unflatten_complex_matrix,
 )
 
 
 @unittest.skipUnless(is_rust_kernel_available(), "yuragi_strider_rust is not importable")
 class RustResetKernelTests(unittest.TestCase):
+    def test_rust_owned_session_batches_operations_and_rejects_partial_commit(self):
+        amplitudes = np.asarray((1.0, 1.0j, 0.4, -0.2j), dtype=complex)
+        amplitudes /= np.linalg.norm(amplitudes)
+        initial = freeze_register(np.outer(amplitudes, amplitudes.conj()))
+        operations = [([0], [0.2], [0.8, 0.2], 2), ([1], [0.7], [0.1, 0.9], 1)]
+        expected = np.asarray(initial)
+        for targets, probabilities, populations, count in operations:
+            for _ in range(count):
+                expected = apply_local_replacement(expected, targets[0], probabilities[0], populations)
+        session = yuragi_strider_rust.ResetSession(
+            "local_reset_state_v1", flatten_complex_matrix(initial), 2, 2,
+        )
+        session.execute("local_reset_batch_v1", operations)
+        np.testing.assert_allclose(unflatten_complex_matrix(session.state_flat(), 4), expected,
+                                   rtol=0.0, atol=2e-13)
+        before = session.state_flat()
+        with self.assertRaises(ValueError):
+            session.execute("local_reset_batch_v1", [operations[0], ([1], [0.5], [0.2, 0.2], 1)])
+        self.assertEqual(session.state_flat(), before)
+        with self.assertRaisesRegex(ValueError, "schema version"):
+            session.execute("unknown", operations)
+        self.assertEqual(session.state_flat(), before)
+
+    def test_rust_owned_qutrit_session_matches_repeated_kraus_channels(self):
+        initial = density_from_ket((0.3 + 0.2j, 0.5j, 0.7 - 0.1j))
+        spec = ImperfectResetSpec(0.37, (0.2, 0.3, 0.5))
+        expected = apply_local_imperfect_reset(initial, 1, 0, spec)
+        expected = apply_local_imperfect_reset(expected, 1, 0, spec)
+        session = yuragi_strider_rust.ResetSession(
+            "local_reset_state_v1", flatten_complex_matrix(initial), 1, 3,
+        )
+        session.execute("local_reset_batch_v1", [([0], [0.37], [0.2, 0.3, 0.5], 2)])
+        np.testing.assert_allclose(unflatten_complex_matrix(session.state_flat(), 3), expected,
+                                   rtol=0.0, atol=2e-13)
+
     def test_multi_qubit_sequence_matches_python_and_preserves_density_invariants(self) -> None:
         amplitudes = np.asarray([1 + 1j, 2 - 0.5j, -1j, 0.3, 1.2j, -2, 0.7, 1.0 + 0.2j], dtype=complex)
         amplitudes /= np.linalg.norm(amplitudes)

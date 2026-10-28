@@ -17,7 +17,7 @@ Rust移行と共通セキュリティ基盤の進捗・測定条件は
 |---|---|---|
 | Web UI | React 19、TypeScript 6、Vite 8 | 回路編集、パラメータ入力、結果表示 |
 | API | FastAPI、Pydantic、Uvicorn | 入力検証とシミュレーション API |
-| 計算コア | Python、NumPy | 密度行列、Lindblad 型時間発展、指標計算 |
+| 計算コア | Python、NumPy、Rust | 密度行列、Lindblad 型時間発展、Reset、指標計算（Rustへ移行中） |
 | 独立検証 | QuTiP、SciPy、Matplotlib | 物理モデルの比較検証と plot（任意） |
 | Rust 拡張 | Rust、PyO3、maturin | Crosstalk 評価、選択式 dense kernel |
 
@@ -137,7 +137,7 @@ Rust toolchain が利用できる環境で、Python 仮想環境へローカル�
 - `validation_hardware/`: 実機データとの比較検証
 - `validation_results/`: 機械可読な検証結果
 - `scripts/`: 独立検証、benchmark、診断 script
-- `rust_kernels/`: PyO3/maturin 拡張と Rust の計算・評価処理
+- `rust_kernels/`: Pythonに依存しないRustコアとPyO3/maturin拡張
 - `formalweb/website/`: Docusaurus 製の公開ドキュメントサイト
 - `packaging/`, `desktop_app.py`: 任意の Windows desktop 配布用ランチャー
 - `docs/development/`: 配布・運用手順

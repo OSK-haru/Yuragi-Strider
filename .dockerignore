@@ -12,5 +12,10 @@
 !rust_kernels/yuragi_strider_rust/src
 !rust_kernels/yuragi_strider_rust/src/**
 rust_kernels/yuragi_strider_rust/target
+!rust_kernels/yuragi_strider_core
+!rust_kernels/yuragi_strider_core/Cargo.toml
+!rust_kernels/yuragi_strider_core/src
+!rust_kernels/yuragi_strider_core/src/**
+rust_kernels/yuragi_strider_core/target
 **/__pycache__
 **/*.pyc
