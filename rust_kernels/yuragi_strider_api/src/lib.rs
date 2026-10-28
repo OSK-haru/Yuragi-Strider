@@ -19,7 +19,11 @@ pub const MAX_API_REQUEST_BODY_BYTES: usize = 64 * 1024;
 /// Parse exact browser origins, optionally requiring HTTPS for a production deployment.
 pub fn parse_allowed_origins(raw: &str, require_https: bool) -> Result<Vec<HeaderValue>, String> {
     let mut origins = Vec::new();
-    for item in raw.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+    for item in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
         let (scheme, authority) = item
             .split_once("://")
             .ok_or_else(|| format!("ALLOWED_ORIGINS contains an invalid origin: {item}"))?;
@@ -35,7 +39,9 @@ pub fn parse_allowed_origins(raw: &str, require_https: bool) -> Result<Vec<Heade
                     || matches!(character, '/' | '?' | '#' | '@' | '\\' | ',')
             })
         {
-            return Err(format!("ALLOWED_ORIGINS contains an invalid origin: {item}"));
+            return Err(format!(
+                "ALLOWED_ORIGINS contains an invalid origin: {item}"
+            ));
         }
         let value = HeaderValue::from_str(item)
             .map_err(|_| format!("ALLOWED_ORIGINS contains an invalid header value: {item}"))?;
