@@ -1,10 +1,12 @@
 use gemm::{Parallelism, c64, gemm};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use std::collections::HashMap;
 
 const RESET_SEQUENCE_SCHEMA_VERSION: &str = "local_reset_sequence_v1";
 const BINARY_CONTRAST_SCHEMA_VERSION: &str = "security_binary_contrast_v1";
 const BINARY_CONTRAST_MAX_EXACT_COUNT: u64 = 1u64 << 53;
+const CROSSTALK_EVALUATION_SCHEMA_VERSION: &str = "crosstalk_disruption_v1";
 
 #[pyfunction]
 fn backend_name() -> &'static str {
@@ -371,11 +373,9 @@ fn binary_contrast_statistics_v1(
         ));
     }
 
-    let p0 = outcome_one_0 as f64 / trials_0 as f64;
-    let p1 = outcome_one_1 as f64 / trials_1 as f64;
+    let (p0, p1, standard_error) =
+        binary_group_statistics(outcome_one_0, trials_0, outcome_one_1, trials_1);
     let difference = p1 - p0;
-    let standard_error =
-        (p0 * (1.0 - p0) / trials_0 as f64 + p1 * (1.0 - p1) / trials_1 as f64).sqrt();
     let z_score = if standard_error > 0.0 {
         Some(difference / standard_error)
     } else {
@@ -397,6 +397,19 @@ fn binary_contrast_statistics_v1(
     ))
 }
 
+fn binary_group_statistics(
+    successes_0: u64,
+    trials_0: u64,
+    successes_1: u64,
+    trials_1: u64,
+) -> (f64, f64, f64) {
+    let p0 = successes_0 as f64 / trials_0 as f64;
+    let p1 = successes_1 as f64 / trials_1 as f64;
+    let standard_error =
+        (p0 * (1.0 - p0) / trials_0 as f64 + p1 * (1.0 - p1) / trials_1 as f64).sqrt();
+    (p0, p1, standard_error)
+}
+
 fn binary_entropy(probability: f64) -> f64 {
     let mut entropy = 0.0;
     if probability > 0.0 {
@@ -407,6 +420,149 @@ fn binary_entropy(probability: f64) -> f64 {
         entropy -= complement * complement.log2();
     }
     entropy
+}
+
+/// Evaluate an entire private workload without returning its intermediate counts.
+#[pyfunction]
+fn evaluate_crosstalk_disruption_v1(
+    schema_version: &str,
+    runs: Vec<HashMap<String, u64>>,
+    success_outcome: &str,
+    baseline_successes: u64,
+    baseline_shots: u64,
+    significance_z: f64,
+    minimum_drop: f64,
+) -> PyResult<bool> {
+    if schema_version != CROSSTALK_EVALUATION_SCHEMA_VERSION {
+        return Err(PyValueError::new_err(
+            "unsupported crosstalk evaluation schema",
+        ));
+    }
+    if runs.is_empty()
+        || success_outcome.is_empty()
+        || baseline_shots == 0
+        || baseline_shots > BINARY_CONTRAST_MAX_EXACT_COUNT
+        || baseline_successes > baseline_shots
+        || !significance_z.is_finite()
+        || !minimum_drop.is_finite()
+    {
+        return Err(PyValueError::new_err("invalid crosstalk evaluation input"));
+    }
+    let mut attacked_successes = 0u64;
+    let mut attacked_shots = 0u64;
+    for run in &runs {
+        for (outcome, count) in run {
+            attacked_shots = attacked_shots
+                .checked_add(*count)
+                .ok_or_else(|| PyValueError::new_err("shot count overflow"))?;
+            if outcome == success_outcome {
+                attacked_successes = attacked_successes
+                    .checked_add(*count)
+                    .ok_or_else(|| PyValueError::new_err("success count overflow"))?;
+            }
+        }
+    }
+    if attacked_shots == 0 || attacked_shots > BINARY_CONTRAST_MAX_EXACT_COUNT {
+        return Err(PyValueError::new_err("invalid attacked shot count"));
+    }
+    let (p_attack, p_base, standard_error) = binary_group_statistics(
+        attacked_successes,
+        attacked_shots,
+        baseline_successes,
+        baseline_shots,
+    );
+    let drop = p_base - p_attack;
+    if standard_error == 0.0 {
+        return Ok(drop >= minimum_drop);
+    }
+    Ok(drop >= minimum_drop && drop / standard_error >= significance_z)
+}
+
+/// Owns private baseline and submission accounting for one challenge instance.
+#[pyclass]
+struct CrosstalkEvaluationRuntime {
+    success_outcome: String,
+    required_runs: usize,
+    max_attempts: u32,
+    attempts: u32,
+    baseline: Option<(u64, u64)>,
+    significance_z: f64,
+    minimum_drop: f64,
+}
+
+#[pymethods]
+impl CrosstalkEvaluationRuntime {
+    #[new]
+    fn new(
+        schema_version: &str,
+        success_outcome: String,
+        required_runs: usize,
+        max_attempts: u32,
+        significance_z: f64,
+        minimum_drop: f64,
+    ) -> PyResult<Self> {
+        if schema_version != CROSSTALK_EVALUATION_SCHEMA_VERSION
+            || success_outcome.is_empty()
+            || required_runs == 0
+            || max_attempts == 0
+            || !significance_z.is_finite()
+            || !minimum_drop.is_finite()
+        {
+            return Err(PyValueError::new_err(
+                "invalid crosstalk runtime configuration",
+            ));
+        }
+        Ok(Self {
+            success_outcome,
+            required_runs,
+            max_attempts,
+            attempts: 0,
+            baseline: None,
+            significance_z,
+            minimum_drop,
+        })
+    }
+
+    fn attempts_remaining(&self) -> u32 {
+        self.max_attempts - self.attempts
+    }
+
+    fn requires_baseline(&self, run_count: usize) -> bool {
+        run_count >= self.required_runs && self.baseline.is_none()
+    }
+
+    fn submit(
+        &mut self,
+        runs: Vec<HashMap<String, u64>>,
+        baseline: Option<(u64, u64)>,
+    ) -> PyResult<(u32, u32, bool, bool)> {
+        if self.attempts == self.max_attempts {
+            return Err(PyValueError::new_err("no submissions remain"));
+        }
+        if runs.len() < self.required_runs {
+            return Ok((self.attempts, self.attempts_remaining(), false, false));
+        }
+        if self.baseline.is_none() {
+            let (successes, shots) =
+                baseline.ok_or_else(|| PyValueError::new_err("baseline required"))?;
+            if shots == 0 || shots > BINARY_CONTRAST_MAX_EXACT_COUNT || successes > shots {
+                return Err(PyValueError::new_err("invalid baseline counts"));
+            }
+            self.baseline = Some((successes, shots));
+        }
+        let (successes, shots) = self.baseline.expect("validated baseline");
+        let passed = evaluate_crosstalk_disruption_v1(
+            CROSSTALK_EVALUATION_SCHEMA_VERSION,
+            runs,
+            &self.success_outcome,
+            successes,
+            shots,
+            self.significance_z,
+            self.minimum_drop,
+        )?;
+        self.attempts += 1;
+        Ok((self.attempts, self.attempts_remaining(), true, passed))
+    }
 }
 
 #[pyfunction]
@@ -2162,6 +2318,8 @@ fn yuragi_strider_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rk4_evolve_flat, m)?)?;
     m.add_function(wrap_pyfunction!(apply_local_reset_sequence_flat, m)?)?;
     m.add_function(wrap_pyfunction!(binary_contrast_statistics_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(evaluate_crosstalk_disruption_v1, m)?)?;
+    m.add_class::<CrosstalkEvaluationRuntime>()?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_stages_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_time_dependent_step_flat, m)?)?;
     m.add_function(wrap_pyfunction!(rk4_evolve_cleaned_flat, m)?)?;
