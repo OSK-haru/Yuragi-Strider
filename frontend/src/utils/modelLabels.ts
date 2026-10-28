@@ -20,7 +20,7 @@ export const MODEL_IDS = {
   cptpEvolution: 'gate_aware_constant_gksl_exponential_v1',
   weakCouplingModel: 'weak_coupling_lindblad',
   postCircuitModel: 'post_circuit_degradation_v1',
-  defaultBackend: 'rust_dense_preview',
+  defaultBackend: 'python_dense',
   previewBackend: 'rust_dense_preview',
   pythonDenseBackendName: 'python_dense_streaming_v1',
   effectiveUnitaryHamiltonian: 'effective_unitary_spectral_generator_v2',
