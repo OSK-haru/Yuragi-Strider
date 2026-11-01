@@ -19,6 +19,9 @@ ALLOWED_SUFFIXES = {
     ".ps1", ".py", ".rs", ".sql", ".toml", ".ts", ".tsx", ".txt", ".yaml", ".yml",
 }
 BLOCKED_PARTS = {".cache", ".claude", ".codex", ".git", ".venv", "node_modules", "private", "raw", "secrets"}
+REQUIRED_INSTRUCTIONS = {
+    "AGENTS.md", "AGENT_HARNESS.md", "CLAUDE.md", "DEVELOPMENT_PROTOCOL.md", "MONITOR_REVIEW.md", "PROJECT_STYLE.md",
+}
 SENSITIVE_NAME = re.compile(r"(^|[._-])(api[_-]?key|credential|password|secret|token|private[_-]?key)([._-]|$)", re.IGNORECASE)
 
 
@@ -55,7 +58,8 @@ def snapshot(destination: Path, manifest_path: Path) -> None:
     destination.mkdir(parents=True)
 
     untracked = git_paths("ls-files", "--others", "--exclude-standard")
-    candidates = git_paths("ls-files", "--cached", "--others", "--exclude-standard")
+    # Local-only instructions (e.g. the git-ignored persona file) are still required.
+    candidates = git_paths("ls-files", "--cached", "--others", "--exclude-standard") | REQUIRED_INSTRUCTIONS
     changed = git_paths("diff", "--name-only", "HEAD") | untracked
     try:
         recent = git_paths("log", "--since=7.days", "--name-only", "--format=")
@@ -87,8 +91,7 @@ def snapshot(destination: Path, manifest_path: Path) -> None:
         modified_times[relative.as_posix()] = source.stat().st_mtime_ns
         total_bytes += size
 
-    required = {"AGENTS.md", "AGENT_HARNESS.md", "CLAUDE.md", "DEVELOPMENT_PROTOCOL.md", "MONITOR_REVIEW.md", "PROJECT_STYLE.md"}
-    missing = sorted(required - files.keys())
+    missing = sorted(REQUIRED_INSTRUCTIONS - files.keys())
     if missing:
         raise RuntimeError(f"snapshot is missing required instructions: {missing}")
     manifest = {

@@ -219,7 +219,12 @@ def run_role(role: str, selected: list[str]) -> str:
              "-ChangedPathsJson", str(selected_path)],
             cwd=ROOT, capture_output=True, text=True, timeout=46 * 60, check=False,
         )
-        if result.returncode != 0 or not latest.exists() or latest.stat().st_mtime < started - 1:
+        if not latest.exists() or latest.stat().st_mtime < started - 1:
+            # The runner failed before writing its own result; keep the reason.
+            tail = "\n".join((result.stdout + result.stderr).strip().splitlines()[-12:])
+            latest.write_text(f"# Audit fleet: failed before the model run\n\n```\n{tail}\n```\n", encoding="utf-8")
+            return "failed"
+        if result.returncode != 0:
             return "failed"
         first_line = latest.read_text(encoding="utf-8-sig").splitlines()[0]
         if first_line == "AUDIT_STATUS: complete":
