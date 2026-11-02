@@ -16,6 +16,11 @@ import math
 from typing import Protocol, runtime_checkable
 import numpy as np
 
+from core.backend_boundary import (
+    PYTHON_DENSE_BACKEND,
+    RUST_DENSE_PREVIEW_BACKEND,
+    RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+)
 from core.experimental_isolation_physics.imperfect_reset import (
     ImperfectResetSpec,
     apply_local_imperfect_reset,
@@ -172,6 +177,7 @@ class PhenomenologicalResetModel:
     fidelity_level: str = "behavioral_approximation"
     provenance: str = "simulator_derived"
     model_mode: ResetModelMode = ResetModelMode.STATE_TRANSITION_WITH_READOUT
+    kernel_backend: str = PYTHON_DENSE_BACKEND
 
     @property
     def configuration_id(self) -> str:
@@ -184,6 +190,9 @@ class PhenomenologicalResetModel:
             "observed_one_given_zero": self.observed_one_given_zero,
             "observed_zero_given_one": self.observed_zero_given_one,
         }
+        if self.kernel_backend != PYTHON_DENSE_BACKEND:
+            payload["kernel_backend"] = self.kernel_backend
+            payload["kernel_schema_version"] = RUST_RESET_SEQUENCE_SCHEMA_VERSION
         encoded = json.dumps(
             payload,
             sort_keys=True,
@@ -207,6 +216,7 @@ class PhenomenologicalResetModel:
                 "PhenomenologicalResetModel requires state_transition_with_readout"
             )
         object.__setattr__(self, "model_mode", mode)
+        _validate_kernel_backend(self.kernel_backend)
         object.__setattr__(
             self,
             "observed_one_given_zero",
@@ -227,13 +237,26 @@ class PhenomenologicalResetModel:
                 (state[0][0], 0.0j),
                 (0.0j, state[1][1]),
             )
-        for _ in range(request.reset_count):
-            state = apply_local_imperfect_reset(
+        if self.kernel_backend == RUST_DENSE_PREVIEW_BACKEND:
+            from core.rust_dense_kernel import rust_apply_local_reset_sequence
+
+            state = rust_apply_local_reset_sequence(
                 state,
                 subsystem_count=1,
-                target=0,
-                spec=self.spec,
+                local_dimension=self.spec.local_dimension,
+                targets=(0,),
+                success_probabilities=(self.spec.success_probability,),
+                target_populations=(self.spec.target_populations,),
+                reset_count=request.reset_count,
             )
+        else:
+            for _ in range(request.reset_count):
+                state = apply_local_imperfect_reset(
+                    state,
+                    subsystem_count=1,
+                    target=0,
+                    spec=self.spec,
+                )
 
         true_one = _probability(float(state[1][1].real), "true_one_probability")
         observed_one = (
@@ -253,9 +276,26 @@ class PhenomenologicalResetModel:
         state = np.asarray(request.input_state, dtype=complex)
         if request.victim_measurement:
             state = nonselective_measurement(state, request.targets)
-        for _ in range(request.reset_count):
-            for target in request.targets:
-                state = apply_local_replacement(state, target, self.spec.success_probability, self.spec.target_populations)
+        if self.kernel_backend == RUST_DENSE_PREVIEW_BACKEND and request.reset_count:
+            from core.rust_dense_kernel import rust_apply_local_reset_sequence
+
+            state = np.asarray(rust_apply_local_reset_sequence(
+                freeze_register(state),
+                subsystem_count=request.subsystem_count,
+                local_dimension=self.spec.local_dimension,
+                targets=request.targets,
+                success_probabilities=tuple(
+                    self.spec.success_probability for _ in request.targets
+                ),
+                target_populations=tuple(
+                    self.spec.target_populations for _ in request.targets
+                ),
+                reset_count=request.reset_count,
+            ), dtype=complex)
+        else:
+            for _ in range(request.reset_count):
+                for target in request.targets:
+                    state = apply_local_replacement(state, target, self.spec.success_probability, self.spec.target_populations)
         return RegisterResetResult(
             freeze_register(state),
             tuple((self.observed_one_given_zero, self.observed_zero_given_one) for _ in request.targets),
@@ -279,6 +319,7 @@ class PerQubitPhenomenologicalResetModel:
     fidelity_level: str = "behavioral_approximation"
     provenance: str = "snapshot_derived_approximation"
     model_mode: ResetModelMode = ResetModelMode.STATE_TRANSITION_WITH_READOUT
+    kernel_backend: str = PYTHON_DENSE_BACKEND
 
     def __post_init__(self) -> None:
         ids = tuple(self.physical_qubit_ids)
@@ -296,6 +337,7 @@ class PerQubitPhenomenologicalResetModel:
                         _probability(pair[1], "readout p01")) for pair in errors)
         for name in ("model_id", "model_version", "fidelity_level", "provenance"):
             _identifier(getattr(self, name), name)
+        _validate_kernel_backend(self.kernel_backend)
         mode = self.model_mode if isinstance(self.model_mode, ResetModelMode) else ResetModelMode(self.model_mode)
         if mode is not ResetModelMode.STATE_TRANSITION_WITH_READOUT:
             raise ValueError("per-qubit reset supports state_transition_with_readout only")
@@ -318,6 +360,9 @@ class PerQubitPhenomenologicalResetModel:
                 for spec, errors in zip(self.specs, self.assignment_errors, strict=True)
             ],
         }
+        if self.kernel_backend != PYTHON_DENSE_BACKEND:
+            payload["kernel_backend"] = self.kernel_backend
+            payload["kernel_schema_version"] = RUST_RESET_SEQUENCE_SCHEMA_VERSION
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
         return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
@@ -327,10 +372,23 @@ class PerQubitPhenomenologicalResetModel:
         state = request.input_state
         if request.victim_measurement:
             state = ((state[0][0], 0.0j), (0.0j, state[1][1]))
-        for _ in range(request.reset_count):
-            state = apply_local_imperfect_reset(
-                state, subsystem_count=1, target=0, spec=self.specs[0],
+        if self.kernel_backend == RUST_DENSE_PREVIEW_BACKEND:
+            from core.rust_dense_kernel import rust_apply_local_reset_sequence
+
+            state = rust_apply_local_reset_sequence(
+                state,
+                subsystem_count=1,
+                local_dimension=self.specs[0].local_dimension,
+                targets=(0,),
+                success_probabilities=(self.specs[0].success_probability,),
+                target_populations=(self.specs[0].target_populations,),
+                reset_count=request.reset_count,
             )
+        else:
+            for _ in range(request.reset_count):
+                state = apply_local_imperfect_reset(
+                    state, subsystem_count=1, target=0, spec=self.specs[0],
+                )
         true_one = _probability(float(state[1][1].real), "true_one_probability")
         p10, p01 = self.assignment_errors[0]
         observed_one = (1.0 - true_one) * p10 + true_one * (1.0 - p01)
@@ -351,12 +409,29 @@ class PerQubitPhenomenologicalResetModel:
         state = np.asarray(request.input_state, dtype=complex)
         if request.victim_measurement:
             state = nonselective_measurement(state, request.targets)
-        for _ in range(request.reset_count):
-            for target in request.targets:
-                spec = self.specs[target]
-                state = apply_local_replacement(
-                    state, target, spec.success_probability, spec.target_populations,
-                )
+        if self.kernel_backend == RUST_DENSE_PREVIEW_BACKEND and request.reset_count:
+            from core.rust_dense_kernel import rust_apply_local_reset_sequence
+
+            state = np.asarray(rust_apply_local_reset_sequence(
+                freeze_register(state),
+                subsystem_count=request.subsystem_count,
+                local_dimension=2,
+                targets=request.targets,
+                success_probabilities=tuple(
+                    self.specs[target].success_probability for target in request.targets
+                ),
+                target_populations=tuple(
+                    self.specs[target].target_populations for target in request.targets
+                ),
+                reset_count=request.reset_count,
+            ), dtype=complex)
+        else:
+            for _ in range(request.reset_count):
+                for target in request.targets:
+                    spec = self.specs[target]
+                    state = apply_local_replacement(
+                        state, target, spec.success_probability, spec.target_populations,
+                    )
         return RegisterResetResult(
             freeze_register(state), tuple(self.assignment_errors[target] for target in request.targets),
         )
@@ -367,6 +442,14 @@ def _identifier(value: str, name: str) -> str:
     if not converted:
         raise ValueError(f"{name} must not be empty")
     return converted
+
+
+def _validate_kernel_backend(value: str) -> None:
+    if type(value) is not str or value not in (
+        PYTHON_DENSE_BACKEND,
+        RUST_DENSE_PREVIEW_BACKEND,
+    ):
+        raise ValueError(f"unsupported reset kernel backend: {value}")
 
 
 def _probability(value: float, name: str) -> float:

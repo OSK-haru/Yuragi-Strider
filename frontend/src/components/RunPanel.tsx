@@ -56,16 +56,18 @@ const evolutionMethodDescriptions: Record<GateAwareEvolutionMethod, string> = {
 }
 
 const backendDescriptions: Record<SimulationBackend, string> = {
-  python_dense: '検証済みの標準 Python dense バックエンドです。',
+  python_dense: 'Python比較バックエンドです。',
   rust_dense_preview:
     '任意の Rust preview バックエンドです。RK4 は利用不可時に Python へフォールバックし、Explicit CPTP には Rust 拡張が必要です。',
+  rust_dense_v1: '対応済み経路をRustで実行します。未対応の経路ではPythonへ切り替えず失敗します。',
 }
 
 /* 実行基盤の実装名を伏せた、利用者向けの説明。 */
 const publicBackendDescriptions: Record<SimulationBackend, string> = {
-  python_dense: '検証済みの標準計算エンジンです。結果の正しさを最優先します。',
+  python_dense: '比較・検証用の計算エンジンです。',
   rust_dense_preview:
     '高速化を試験中の計算エンジンです。利用できない条件では自動的に標準エンジンへ切り替わります。',
+  rust_dense_v1: 'Rust限定の計算経路です。未対応の機能は実行前に拒否します。',
 }
 
 const compilationModeDescriptions: Record<GateCompilationMode, string> = {
@@ -88,12 +90,14 @@ const evolutionMethodLabels: Record<GateAwareEvolutionMethod, string> = {
 const backendLabels: Record<SimulationBackend, string> = {
   python_dense: 'Python dense',
   rust_dense_preview: 'Rust dense (preview)',
+  rust_dense_v1: 'Rust dense',
 }
 
 /* 実装名を出さない、利用者向けのエンジン呼称。 */
 const publicBackendLabels: Record<SimulationBackend, string> = {
-  python_dense: '標準エンジン',
+  python_dense: '比較エンジン',
   rust_dense_preview: '高速エンジン（試験）',
+  rust_dense_v1: 'Rust限定エンジン',
 }
 
 function formatElapsedMs(value: number | null) {
@@ -229,10 +233,13 @@ export function RunPanel({
                 aria-label="計算エンジン"
               >
                 <option value="python_dense">
-                  {internalInfoVisible ? 'Python dense (standard)' : '標準エンジン'}
+                  {internalInfoVisible ? 'Python dense (comparison)' : '比較エンジン'}
                 </option>
                 <option value="rust_dense_preview">
                   {internalInfoVisible ? 'Rust dense (preview)' : '高速エンジン（試験）'}
+                </option>
+                <option value="rust_dense_v1">
+                  {internalInfoVisible ? 'Rust dense (standard)' : '標準エンジン（Rust）'}
                 </option>
               </select>
             </label>

@@ -1,0 +1,130 @@
+{
+  "compilation_mode": "auto_decompose",
+  "circuit_config": {
+    "logical_qubits": 5,
+    "initial_states": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "columns": [
+      {
+        "step": 0,
+        "gates": [
+          {
+            "type": "RX",
+            "targets": [
+              0
+            ],
+            "params": {
+              "theta_rad": 0.33
+            }
+          }
+        ]
+      },
+      {
+        "step": 1,
+        "gates": [
+          {
+            "type": "RY",
+            "targets": [
+              1
+            ],
+            "params": {
+              "theta_rad": -0.8
+            }
+          }
+        ]
+      },
+      {
+        "step": 2,
+        "gates": [
+          {
+            "type": "CZ",
+            "targets": [
+              2
+            ],
+            "controls": [
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "step": 3,
+        "gates": [
+          {
+            "type": "SWAP",
+            "targets": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "step": 4,
+        "gates": [
+          {
+            "type": "CP",
+            "targets": [
+              2
+            ],
+            "controls": [
+              0
+            ],
+            "params": {
+              "theta_rad": 0.7
+            }
+          }
+        ]
+      },
+      {
+        "step": 5,
+        "gates": [
+          {
+            "type": "CCX",
+            "targets": [
+              2
+            ],
+            "controls": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "step": 6,
+        "gates": [
+          {
+            "type": "QFT",
+            "targets": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      },
+      {
+        "step": 7,
+        "gates": [
+          {
+            "type": "ORACLE",
+            "targets": [
+              0,
+              1,
+              2
+            ],
+            "params": {
+              "marked_index": 5
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

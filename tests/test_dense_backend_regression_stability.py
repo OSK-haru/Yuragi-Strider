@@ -201,6 +201,7 @@ def _config_empty(qubits: int, duration_us: float, time_steps: int) -> Simulatio
         duration_us=duration_us,
         time_steps=time_steps,
         fidelity_threshold=0.9,
+        simulation_backend="python_dense",
     )
 
 
@@ -215,6 +216,7 @@ def _config_h(qubits: int, duration_us: float, time_steps: int) -> SimulationCon
         duration_us=duration_us,
         time_steps=time_steps,
         fidelity_threshold=0.9,
+        simulation_backend="python_dense",
     )
 
 
@@ -242,6 +244,7 @@ def _config_bell(duration_us: float, time_steps: int) -> SimulationConfig:
         duration_us=duration_us,
         time_steps=time_steps,
         fidelity_threshold=0.9,
+        simulation_backend="python_dense",
     )
 
 
@@ -266,6 +269,7 @@ def _config_ghz_3q(duration_us: float, time_steps: int) -> SimulationConfig:
         duration_us=duration_us,
         time_steps=time_steps,
         fidelity_threshold=0.9,
+        simulation_backend="python_dense",
     )
 
 
@@ -287,6 +291,7 @@ def _config_3q_mixed(duration_us: float, time_steps: int) -> SimulationConfig:
         duration_us=duration_us,
         time_steps=time_steps,
         fidelity_threshold=0.9,
+        simulation_backend="python_dense",
     )
 
 
@@ -312,6 +317,7 @@ def _config_4q_two_cnot(duration_us: float, time_steps: int) -> SimulationConfig
         duration_us=duration_us,
         time_steps=time_steps,
         fidelity_threshold=0.9,
+        simulation_backend="python_dense",
     )
 
 

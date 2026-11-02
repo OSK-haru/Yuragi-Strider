@@ -1,0 +1,17 @@
+# Separate image for the stateless Rust API routes while the remaining API
+# surface continues to run in the existing FastAPI service.
+FROM rust:1.99.1-slim AS builder
+WORKDIR /build
+COPY rust_kernels/yuragi_strider_api/Cargo.toml rust_kernels/yuragi_strider_api/Cargo.lock ./
+COPY rust_kernels/yuragi_strider_api/src ./src
+RUN cargo build --release --locked --manifest-path /build/Cargo.toml
+
+FROM debian:trixie-slim AS runtime
+WORKDIR /app
+COPY --from=builder --chown=10001:10001 /build/target/release/yuragi-strider-api /usr/local/bin/yuragi-strider-api
+USER 10001:10001
+ENV RUST_API_PROFILE=production
+ENV BIND_HOST=0.0.0.0
+ENV PORT=8000
+EXPOSE 8000
+ENTRYPOINT ["/usr/local/bin/yuragi-strider-api"]

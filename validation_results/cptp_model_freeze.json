@@ -1,7 +1,7 @@
 {
   "validation": "CPTP-MODEL-FREEZE-C10",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-13T11:51:05.619528+00:00",
+  "generated_at_utc": "2026-10-28T05:39:30.488743+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -81,9 +81,9 @@
         "cptp_guaranteed_by_construction": true,
         "cleanup_applied": false,
         "all_maps_cptp": true,
-        "minimum_choi_eigenvalue": -3.342960774646612e-16,
-        "maximum_tp_frobenius_error": 2.51571437398213e-15,
-        "maximum_state_trace_error": 1.3325567187647329e-15,
+        "minimum_choi_eigenvalue": -5.289612681904023e-16,
+        "maximum_tp_frobenius_error": 2.3693743952993905e-15,
+        "maximum_state_trace_error": 1.776573666601473e-15,
         "minimum_state_eigenvalue": 0.0
       },
       "qutrit": {
@@ -94,9 +94,9 @@
         "cptp_guaranteed_by_construction": true,
         "cleanup_applied": false,
         "all_maps_cptp": true,
-        "minimum_choi_eigenvalue": 1.5218036817068044e-14,
+        "minimum_choi_eigenvalue": 1.521803618179344e-14,
         "maximum_tp_frobenius_error": 2.7126045330946104e-14,
-        "maximum_state_trace_error": 5.773163599022281e-15,
+        "maximum_state_trace_error": 6.994408099156442e-15,
         "minimum_state_eigenvalue": 0.0
       }
     },
@@ -110,7 +110,7 @@
         "cptp_guaranteed_by_construction": true,
         "cleanup_applied": false,
         "all_maps_cptp": true,
-        "minimum_choi_eigenvalue": -3.130620770501822e-16,
+        "minimum_choi_eigenvalue": -2.62667710860867e-16,
         "maximum_tp_frobenius_error": 3.233018248352212e-15,
         "maximum_state_trace_error": 3.3306690738754696e-15,
         "minimum_state_eigenvalue": 0.0
@@ -123,9 +123,9 @@
         "cptp_guaranteed_by_construction": true,
         "cleanup_applied": false,
         "all_maps_cptp": true,
-        "minimum_choi_eigenvalue": 1.521803682382996e-14,
+        "minimum_choi_eigenvalue": 1.5218035758277163e-14,
         "maximum_tp_frobenius_error": 3.124602339217192e-14,
-        "maximum_state_trace_error": 2.1538345907961954e-14,
+        "maximum_state_trace_error": 2.1538345907439028e-14,
         "minimum_state_eigenvalue": 0.0
       }
     }
@@ -143,73 +143,103 @@
     }
   },
   "source_revision": {
-    "git_commit": "4f18b1ecb061ab66206b9e36fd01d7d42f1fcc60",
-    "critical_source_tree_sha256": "fd8776d9443ff7373faaf5f0bfcd2748345cfc8ab900075e0c7340a3d03fb108",
+    "git_commit": "9f67db0342c53be408354c7c76dbcf70fe22c514",
+    "critical_source_tree_sha256": "7b8933cae67ae3070bf540d88b70592a61f8cfdc65399062fca80698cf26231b",
     "files": [
       {
         "file": "core/cptp.py",
         "exists": true,
-        "sha256": "b619b7f7a297b529fb313d5a3cfd28bccb925bf3cd6ae3c568829232316f4cb7"
+        "sha256": "245633fbc5c1f22603ca33653ef4593f33a510ab52f66197149fa55af5acdd4b"
       },
       {
         "file": "core/cptp_qutrit.py",
         "exists": true,
-        "sha256": "285d5107f20360f20668ac557e51461f73ebcea13f33cbe3db2d6d859dccad2c"
+        "sha256": "af37841056f91167fb7f5aa8c1375cf67e2eeba3ba8318f4cb4da41ed54d7679"
       },
       {
         "file": "core/cptp_liouvillian.py",
         "exists": true,
-        "sha256": "52469c2035cd940edc83dc180151f434670c0d20f40c18da0e85450c47764aff"
+        "sha256": "5b808800c933e635f93b3ddb3632aca31a2f6293fb32ccfe8237f9bf3b0354b6"
       },
       {
         "file": "core/cptp_piecewise.py",
         "exists": true,
-        "sha256": "96b52c2f69684d9d3f9bb0eb78d227e74b54178930e09fd1d82bf0372311b03a"
+        "sha256": "a5bd2a5c08c5bdcebc7a6eb9fd43ba51abcb6fe7a71a517a602e7c00d0f46253"
       },
       {
         "file": "core/cptp_rust.py",
         "exists": true,
-        "sha256": "ca13b1d47496fd8538490b42527bc6f2b3c3b63b3d4b3a76ef5e262d83809850"
+        "sha256": "fa150a2ce1f3ed9629d713b92eda15638829dfc810fb1f81ce55e6833270094a"
       },
       {
         "file": "core/cptp_evolution.py",
         "exists": true,
-        "sha256": "345fa65097967ba0a4da1e47450455ac0df39718f5343aeb9dd6d108c15ab541"
+        "sha256": "b60a74e403ee15c30afa0c658de537f9395c4bcc1bc7b4763c1d47fc1a4c45fd"
       },
       {
         "file": "core/pulse_open_system.py",
         "exists": true,
-        "sha256": "eb6969b1bb1b156f4a30215b4e36d85089ad8df5757bcebc27a0456ce3a19d0a"
+        "sha256": "99cc23508902f1693c9180ca0e0443535b45f0177909ad3400324e9bb312e32a"
       },
       {
         "file": "core/pulse_qutrit_open_system.py",
         "exists": true,
-        "sha256": "70189da6baf107a7068f484fa7134ac53aeaf320527fcbc152a47cba3b3626d3"
+        "sha256": "0c0517f2e09b4c8b565affbda18a1ccdfb191da229dcb4561f595a1355a461fa"
       },
       {
         "file": "core/rust_dense_kernel.py",
         "exists": true,
-        "sha256": "839f9968e504077b122dfeb9f7f3ac381b0a4d3a323980d88b49369bbb1159df"
+        "sha256": "b276c80c59fcd491fa0facd1e795127869d70eb8ba7a7ba4993a0142f7862c8e"
+      },
+      {
+        "file": "rust_kernels/yuragi_strider_core/Cargo.toml",
+        "exists": true,
+        "sha256": "f6a54c17a8c14efa08853d2ec487a08b2cb61f4dd33b6074652bb310bbe5e846"
+      },
+      {
+        "file": "rust_kernels/yuragi_strider_core/src/lib.rs",
+        "exists": true,
+        "sha256": "13d1ff237e7a4dcbb8d39565d0d0407e40db03a848999c748dc7a43c49744708"
+      },
+      {
+        "file": "rust_kernels/yuragi_strider_core/src/register.rs",
+        "exists": true,
+        "sha256": "98e85e8f4f5afcafabd0b2fef33000f1ad96379cc882f53e06c8d5c739819f56"
+      },
+      {
+        "file": "rust_kernels/yuragi_strider_core/src/reset.rs",
+        "exists": true,
+        "sha256": "a7559b54bc54c856bd6ec3c44f82bcbb290b03d34a150f3a919c69ddbee511cf"
+      },
+      {
+        "file": "rust_kernels/yuragi_strider_rust/Cargo.toml",
+        "exists": true,
+        "sha256": "4d906f2b04c9ea73344848e07231f415366788de0b9ae505bfe373f59e443ac2"
+      },
+      {
+        "file": "rust_kernels/yuragi_strider_rust/Cargo.lock",
+        "exists": true,
+        "sha256": "8f0866ac4c2ed9ba808219fe70050ec60e02aa6f24eae281bbea73a69ad5e001"
       },
       {
         "file": "rust_kernels/yuragi_strider_rust/src/lib.rs",
         "exists": true,
-        "sha256": "f49f4e3e0164687a2334eee1908dfd8c219563a789dbb025432e45faa03033ec"
+        "sha256": "63dadc87805d6a322cdfb92012ec4a25521b8c880fc28efe443dbb3fdccf3a88"
       },
       {
         "file": "api/pulse_models.py",
         "exists": true,
-        "sha256": "4785b2782af7c7f261d59ff5992d231865f72bf8948f7fe992f42d2d8c6881d0"
+        "sha256": "16edf0ec806b3dbf25fbaacefef45adf047d048439c2d0b308a0b45777f165df"
       },
       {
         "file": "api/pulse_service.py",
         "exists": true,
-        "sha256": "a3e5139db029aad088a92e2c869b80688e8ab358473ced842e4a1587907bbe7b"
+        "sha256": "72e089c7fa6a36da9190a82919d2c1a99367fde309a5fed54a89153568d93ca3"
       },
       {
         "file": "api/pulse_qutrit_service.py",
         "exists": true,
-        "sha256": "4aa950e307947ebea4170ac89cbbbc350c89fa3a3476e2bcb4b8b588c7baf8fe"
+        "sha256": "bd2ec7e49c156f996080e1e2723fddb2db795dc9fc3c0aa067762d8b19f337e7"
       },
       {
         "file": "frontend/src/types/pulse.ts",
@@ -219,77 +249,77 @@
       {
         "file": "frontend/src/utils/pulseLab.ts",
         "exists": true,
-        "sha256": "c114fd5a49cd5033c19e9e641b008c49256fa8a3dfc7a6de8614ab64b0bc253e"
+        "sha256": "f0dfff8b5bb71b48e03bb92a75818db272925b70536cbd6b0fdb1c5a48bd545a"
       },
       {
         "file": "frontend/src/components/PulseEnvironmentPanel.tsx",
         "exists": true,
-        "sha256": "c0b7ff2ca4633559ec52cfa66b51e0f6a05843637d6eb8165d1e435dfabfec75"
+        "sha256": "ae79228e26b73c315f59ce9dd6ac0f7f140bdd384468294710bceb850ca349e2"
       },
       {
         "file": "frontend/src/pages/PulseLabPage.tsx",
         "exists": true,
-        "sha256": "1c6d8f574bbcbe0efb217d8d2020c135d9921998c97cc327e3d32d46ab535e0c"
+        "sha256": "6acccc712dfc4a8d0158dacb95232d0f6d2721328889423137b0b9251acc9d34"
       },
       {
         "file": "tests/test_cptp_qubit_channels.py",
         "exists": true,
-        "sha256": "f792bd30389203abe99fa9c4121b0bc3ed0e6c432dbfed9a37d529e34c4e6d55"
+        "sha256": "f1539aacd3915c6d25b1a6936046e3a16f2dc6ddd3e0d5671dc82592ce726efe"
       },
       {
         "file": "tests/test_cptp_qutrit_channels.py",
         "exists": true,
-        "sha256": "be098451831aa74b4c72b5b008e5a1e09bfe5c5629a8e9b74c8b9af76251d0cb"
+        "sha256": "b52e34f36f192df7ff3a101241767676cbb75bef8d4688517a8c0b49dd71485c"
       },
       {
         "file": "tests/test_cptp_choi_audit.py",
         "exists": true,
-        "sha256": "22430d813cdb0f595448d5b55a99158782038f65cb3388c873dba63257e85f10"
+        "sha256": "d51245ad06cc202f1e86bcf18aa1b6b54789c3fbccc5a4c06f1927ab124eb6c6"
       },
       {
         "file": "tests/test_cptp_composition.py",
         "exists": true,
-        "sha256": "97b04ae00b4b3cf9b58e7b171e9631e9f0dc63364da9740f523d5d978089bddf"
+        "sha256": "23f0397839dc3a69e8466c8c19b1dfe3dfbefab6eb75109310df568f5fa7d1a7"
       },
       {
         "file": "tests/test_cptp_liouvillian.py",
         "exists": true,
-        "sha256": "4947fe77284e7ad83247cad550b92f7475db5fccda2f82700123553351d9fd36"
+        "sha256": "c762d60458dbc8c8b737b7c1845e3c56f1f114f6ea5b9260b800ffc583983789"
       },
       {
         "file": "tests/test_cptp_piecewise.py",
         "exists": true,
-        "sha256": "cb71e7fcd01d5e3de27d61a4ddad86a48e3dcdf24db3606628b2046336552a3c"
+        "sha256": "142eba6232d206186f36d8ed3f5fa9c08884b54ae59cf3f45c1053dfc63e6aa7"
       },
       {
         "file": "tests/test_cptp_rust_parity.py",
         "exists": true,
-        "sha256": "618c17a0bcc14f16bb81ea66446900e0833edd885ad8cc676594aba8227d53fa"
+        "sha256": "f9476fc7ca804065aedfd47fcb751da30e218ed1fb6881e95010fd153e02ca0b"
       },
       {
         "file": "tests/test_cptp_rk4_comparison.py",
         "exists": true,
-        "sha256": "ce1b139d4b3ea2a4ea6ea5030c4924ceb07155382cb6d30d76974a9901c58a2b"
+        "sha256": "556a8b20d9e436d8c5779beef6a6a968796cbae96d29c02d6542634ad11a4e55"
       },
       {
         "file": "tests/test_pulse_cptp_api_integration.py",
         "exists": true,
-        "sha256": "b2b113071534b1a913de7a4b10cb2c41e986045ad6f58f884e6a8fb282a38df9"
+        "sha256": "49172be0825c6429e4741e5342b49e30f5b0ad73c9846f2c837d8985ebe56ab1"
       },
       {
         "file": "tests/test_cptp_model_freeze.py",
         "exists": true,
-        "sha256": "dd3aa5affd4a315b4aa82a688d2192eeaecb5138e392aa53600f8c004e6150f3"
+        "sha256": "8896088907bc285a23926723fbc50fcf606bb416a45286178159faa02c34ba8e"
       },
       {
         "file": "validation_cptp/model_freeze.py",
         "exists": true,
-        "sha256": "4a7a80a0f3bf975891c8a3311b10d06105c104f243ab185520a007f6b281d22e"
+        "sha256": "4888cacc969e8f53b2bd075df39513480eddada064e37967eee01420dda07a56"
       },
       {
         "file": "scripts/freeze_cptp_model.py",
         "exists": true,
-        "sha256": "2e626f5b3007f7282d716215385786befb99d8027563503abf2c8f07236a9e6b"
+        "sha256": "b89700e424a82f6c7f0708b518e04632ba7c528ef891c0efa2556d3832eefbcf"
       }
     ]
   },
@@ -297,31 +327,31 @@
     {
       "file": "validation_results/cptp_rk4_comparison.json",
       "exists": true,
-      "sha256": "207b76adca1e2784a58f7e05d39b420144aae1aa0f948b856301a67ed751c163"
+      "sha256": "16db4139d671b7f5dba2aa844d09eaa077ec65cd0813395dfae6badb8df8f22e"
     },
     {
       "file": "docs_for_develop/validation/cptp-rk4-comparison.md",
       "exists": true,
-      "sha256": "c2929047441f4f1e1cffcc29a38725900d7385b17c511d8d1c0876197c332d5e"
+      "sha256": "ad383bd62665f31ea1ad8a08179d6687a7f057b02b97c89a9d772636bcf2d142"
     },
     {
       "file": "docs_for_develop/development/physical-model-finalization/phase2-explicit-cptp-path.md",
       "exists": true,
-      "sha256": "0c1454214dae821a1f374a817a1c801a65c11856931a1449add343f0f66c0653"
+      "sha256": "f85e3a2767079ef2c675af2d04362c65c544e8a0479afcc941f1bd8e56d00e6f"
     },
     {
       "file": "docs_for_develop/physics/model_identity.md",
       "exists": true,
-      "sha256": "be2fc12d2f013ae64a3b8d5f86c3a3a65dc41fbce4740a9f37c3c50edfa954d0"
+      "sha256": "afed4f16ab387c8f4983deebe453dfc7c991db350744ce7d919f4bc0023ea7b3"
     },
     {
       "file": "docs_for_develop/validation/cptp-model-freeze.md",
       "exists": true,
-      "sha256": "34456a79188bda32e86e577358d20783aeeb188b5c3068c9d7e60ce0f9147b78"
+      "sha256": "1f686efa68b9998db48f2b018dfcd9dc72bec40aa2d5d93242d69bbdc640366f"
     }
   ],
   "environment": {
-    "python": "3.14.4",
+    "python": "3.12.14",
     "packages": {
       "numpy": "2.4.4",
       "fastapi": "0.138.1",

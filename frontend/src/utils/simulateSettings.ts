@@ -91,7 +91,7 @@ export const initialSimulateSettings: SimulateSettings = {
   parameters: initialSimulationParameters,
   evolutionMethod: 'fixed_step_rk4',
   compilationMode: 'logical_direct',
-  simulationBackend: 'python_dense',
+  simulationBackend: 'rust_dense_preview',
   snapshotOptions: initialSnapshotOptions,
   readoutError: initialReadoutError,
   perQubitCalibration: initialPerQubitCalibration,

@@ -54,7 +54,8 @@ def _assumption(path, *, basis=AssumptionBasis.SIMULATOR_CHOICE, rationale="Expl
 
 
 def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
-                         idle_input_mode=IDLE_INPUT_CALIBRATION):
+                         idle_input_mode=IDLE_INPUT_CALIBRATION,
+                         register_backend="python_dense", record_backend_assumption=True):
     standard = standard_calibration_initial_values()["values"]
     val = lambda name: standard[name]["value"]
     model = PhenomenologicalResetModel(
@@ -75,6 +76,7 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
         resource_binding=None,
         program_measurement_duration_us=val("measurement_duration_us"),
         max_local_qubits=2, max_execution_work=1_000_000,
+        register_backend=register_backend,
     )
     topology_limits = TopologyLimits(256, 2048, 4096)
     topology = QpuTopology("qpu-1", "topology-test-v1", tuple(range(150, 250)), topology_limits)
@@ -200,6 +202,8 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
         _assumption("qpu_service.circuit_execution.gate_durations_us.H", basis=AssumptionBasis.MEASURED),
         _assumption("experiment.world_clock.rate"),
     ]
+    if register_backend != "python_dense" and record_backend_assumption:
+        assumptions.append(_assumption("qpu_service.runtime_execution.register_backend"))
     if idle_input_mode == IDLE_INPUT_CALIBRATION:
         assumptions.extend([
             _assumption("qpu_service.idle_dynamics.qubits.150.t1_us", basis=AssumptionBasis.MEASURED),
@@ -268,6 +272,32 @@ class ProductFactoryTests(unittest.TestCase):
 
     def setUp(self):
         self.factory = ProductEnvironmentFactory(HOST_LIMITS)
+
+    def test_explicit_rust_register_profile_is_frozen_and_runs_a_product_job(self):
+        environment = prepared_environment(register_backend="rust_register_v1")
+        owner = WebOwnerContext()
+        product = self.factory.assemble(environment, owner)
+        try:
+            runtime = product.controller._world._executor.runtime
+            self.assertEqual(runtime.config.register_backend, "rust_register_v1")
+            program = CircuitProgram.from_editor_json(
+                '{"logical_qubits":2,"classical_bits":2,"initial_states":[0,0],"columns":['
+                '{"step":0,"gates":[{"type":"H","targets":[0]}]},'
+                '{"step":1,"gates":[{"type":"MEASURE","targets":[0],"classical_targets":[0]}]}]}'
+            )
+            receipt = product.controller.submit(product.attacker_credential,
+                ProgramSubmitRequest(program, "qpu-1", 2, "rust-batch"), owner_context=owner)
+            product.controller.wait(product.attacker_credential, 10.0, owner_context=owner)
+            reply = product.controller.reply(product.attacker_credential, receipt, owner_context=owner)
+            status = product.controller.status(product.attacker_credential, reply.value.job_id, owner_context=owner)
+            product.controller.wait(product.attacker_credential, 1.0, owner_context=owner)
+            self.assertEqual(product.controller.reply(product.attacker_credential, status,
+                               owner_context=owner).value.status.value, "succeeded")
+        finally:
+            product.close()
+        with self.assertRaisesRegex(ValueError, "basis records"):
+            self.factory.assemble(prepared_environment(register_backend="rust_register_v1",
+                                  record_backend_assumption=False), WebOwnerContext())
 
     def test_both_modes_assemble_submit_wait_reply_and_discard(self):
         circuit = CircuitProgram.from_editor_json(

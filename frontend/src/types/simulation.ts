@@ -5,7 +5,7 @@ export type OutputProbabilities = Record<string, number>
 export type SimulationLoadStatus = 'fixture' | 'loading' | 'api' | 'error'
 export type GateAwareEvolutionMethod = 'fixed_step_rk4' | 'explicit_cptp'
 export type GateCompilationMode = 'logical_direct' | 'auto_decompose'
-export type SimulationBackend = 'python_dense' | 'rust_dense_preview'
+export type SimulationBackend = 'python_dense' | 'rust_dense_preview' | 'rust_dense_v1'
 
 export type SimulationSummaryData = {
   final_fidelity: number | null

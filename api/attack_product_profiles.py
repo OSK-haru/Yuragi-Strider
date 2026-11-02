@@ -361,6 +361,7 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
         drive_crosstalk_strength=DEFAULT_CROSSTALK_STRENGTH,
         max_local_qubits=len(region),
         max_execution_work=2_147_483_648,
+        register_backend="rust_register_v1",
     )
     qpu = {
         "execution_regime": "nisq_physical",
@@ -700,6 +701,8 @@ def _assumptions(snapshot: DeviceSnapshot, region: tuple[int, ...], mode: str,
                  gate_durations: Mapping[str, float]) -> list[AssumptionRecord]:
     evidence = snapshot.source_path
     assumptions = [
+        _record("qpu_service.runtime_execution.register_backend", AssumptionBasis.SIMULATOR_CHOICE,
+                "Newly assembled shared-QPU profiles use the Rust register execution core; older frozen profiles that omit this field retain their recorded Python behavior."),
         _record("qpu_service.idle_dynamics.input_mode", AssumptionBasis.SIMULATOR_CHOICE,
                 f"Mutually exclusive idle input mode selected for this profile: {mode}."),
         _record("qpu_service.device_snapshot", AssumptionBasis.MEASURED,

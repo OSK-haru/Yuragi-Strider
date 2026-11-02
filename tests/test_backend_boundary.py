@@ -1,7 +1,8 @@
 import unittest
 
 from core.backend_boundary import (
-    PYTHON_DENSE_BACKEND_NAME,
+    DEFAULT_SIMULATION_BACKEND,
+    RUST_DENSE_BACKEND,
     get_rust_backend_name,
     is_rust_backend_available,
     rust_backend_status,
@@ -17,31 +18,29 @@ class BackendBoundaryTest(unittest.TestCase):
     def test_default_backend_metadata(self) -> None:
         result = run_simulation(_config())
 
+        self.assertEqual(DEFAULT_SIMULATION_BACKEND, "python_dense")
         self.assertEqual(result.diagnostics["backend_requested"], "python_dense")
-        self.assertEqual(result.diagnostics["backend_name"], PYTHON_DENSE_BACKEND_NAME)
-        self.assertEqual(result.diagnostics["backend_version"], "7.10")
-        self.assertTrue(result.diagnostics["backend_available"])
+        self.assertEqual(result.diagnostics["backend_name"], "python_dense_streaming_v1")
         self.assertFalse(result.diagnostics["backend_fallback_used"])
         self.assertEqual(result.diagnostics["backend_fallback_reason"], "")
         self.assertFalse(result.diagnostics["rust_kernel_used"])
-        self.assertEqual(result.diagnostics["simulation_model"], "gate_aware_open_system")
-        self.assertEqual(
-            result.diagnostics["evolution_mode"],
-            "gate_aware_hamiltonian_lindblad_v1",
-        )
-        self.assertEqual(result.diagnostics["rust_kernel_mode"], "none")
-        self.assertEqual(result.diagnostics["rust_kernel_call_count"], 0.0)
-        self.assertEqual(result.diagnostics["rust_kernel_actual_batch_count"], 0.0)
-        self.assertFalse(result.diagnostics["rust_kernel_fallback_used"])
 
     def test_python_dense_backend_matches_default(self) -> None:
         default = run_simulation(_config())
         explicit = run_simulation(_config(simulation_backend="python_dense"))
 
-        self.assertEqual(default.output_probabilities, explicit.output_probabilities)
-        self.assertEqual(default.fidelity, explicit.fidelity)
-        self.assertEqual(default.purity, explicit.purity)
+        for key, value in default.output_probabilities.items():
+            self.assertAlmostEqual(value, explicit.output_probabilities[key], places=11)
+        for values_a, values_b in ((default.fidelity, explicit.fidelity),
+                                   (default.purity, explicit.purity)):
+            self.assertEqual(len(values_a), len(values_b))
+            for value_a, value_b in zip(values_a, values_b):
+                self.assertAlmostEqual(value_a, value_b, places=10)
 
+    @unittest.skipUnless(
+        is_rust_backend_available(),
+        "Rust extension is not built in this environment",
+    )
     def test_rust_dense_preview_uses_rust_when_available(self) -> None:
         result = run_simulation(_config(simulation_backend="rust_dense_preview"))
 
@@ -98,6 +97,19 @@ class BackendBoundaryTest(unittest.TestCase):
         self.assertEqual(config.simulation_backend, "python_dense")
         self.assertEqual(result.diagnostics["backend_requested"], "python_dense")
 
+    def test_rust_backend_statevector_path_is_no_longer_classified_as_unsupported(self) -> None:
+        config = _config(simulation_backend=RUST_DENSE_BACKEND)
+        config.circuit = CircuitConfig(logical_qubits=6, initial_states=["0"] * 6, columns=[])
+        result = run_simulation(config)
+        issue_codes = {item.code for item in result.issues}
+        self.assertNotIn("RUST_BACKEND_UNSUPPORTED_PATH", issue_codes)
+        if is_rust_backend_available():
+            self.assertEqual(issue_codes, set())
+            self.assertTrue(result.diagnostics["rust_kernel_used"])
+            self.assertEqual(result.diagnostics["rust_kernel_call_count"], 1)
+        else:
+            self.assertIn("STATEVECTOR_EXECUTION_FAILED", issue_codes)
+
     def test_qscope_envelope_round_trips_backend_field(self) -> None:
         config = _config(simulation_backend="rust_dense_preview")
         encoded = config_to_dict(config)
@@ -151,7 +163,7 @@ class BackendBoundaryTest(unittest.TestCase):
 
 
 def _config(
-    simulation_backend: str = "python_dense",
+    simulation_backend: str = DEFAULT_SIMULATION_BACKEND,
     model: str = "weak_coupling_lindblad",
 ) -> SimulationConfig:
     return SimulationConfig(

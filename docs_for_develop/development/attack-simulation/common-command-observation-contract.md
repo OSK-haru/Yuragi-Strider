@@ -150,8 +150,8 @@ Reset課題専用v0の採用値は、成功確率`0.90`、標準`32 shots/case`�
 | 主体非依存operation | 部分実装 | 限定回路compilerが`CircuitExecutionOperation`へ変換し、両主体が同じ送信要求を使う。Reset既存内部operationの置換は未完了 |
 | 共通Application API | 部分実装 | in-process jobサービスにdevice照会・回路送信・job操作を接続。Reset既存runnerもjobサービスを共有するが、HTTP／UI境界は未実装 |
 | 疑似ターミナル | 部分実装 | actor別のbounded回路namespaceから`device`／`program submit`／`job status/result/cancel`を実行。host shell・任意コード・HTTP／画面は未実装 |
-| 共通local analysis | 未実装 | 校正runnerとgraderはあるが、利用者dataだけを読む一般toolではない |
-| 統計量provenance | 未実装 | 文書上の契約のみ |
+| 共通local analysis | 部分実装 | `security_binary_contrast_v1`は二値集計から成功率差、標準誤差、z値、等事前確率下の相互情報量とBayes精度を算出する。Reset公開訓練結果のadapterと、同じRust統計計算部を使うCrosstalkの内部評価を追加した。Crosstalkの非公開の測定結果は内部で扱い、利用者へは判定だけを返す。標準誤差はshot間の独立を仮定する。provenanceとphaseは認証境界ではなく、呼び出し側が認可済みの結果を渡す必要がある。既存Reset runner・端末・UIと、公開Crosstalk分析への接続は未実装 |
+| 統計量provenance | 部分実装 | request/reportがmanifest、機構版、model configuration、dataset、measurement ID、measurement conditions、assumption IDs、sourceを保持する。完全なseed・実験記録、共通保存、actor-derived結果投影は未実装 |
 
 役割別operationはReset縦切りを成立させる内部足場であり、公開APIとして固定しない。現runtimeは、通常の`submit`経由で被害者準備operationを拒否し、内部専用経路に限って投入する。端末の中立回路要求は仮想資格情報からprincipalとtenantを導出し、利用者bodyから役割・配置・seedを受け取らない。内部専用経路を利用者へ公開してはならない。
 Resetのheadless受入は、公開training由来の推定器、hidden判定、負の対照、bounded instance preflightまで完了した。次は役割別内部operationを共通program requestへ置換する際に、観測予算と被害者のshotごとの再実行を保持し、認証済み外部Application APIへ接続する。新しいsampling経路は各shotを初期化するため、既存漏洩課題の測定経路と無条件に置換しない。
@@ -163,7 +163,7 @@ Resetのheadless受入は、公開training由来の推定器、hidden判定、�
 1. **完了:** Reset headless pipelineの受入を閉じる。
 2. **部分実装:** in-process job操作の認可・結果投影、主体非依存の限定回路要求を接続。Reset runner移行、外部認証、HTTP APIを実装する。
 3. **部分実装:** 同じApplication API上の疑似ターミナルに共通コマンドを接続。被害者runnerのin-process接続は実装済み。Web workspaceへの接続が残る。任意コード実行はSandbox設計後に追加する（所有者指示）。
-4. 返却dataだけを読むlocal analysisと、統計量provenanceを実装する。
+4. **部分実装:** 二値集計の共通local analysis、provenance record、Reset公開訓練結果のadapter、Crosstalkの内部評価との計算部共有を追加。既存Reset runnerやclient、UI、公開Crosstalk分析への接続、および実験記録のseed・保存は未完了。
 5. 同じAPIを使うUIを実装する。
 
 共通操作境界は、少なくとも次を満たすまで完成扱いにしない。

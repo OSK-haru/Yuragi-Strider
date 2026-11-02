@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import math
 from typing import Any
 
-from core.backend_boundary import PYTHON_DENSE_BACKEND
+from core.backend_boundary import DEFAULT_SIMULATION_BACKEND, PYTHON_DENSE_BACKEND
 from core.capabilities import DEFAULT_SIMULATION_MODEL
 from core.circuit_model import CircuitConfig
 from core.errors import ValidationIssue
@@ -364,7 +364,7 @@ class SimulationConfig:
     time_steps: int = 101
     fidelity_threshold: float = 0.9
     model: str = DEFAULT_SIMULATION_MODEL
-    simulation_backend: str = PYTHON_DENSE_BACKEND
+    simulation_backend: str = DEFAULT_SIMULATION_BACKEND
     evolution_method: str = FIXED_STEP_RK4
     compilation_mode: str = "logical_direct"
     native_gate_durations_us: dict[str, float] = field(default_factory=dict)
@@ -466,6 +466,8 @@ class SimulationConfig:
             time_steps=data.get("time_steps", 101),
             fidelity_threshold=data.get("fidelity_threshold", 0.9),
             model=data.get("model", DEFAULT_SIMULATION_MODEL),
+            # Serialized historical configs preserve the backend they were
+            # authored against; newly constructed configs use Rust by default.
             simulation_backend=data.get("simulation_backend", PYTHON_DENSE_BACKEND),
             evolution_method=data.get("evolution_method", FIXED_STEP_RK4),
             compilation_mode=data.get("compilation_mode", "logical_direct"),

@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from threading import Lock
 import json
-import math
+import importlib
 from typing import Any
 
 from api.attack_challenge_common import thaw, unique_by_assumption_id
@@ -181,12 +181,29 @@ class DisruptionResult:
 def disrupted(attacked: int, attacked_shots: int, baseline: int, baseline_shots: int,
               *, significance_z: float, minimum_drop: float) -> bool:
     """One-sided comparison of two success fractions: lower by enough, and by more than noise."""
-    p_attack, p_base = attacked / attacked_shots, baseline / baseline_shots
-    variance = p_attack * (1 - p_attack) / attacked_shots + p_base * (1 - p_base) / baseline_shots
-    drop = p_base - p_attack
-    if variance == 0.0:
-        return drop >= minimum_drop
-    return drop >= minimum_drop and drop / math.sqrt(variance) >= significance_z
+    return _evaluate_disruption(
+        ({"success": attacked, "other": attacked_shots - attacked},), "success",
+        baseline, baseline_shots, significance_z, minimum_drop,
+    )
+
+
+def _evaluate_disruption(runs: tuple[Mapping[str, int], ...], expected: str,
+                         baseline: int, baseline_shots: int,
+                         significance_z: float, minimum_drop: float) -> bool:
+    """Send one complete private evaluation to Rust; publish only its decision."""
+    module = _rust_crosstalk_module()
+    operation = getattr(module, "evaluate_crosstalk_disruption_v1", None)
+    if not callable(operation):
+        raise RuntimeError("Rust extension does not implement crosstalk_disruption_v1")
+    return operation("crosstalk_disruption_v1", runs, expected, baseline, baseline_shots,
+                     significance_z, minimum_drop)
+
+
+def _rust_crosstalk_module():
+    try:
+        return importlib.import_module("yuragi_strider_rust")
+    except ImportError as error:
+        raise RuntimeError("Rust crosstalk evaluator is unavailable") from error
 
 
 class CrosstalkGroverEvaluator:
@@ -206,41 +223,37 @@ class CrosstalkGroverEvaluator:
         self._manifest, self._limits, self._observe = manifest, limits, observe
         self._plan = parse_workload_plan(workload)
         self._expected = config["expected_bitstring"]
-        self._max_submissions = config["max_submissions"]
         self._baseline_shots = config["baseline_shots"]
-        self._z, self._minimum_drop = config["significance_z"], config["minimum_drop"]
-        self._runs = self._plan.steps[0].max_visits
+        runtime_type = getattr(_rust_crosstalk_module(), "CrosstalkEvaluationRuntime", None)
+        if not callable(runtime_type):
+            raise RuntimeError("Rust extension does not implement the crosstalk runtime")
+        self._evaluation_runtime = runtime_type(
+            "crosstalk_disruption_v1", self._expected, self._plan.steps[0].max_visits,
+            config["max_submissions"], config["significance_z"], config["minimum_drop"],
+        )
         self._measure_baseline = measure_baseline or self._run_baseline
-        self._baseline: tuple[int, int] | None = None
-        self._attempts = 0
         self._lock = Lock()
 
     @property
     def attempts_remaining(self) -> int:
         with self._lock:
-            return self._max_submissions - self._attempts
+            return self._evaluation_runtime.attempts_remaining()
 
     def submit(self, document: Mapping[str, object]) -> DisruptionResult:
         from api.attack_challenge import EvaluationUnavailable, SubmissionRejected
         if not isinstance(document, Mapping) or document:
             raise SubmissionRejected("a submission is an empty object")
         with self._lock:
-            if self._attempts >= self._max_submissions:
+            if self._evaluation_runtime.attempts_remaining() == 0:
                 raise SubmissionRejected("no submissions remain")
             try:
                 runs = self._observe()
-                if len(runs) < self._runs:
-                    return DisruptionResult(self._attempts, self._max_submissions - self._attempts, False, False)
-                if self._baseline is None:
-                    self._baseline = self._measure_baseline()
-                attacked = sum(int(run.get(self._expected, 0)) for run in runs)
-                shots = sum(int(sum(run.values())) for run in runs)
-                passed = disrupted(attacked, shots, *self._baseline, significance_z=self._z,
-                                   minimum_drop=self._minimum_drop)
+                baseline = (self._measure_baseline()
+                            if self._evaluation_runtime.requires_baseline(len(runs)) else None)
+                attempt, remaining, ready, passed = self._evaluation_runtime.submit(runs, baseline)
             except Exception as error:
                 raise EvaluationUnavailable("evaluation is unavailable") from error
-            self._attempts += 1
-            return DisruptionResult(self._attempts, self._max_submissions - self._attempts, passed)
+            return DisruptionResult(attempt, remaining, passed, ready)
 
     def _run_baseline(self) -> tuple[int, int]:
         """Successes and shots of the victim's program alone, in a fresh environment from the same manifest."""

@@ -7,12 +7,19 @@ from typing import Any
 
 
 PYTHON_DENSE_BACKEND = "python_dense"
+RUST_DENSE_BACKEND = "rust_dense_v1"
 RUST_DENSE_PREVIEW_BACKEND = "rust_dense_preview"
+RUST_RESET_SEQUENCE_SCHEMA_VERSION = "local_reset_sequence_v1"
+RUST_REGISTER_BATCH_SCHEMA_VERSION = "register_batch_v1"
+RUST_IDEAL_STATEVECTOR_SCHEMA_VERSION = "ideal_statevector_v1"
+RUST_READOUT_ASSIGNMENT_SCHEMA_VERSION = "binary_readout_assignment_v1"
 SUPPORTED_SIMULATION_BACKENDS = {
     PYTHON_DENSE_BACKEND,
+    RUST_DENSE_BACKEND,
     RUST_DENSE_PREVIEW_BACKEND,
 }
 PYTHON_DENSE_BACKEND_NAME = "python_dense_streaming_v1"
+DEFAULT_SIMULATION_BACKEND = PYTHON_DENSE_BACKEND
 BACKEND_VERSION = "7.10"
 RUST_PREVIEW_FALLBACK_REASON = (
     "rust_dense_preview did not execute; Python dense fallback or an earlier "
@@ -60,6 +67,10 @@ def is_rust_backend_available() -> bool:
     return bool(rust_backend_status()["available"])
 
 
+def requests_rust_backend(backend: str) -> bool:
+    return backend in (RUST_DENSE_BACKEND, RUST_DENSE_PREVIEW_BACKEND)
+
+
 def get_rust_backend_name() -> str:
     """Return the Rust module backend name, or an empty string when unavailable."""
 
@@ -85,9 +96,13 @@ def backend_metadata(
             "backend_fallback_reason": "",
         }
 
-    if requested_backend == RUST_DENSE_PREVIEW_BACKEND:
+    if requests_rust_backend(requested_backend):
         rust_status = rust_backend_status()
-        backend_fallback_used = bool(rust_kernel_fallback_used or not rust_kernel_used)
+        strict = requested_backend == RUST_DENSE_BACKEND
+        backend_fallback_used = bool(
+            requested_backend == RUST_DENSE_PREVIEW_BACKEND
+            and (rust_kernel_fallback_used or not rust_kernel_used)
+        )
         fallback_reason = rust_kernel_fallback_reason
         if backend_fallback_used and not fallback_reason:
             fallback_reason = (
@@ -96,7 +111,7 @@ def backend_metadata(
                 else RUST_PREVIEW_FALLBACK_REASON
             )
         return {
-            "backend_requested": RUST_DENSE_PREVIEW_BACKEND,
+            "backend_requested": requested_backend,
             "backend_name": (
                 str(rust_status["name"]) if rust_kernel_used and not backend_fallback_used
                 else PYTHON_DENSE_BACKEND_NAME
@@ -108,6 +123,7 @@ def backend_metadata(
             "rust_module_available": bool(rust_status["available"]),
             "rust_module_name": str(rust_status["name"]),
             "rust_module_error": str(rust_status["reason"]),
+            "backend_requires_rust": strict,
         }
 
     return {

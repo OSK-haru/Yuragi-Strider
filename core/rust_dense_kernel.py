@@ -6,6 +6,10 @@ import importlib
 import math
 from collections.abc import Sequence
 
+from core.backend_boundary import (
+    RUST_REGISTER_BATCH_SCHEMA_VERSION,
+    RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+)
 from core.gates import Matrix
 
 
@@ -22,11 +26,22 @@ def is_rust_kernel_available() -> bool:
 def flatten_complex_matrix(matrix: Sequence[Sequence[complex]]) -> list[float]:
     """Return row-major interleaved complex values for a square matrix."""
 
-    dimension = _validate_square_matrix(matrix, "matrix")
+    if not isinstance(matrix, Sequence) or isinstance(matrix, (str, bytes)):
+        raise ValueError("matrix must be a square matrix")
+    dimension = len(matrix)
+    if dimension <= 0:
+        raise ValueError("matrix must be non-empty")
     flat: list[float] = []
-    for row in matrix:
+    for row_index, row in enumerate(matrix):
+        if not isinstance(row, Sequence) or isinstance(row, (str, bytes)):
+            raise ValueError(f"matrix[{row_index}] must be a row sequence")
+        if len(row) != dimension:
+            raise ValueError("matrix must be square and non-ragged")
         for value in row:
-            complex_value = complex(value)
+            try:
+                complex_value = complex(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("matrix entries must be complex-compatible") from exc
             flat.extend([float(complex_value.real), float(complex_value.imag)])
     if len(flat) != 2 * dimension * dimension:
         raise ValueError("matrix flattening produced an unexpected length")
@@ -372,6 +387,179 @@ def rust_lindblad_rhs(
         dimension,
     )
     return unflatten_complex_matrix(result, dimension)
+
+
+def rust_apply_local_reset_sequence(
+    state: Sequence[Sequence[complex]],
+    *,
+    subsystem_count: int,
+    local_dimension: int,
+    targets: Sequence[int],
+    success_probabilities: Sequence[float],
+    target_populations: Sequence[Sequence[float]],
+    reset_count: int,
+) -> Matrix:
+    """Apply a declared local replacement sequence in one Rust call.
+
+    The operation implements ``E(rho)=(1-s)rho+s*tau*Tr_q(rho)`` for each
+    target, preserving the existing most-significant-subsystem convention.
+    """
+
+    if type(subsystem_count) is not int or subsystem_count < 1:
+        raise ValueError("subsystem_count must be positive")
+    if type(local_dimension) is not int or local_dimension not in (2, 3):
+        raise ValueError("local_dimension must be 2 or 3")
+    if type(reset_count) is not int or reset_count < 0:
+        raise ValueError("reset_count must be a non-negative integer")
+    dimension = local_dimension ** subsystem_count
+    flat_state = flatten_complex_matrix(state)
+    if len(flat_state) != 2 * dimension * dimension:
+        raise ValueError("state dimension does not match reset register")
+    checked_targets = tuple(targets)
+    if any(type(target) is not int for target in checked_targets):
+        raise ValueError("reset targets must be integers")
+    if any(type(value) not in (int, float) for value in success_probabilities):
+        raise ValueError("success probabilities must be numeric")
+    if any(type(value) not in (int, float) for row in target_populations for value in row):
+        raise ValueError("target populations must be numeric")
+    checked_successes = tuple(float(value) for value in success_probabilities)
+    checked_populations = tuple(tuple(float(value) for value in row) for row in target_populations)
+    if (not checked_targets or len(set(checked_targets)) != len(checked_targets)
+            or any(target < 0 or target >= subsystem_count for target in checked_targets)):
+        raise ValueError("reset targets must be unique and inside the register")
+    if len(checked_successes) != len(checked_targets):
+        raise ValueError("one success probability is required per reset target")
+    if len(checked_populations) != len(checked_targets):
+        raise ValueError("one target population vector is required per reset target")
+    for success, populations in zip(checked_successes, checked_populations, strict=True):
+        if not math.isfinite(success) or not 0.0 <= success <= 1.0:
+            raise ValueError("success probabilities must be finite and between zero and one")
+        if (len(populations) != local_dimension
+                or any(not math.isfinite(value) or value < 0.0 for value in populations)
+                or not math.isclose(sum(populations), 1.0, rel_tol=0.0, abs_tol=1e-12)):
+            raise ValueError("target populations must be a normalized local state")
+
+    flat_populations = [value for row in checked_populations for value in row]
+    rust_module = _load_rust_module()
+    if local_dimension == 2:
+        execute_batch = getattr(rust_module, "execute_register_batch_flat", None)
+        if callable(execute_batch):
+            reset_data = [
+                value
+                for success, populations in zip(
+                    checked_successes, checked_populations, strict=True
+                )
+                for value in (success, *populations)
+            ]
+            operations = [
+                ("reset", list(checked_targets), reset_data, 0.0)
+                for _ in range(reset_count)
+            ]
+            measurements, result = execute_batch(
+                RUST_REGISTER_BATCH_SCHEMA_VERSION,
+                flat_state,
+                subsystem_count,
+                operations,
+            )
+            if measurements:
+                raise RuntimeError("reset-only register batch returned measurements")
+        else:
+            # Keep compatibility with extensions built before the unified batch API.
+            result = rust_module.apply_local_reset_sequence_flat(
+                RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+                flat_state,
+                subsystem_count,
+                local_dimension,
+                list(checked_targets),
+                list(checked_successes),
+                flat_populations,
+                reset_count,
+            )
+    else:
+        result = rust_module.apply_local_reset_sequence_flat(
+            RUST_RESET_SEQUENCE_SCHEMA_VERSION,
+            flat_state,
+            subsystem_count,
+            local_dimension,
+            list(checked_targets),
+            list(checked_successes),
+            flat_populations,
+            reset_count,
+        )
+    return unflatten_complex_matrix(result, dimension)
+
+
+def rust_binary_contrast_statistics(
+    schema_version: str,
+    observation_source: str,
+    trials_0: int,
+    outcome_one_0: int,
+    trials_1: int,
+    outcome_one_1: int,
+) -> tuple[float, float, float, float, float | None, float, float]:
+    """Compute generic binary contrast metrics from approved aggregate counts."""
+
+    if type(schema_version) is not str or schema_version != "security_binary_contrast_v1":
+        raise ValueError("unsupported binary contrast schema version")
+    if type(observation_source) is not str or observation_source not in (
+        "actor_visible", "service_published",
+    ):
+        raise ValueError("binary analysis requires an approved observation source")
+    for name, value in (("trials_0", trials_0), ("trials_1", trials_1)):
+        if type(value) is not int or not 1 <= value <= 2**53:
+            raise ValueError(f"{name} must be a positive exactly representable integer")
+    for name, value, trials in (("outcome_one_0", outcome_one_0, trials_0),
+                                ("outcome_one_1", outcome_one_1, trials_1)):
+        if type(value) is not int or not 0 <= value <= trials:
+            raise ValueError(f"{name} must be between zero and its trial count")
+    rust_module = _load_rust_module()
+    operation = getattr(rust_module, "binary_contrast_statistics_v1", None)
+    if not callable(operation):
+        raise RuntimeError("Rust extension does not implement security_binary_contrast_v1")
+    result = operation(
+        schema_version, observation_source, trials_0, outcome_one_0,
+        trials_1, outcome_one_1,
+    )
+    return tuple(result)
+
+
+def rust_reset_training_analysis(
+    observations: Sequence[tuple[int, int, int]],
+) -> tuple[int, int, int, int, int, int, float, bool, float, float, float, float, float | None, float, float]:
+    """Pool labelled public results and calculate Reset metrics in one Rust call."""
+
+    normalized: list[tuple[int, int, int]] = []
+    for label, shots, ones in observations:
+        if type(label) is not int or label not in (0, 1):
+            raise ValueError("reset training labels must be zero or one")
+        if type(shots) is not int or not 1 <= shots <= 2**53:
+            raise ValueError("reset training shots must be positive exact integers")
+        if type(ones) is not int or not 0 <= ones <= shots:
+            raise ValueError("reset training outcomes must be between zero and shots")
+        normalized.append((label, shots, ones))
+    if not normalized:
+        raise ValueError("reset training observations must not be empty")
+    rust_module = _load_rust_module()
+    operation = getattr(rust_module, "reset_training_analysis_v1", None)
+    if not callable(operation):
+        raise RuntimeError("Rust extension does not implement reset_training_analysis_v1")
+    result = operation("security_binary_contrast_v1", normalized)
+    if not isinstance(result, dict):
+        raise RuntimeError("Rust reset analysis returned an invalid result shape")
+    counts = result.get("observation_count_by_label")
+    shots = result.get("shots_by_label")
+    ones = result.get("outcome_one_by_label")
+    probabilities = result.get("probability_one_by_class")
+    if any(not isinstance(values, list) or len(values) != 2 for values in (counts, shots, ones, probabilities)):
+        raise RuntimeError("Rust reset analysis returned invalid class aggregates")
+    return (
+        counts[0], counts[1], shots[0], ones[0], shots[1], ones[1],
+        result["threshold"], result["predict_one_when_at_or_above"],
+        probabilities[0], probabilities[1],
+        result["difference_class_1_minus_class_0"], result["standard_error"],
+        result["z_score"], result["balanced_prior_mutual_information_bits"],
+        result["balanced_prior_bayes_accuracy"],
+    )
 
 
 def rust_gksl_exponential_superoperator(

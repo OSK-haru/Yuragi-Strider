@@ -128,6 +128,7 @@ def _one_qubit_h_config(environment: EnvironmentConfig) -> SimulationConfig:
         duration_us=1.0,
         time_steps=51,
         fidelity_threshold=0.9,
+        simulation_backend="python_dense",
     )
 
 
@@ -158,6 +159,7 @@ def _bell_config(
         duration_us=duration_us,
         time_steps=51,
         fidelity_threshold=0.9,
+        simulation_backend="python_dense",
     )
 
 
