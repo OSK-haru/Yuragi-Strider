@@ -1,6 +1,7 @@
 """Product settings for concurrent sharing: choice, validation, frozen manifest and the assembled executor."""
 
 import json
+import math
 import unittest
 
 from api.attack_product_factory import (
@@ -48,10 +49,11 @@ class ConcurrentProductSettingsTests(unittest.TestCase):
     def test_default_is_the_exclusive_fifo_with_a_declared_sample_strength(self):
         _, environment = resolve({})
         execution = environment.establish().qpu_service_config["runtime_execution"]
-        self.assertEqual(execution["schema_version"], "shared_qpu_runtime_v3")
+        self.assertEqual(execution["schema_version"], "shared_qpu_runtime_v4")
         self.assertEqual(execution["concurrency_policy"], "exclusive_fifo")
         self.assertEqual(execution["drive_crosstalk_strength"], 0.02)
         self.assertEqual(execution["drive_crosstalk_direction"], "both")
+        self.assertEqual(execution["drive_crosstalk_detuning_mhz"], 100.0)
 
     def test_overlap_needs_dedicated_regions(self):
         with self.assertRaises(ValueError):
@@ -73,7 +75,8 @@ class ConcurrentProductSettingsTests(unittest.TestCase):
     def test_invalid_values_are_rejected(self):
         for settings in ({**OVERLAP, PREFIX + "drive_crosstalk_strength": 1.5},
                          {**OVERLAP, PREFIX + "drive_crosstalk_direction": "sideways"},
-                         {**OVERLAP, PREFIX + "concurrency_policy": "parallel"}):
+                         {**OVERLAP, PREFIX + "concurrency_policy": "parallel"},
+                         {**OVERLAP, PREFIX + "drive_crosstalk_detuning_mhz": 5000.0}):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 resolve(settings)
 
@@ -104,6 +107,15 @@ class ConcurrentProductSettingsTests(unittest.TestCase):
         self.assertEqual({(item.source, item.target) for item in attacker_only.transfers}, {(6, 5)})
         none, _ = self._transfers({**OVERLAP, PREFIX + "drive_crosstalk_strength": 0.0})
         self.assertEqual(none.transfers, ())
+
+    def test_detuning_is_frozen_and_reaches_every_transfer(self):
+        sample, _ = self._transfers(OVERLAP)
+        self.assertTrue(all(math.isclose(item.detuning_rad_per_us, 2 * math.pi * 100.0)
+                            for item in sample.transfers))
+        resonant, _ = self._transfers({**OVERLAP, PREFIX + "drive_crosstalk_detuning_mhz": 0.0})
+        self.assertEqual({item.detuning_rad_per_us for item in resonant.transfers}, {0.0})
+        shifted, _ = self._transfers({**OVERLAP, PREFIX + "drive_crosstalk_detuning_mhz": -3.0})
+        self.assertTrue(all(math.isclose(item.detuning_rad_per_us, -6 * math.pi) for item in shifted.transfers))
 
     def test_the_product_assembles_an_executor_that_runs_regions_concurrently(self):
         factory = ProductEnvironmentFactory(LIMITS)

@@ -115,7 +115,7 @@ def run(strength: float, attack: bool, *, victim_shots: int, pulses: int, attack
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--shots", type=int, default=60)
+    parser.add_argument("--shots", type=int, default=50)   # the instruction-work limit allows at most 59
     parser.add_argument("--pulses", type=int, default=150)
     parser.add_argument("--attacker-shots", type=int, default=200)
     parser.add_argument("--attacker-jobs", type=int, default=1)

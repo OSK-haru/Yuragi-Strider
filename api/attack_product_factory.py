@@ -292,6 +292,7 @@ class ProductEnvironmentFactory:
             "qpu_service.runtime_execution.concurrency_policy",
             "qpu_service.runtime_execution.drive_crosstalk_strength",
             "qpu_service.runtime_execution.drive_crosstalk_direction",
+            "qpu_service.runtime_execution.drive_crosstalk_detuning_mhz",
             "qpu_service.declared_service_timing.processing_delay_us",
             "qpu_service.declared_service_timing.publication_delay_us",
             "qpu_service.declared_service_timing.denial_delay_us",
@@ -393,10 +394,11 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "attacker_measurement_duration_us", "queue_policy_id", "cancellation_policy_id",
         "measure_input_state_before_transition", "placement_policy", "isolated_assignment_duration_us",
         "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
-        "concurrency_policy", "drive_crosstalk_strength", "drive_crosstalk_direction", "resource_binding",
+        "concurrency_policy", "drive_crosstalk_strength", "drive_crosstalk_direction", "drive_crosstalk_detuning_mhz",
+        "resource_binding",
         "max_local_qubits", "max_execution_work",
     })
-    if runtime_raw["schema_version"] != "shared_qpu_runtime_v3":
+    if runtime_raw["schema_version"] != "shared_qpu_runtime_v4":
         raise ValueError("unsupported frozen QPU runtime schema")
     _validate_runtime_profile(runtime_raw)
     runtime_fields = dict(runtime_raw)
@@ -638,7 +640,8 @@ def concurrent_regions_for(parsed: Mapping[str, Any]) -> ConcurrentRegions | Non
     transfers = cross_region_transfers(
         parsed["region"].topology.gate_edges, parsed["region"].physical_qubit_ids,
         parsed["alternate_region"].physical_qubit_ids,
-        config.drive_crosstalk_strength, config.drive_crosstalk_direction)
+        config.drive_crosstalk_strength, config.drive_crosstalk_direction,
+        2.0 * math.pi * config.drive_crosstalk_detuning_mhz)      # 1 MHz = 2 pi rad/us
     return ConcurrentRegions(transfers, SAMPLE_PULSE_SHAPE)
 
 
@@ -1048,6 +1051,9 @@ def _validate_runtime_profile(raw: Mapping[str, Any]) -> None:
         value = raw[name]
         if (type(value) not in (int, float) or not math.isfinite(float(value)) or value < 0):
             raise ValueError(f"runtime_execution.{name} must be finite and nonnegative")
+    detuning = raw["drive_crosstalk_detuning_mhz"]
+    if type(detuning) not in (int, float) or not math.isfinite(float(detuning)):
+        raise ValueError("runtime_execution.drive_crosstalk_detuning_mhz must be finite")
 
 
 def _basis_values(value: object, name: str) -> None:

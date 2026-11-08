@@ -87,6 +87,10 @@ class SharedQpuRuntimeConfig:
     # should declare directed region transfers in crosstalk_declarations.
     drive_crosstalk_strength: float = 0.0
     drive_crosstalk_direction: str = "both"
+    # Frequency difference between a leaking drive and the receiving transition. 100 MHz is the D80 sample
+    # (crosstalk_samples.SAMPLE_DETUNING_RAD_PER_US); 0 is a resonant leak, e.g. an attacker with
+    # pulse-level access that shifts its drive onto the victim's frequency.
+    drive_crosstalk_detuning_mhz: float = 100.0
     max_local_qubits: int = 8
     max_execution_work: int = 536870912
 
@@ -94,7 +98,7 @@ class SharedQpuRuntimeConfig:
         """Return every behavior-changing runtime value for pre-start freezing."""
         binding = self.resource_binding
         config = {
-            "schema_version": "shared_qpu_runtime_v3",
+            "schema_version": "shared_qpu_runtime_v4",
             "reset_model_id": self.reset_model_id,
             "reset_model_configuration_id": self.reset_model_configuration_id,
             "reset_model_mode": self.reset_model_mode.value,
@@ -113,6 +117,7 @@ class SharedQpuRuntimeConfig:
             "concurrency_policy": self.concurrency_policy,
             "drive_crosstalk_strength": self.drive_crosstalk_strength,
             "drive_crosstalk_direction": self.drive_crosstalk_direction,
+            "drive_crosstalk_detuning_mhz": self.drive_crosstalk_detuning_mhz,
             "resource_binding": None if binding is None else dict(binding.to_manifest_config()),
             "max_local_qubits": self.max_local_qubits,
             "max_execution_work": self.max_execution_work,
@@ -185,6 +190,10 @@ class SharedQpuRuntimeConfig:
         if not math.isfinite(strength) or not 0.0 <= strength <= 1.0:
             raise ValueError("drive_crosstalk_strength must be in [0, 1]")
         object.__setattr__(self, "drive_crosstalk_strength", strength)
+        detuning = self.drive_crosstalk_detuning_mhz
+        if type(detuning) not in (int, float) or not math.isfinite(float(detuning)):
+            raise ValueError("drive_crosstalk_detuning_mhz must be finite")
+        object.__setattr__(self, "drive_crosstalk_detuning_mhz", float(detuning))
         if (self.concurrency_policy == OVERLAP_DISJOINT_REGIONS
                 and placement is not PlacementPolicy.TENANT_DEDICATED_REGION):
             raise ValueError("overlapping jobs need tenant-dedicated regions")

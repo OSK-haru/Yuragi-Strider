@@ -60,6 +60,7 @@ def cross_region_transfers(
     declarations: Sequence[CrosstalkDeclaration] | Sequence[int],
     strength: float | None = None,
     direction: str | None = None,
+    detuning_rad_per_us: float | None = None,
 ) -> tuple[DriveCrosstalkTransfer, ...]:
     """Expand declared region-to-region transfers over physical coupling edges."""
     # Scenario adapter for the existing two-region product contract. New callers
@@ -73,12 +74,13 @@ def cross_region_transfers(
             pairs = pairs[:1]
         elif direction == ATTACKER_TO_VICTIM:
             pairs = pairs[1:]
-        from core.attack_simulation.crosstalk_samples import SAMPLE_DETUNING_RAD_PER_US
-        declared = tuple(CrosstalkDeclaration(src, dst, float(strength),
-                                               SAMPLE_DETUNING_RAD_PER_US)
+        if detuning_rad_per_us is None:
+            from core.attack_simulation.crosstalk_samples import SAMPLE_DETUNING_RAD_PER_US
+            detuning_rad_per_us = SAMPLE_DETUNING_RAD_PER_US
+        declared = tuple(CrosstalkDeclaration(src, dst, float(strength), float(detuning_rad_per_us))
                          for src, dst in pairs)
         return cross_region_transfers(gate_edges, region_map, declared)
-    if strength is not None or direction is not None:
+    if strength is not None or direction is not None or detuning_rad_per_us is not None:
         raise ValueError("strength and direction belong in declaration entries")
     if len({item for values in regions.values() for item in values}) != sum(map(len, regions.values())):
         raise ValueError("declared regions must be physically disjoint")

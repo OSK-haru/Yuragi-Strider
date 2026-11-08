@@ -96,7 +96,7 @@ class FreeModeReproductionTests(unittest.TestCase):
         challenge, free = manifest(), self.free({})
         self.assertEqual(free.victim_config["workload"], challenge.victim_config["workload"])
         for name in ("placement_policy", "concurrency_policy", "drive_crosstalk_strength",
-                     "drive_crosstalk_direction", "repetition_delay_us"):
+                     "drive_crosstalk_direction", "drive_crosstalk_detuning_mhz", "repetition_delay_us"):
             self.assertEqual(free.qpu_service_config["runtime_execution"][name],
                              challenge.qpu_service_config["runtime_execution"][name], name)
         self.assertEqual(free.qpu_service_config["topology"], challenge.qpu_service_config["topology"])
