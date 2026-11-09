@@ -58,10 +58,10 @@ $$
 
 ### 包絡線の形状
 
-| 形状 | 指定 |
-|---|---|
-| `square` | `pulse_duration_us` |
-| `gaussian` | `sigma_us` と `truncation_sigma` |
+| 形状 | 指定 | UIの入力欄 | 実装(`core/pulse_envelopes.py`) |
+|---|---|---|---|
+| `square` | `pulse_duration_us` | 「Pulse長 [us]」 | `SquarePulseEnvelope` |
+| `gaussian` | `sigma_us` と `truncation_sigma` | 「Gaussian σ [us]」「打ち切り [σ]」 | `GaussianPulseEnvelope` |
 
 Gaussianでは所要時間が次式で導出されるため、`pulse_duration_us` の指定は拒否されます。
 
@@ -75,10 +75,26 @@ $$
 
 排他的に1つだけ指定します。
 
-| モード | 必要なフィールド |
-|---|---|
-| `target_rotation_angle` | `target_rotation_angle_rad` |
-| `peak_amplitude` | `peak_amplitude_rad_per_us` |
+| モード | 必要なフィールド | UIの入力欄 |
+|---|---|---|
+| `target_rotation_angle` | `target_rotation_angle_rad` | 「回転角 [rad]」 |
+| `peak_amplitude` | `peak_amplitude_rad_per_us` | 「ピーク振幅 [rad/us]」 |
+
+### パラメータとUI・実装の対応
+
+| 量 | 記号 | 単位 | UIの入力欄(Pulse Lab) | 実装 |
+|---|---|---|---|---|
+| 2準位の駆動ハミルトニアン | $H=\tfrac{\Omega}{2}(\cos\phi\,\sigma_x+\sin\phi\,\sigma_y)+\tfrac{\Delta}{2}\sigma_z$ | rad/μs | — | `core/pulse_envelopes.py` の `TwoLevelPulseHamiltonian` |
+| 3準位の駆動ハミルトニアン | 対角 $(0,-\Delta,-2\Delta+\alpha)$、遷移 $\tfrac{\Omega}{2}$ と $\sqrt2\,\tfrac{\Omega}{2}$ | rad/μs | — | `core/pulse_qutrit_contract.py` の `qutrit_rotating_frame_hamiltonian` |
+| 駆動の位相 | $\phi$ | rad | 「位相 [rad]」 | 各Pulseの `phase_rad` |
+| 離調 | $\Delta$ | rad/μs | 「離調 [rad/us]」 | `core/pulse_contract.py` の `detuning_rad_per_us` |
+| DRAG係数 | $\beta$ | μs | 「DRAG β [us]」 | `core/pulse_transmon_network.py` の `ScheduledTransmonDrive.quadratures` ほか |
+| 非調和性 | $\alpha$ | MHz | 「非調和性 [MHz]」 | `core/pulse_qutrit_contract.py` |
+| 各トランズモンの基準離調 | $\Delta_i$ | rad/μs | 「q0 基準離調 [rad/us]」「q1 基準離調 [rad/us]」 | `core/pulse_transmon_network.py` の `CoupledTransmonNetworkHamiltonian` |
+| 交換結合 | $J$ | **rad/μs**(文献の $J/2\pi$ [MHz] とは $2\pi$ 倍異なる) | 「隣接交換結合 J [rad/us]」 | 同上(`TransmonExchangeCoupling`) |
+| トランズモンの周波数 | $f_i$ | GHz | 「量子ビット周波数 [GHz]」(全トランズモン共通) | 散逸率の計算に使用 |
+| 準静的な離調ノイズ | $\sigma_\Delta$ | rad/μs | 「離調の標準偏差 σ [rad/us]」、ネットワークは「共通 σ [rad/us]」「隣接相関係数 r」 | `core/quasi_static_noise.py` |
+| 単位換算 | MHz・GHz → rad/μs | — | — | `core/pulse_contract.py` の `mhz_to_rad_per_us`、`ghz_to_rad_per_us` |
 
 ## Pulse Baseline A(2準位)
 

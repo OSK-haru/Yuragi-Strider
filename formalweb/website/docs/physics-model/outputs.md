@@ -98,6 +98,8 @@ p_{10} = P(\text{観測}1 \mid \text{準備}0),
 p_{01} = P(\text{観測}0 \mid \text{準備}1)
 $$
 
+UIでは「p10 = P(観測1 | 真の0)」「p01 = P(観測0 | 真の1)」から入力し、実装は `core/gates.py` の `apply_readout_error` です。
+
 対応する混同行列(confusion matrix)は列確率行列です。
 
 $$

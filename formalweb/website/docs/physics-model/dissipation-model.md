@@ -27,6 +27,8 @@ $$
 
 $N$ 量子ビット系では、各演算子が量子ビットごとにテンソル積で展開され、最大 $3N$ 個の崩壊演算子が構成されます。対応するレートが 0 の演算子は生成されません。
 
+実装: `core/gates.py` の `multi_qubit_environment_collapse_operators`(量子ビット別のレートにも対応)。Lindblad生成子への組み込みは `core/cptp_liouvillian.py` です。レートはUIから直接入力せず、[入力とパラメータ](./input_and_parameters.md)の変換で決まります。
+
 ## 位相緩和の係数規約
 
 :::warning $\sqrt{\gamma_\phi/2}$ の係数について
@@ -98,6 +100,14 @@ $$
 位相緩和は数演算子 $\hat{n}$ を用いた $\sqrt{2\gamma_{\phi,\text{adj}}}\,\hat{n}$ の形をとります(モデル識別子 `number_operator_adjacent_rate_v1`)。この構成により、$\rho_{01}$、$\rho_{12}$、$\rho_{02}$ の減衰比が **1 : 1 : 4** に固定されます。
 
 physicalモードでは $f_{12} = f_{01} + \alpha/1000$、$\gamma_{21}(T{=}0) = 2\gamma_{10}(T{=}0)$ という関係を用います。後者は調和振動子の行列要素に由来する教育用の近似です。
+
+| 量 | 実装(`core/pulse_qutrit_open_system.py`) | UIの入力欄(Pulse Lab) |
+|---|---|---|
+| physicalモードのレート導出 | `qutrit_dissipation_rates` | 2準位と同じ環境入力と「非調和性 [MHz]」 |
+| 直接指定のレート | 同上(`direct_rates`) | 「gamma 10 down」「gamma 01 up」「gamma 21 down」「gamma 12 up」「隣接準位の位相緩和」[1/us] |
+| 崩壊演算子 | `qutrit_collapse_operator_matrices` | — |
+
+結合トランズモン網では、同じ崩壊演算子を各トランズモンに付けます(`core/pulse_transmon_network.py` の `network_collapse_operator_matrices`)。
 
 ## 検証状況
 

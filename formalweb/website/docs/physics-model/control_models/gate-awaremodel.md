@@ -103,14 +103,16 @@ Z, S, T の所要時間が 0 なのは、これらがフレーム更新(仮想�
 
 所要時間はゲートごとに `params.duration_us` で個別に上書きできます。
 
+既定値の定義は `core/gate_specs.py` の `GateSpec` にあります。UIでは「ゲート時間のデフォルト」から種別ごとに変更でき、APIの受け口は `api/main.py` の `GateDurationDefaultsRequest` です。
+
 ## 有効ハミルトニアンの構成
 
 ゲートのユニタリ $U_k$ と所要時間 $\tau_k$ から、$e^{-iH_k\tau_k} = U_k$ を満たす $H_k$ を求めます。実装は2つの経路を持ちます。
 
-| 条件 | 経路 | 式 |
-|---|---|---|
-| $U^\dagger \approx U$ かつ $U^2 \approx I$ | 対合 | $H_k = \dfrac{\pi}{2\tau_k}(I - U_k)$ |
-| それ以外 | スペクトル生成子 | $H_k = V\operatorname{diag}(-\theta_j/\tau_k)V^{-1}$ |
+| 条件 | 経路 | 式 | 実装(`core/gates.py`) |
+|---|---|---|---|
+| $U^\dagger \approx U$ かつ $U^2 \approx I$ | 対合 | $H_k = \dfrac{\pi}{2\tau_k}(I - U_k)$ | `effective_hamiltonian_from_involution` |
+| それ以外 | スペクトル生成子 | $H_k = V\operatorname{diag}(-\theta_j/\tau_k)V^{-1}$ | `effective_hamiltonian_from_unitary` |
 
 判定の許容誤差は $10^{-9}$、スペクトル経路の再構成検証は $5\times10^{-9}$ です。詳細は[Lindblad方程式](../lindblad.md)を参照してください。
 
