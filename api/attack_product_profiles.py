@@ -12,7 +12,7 @@ from api.attack_settings_resolver import FreeScenarioDefinition, SettingField
 from core.attack_simulation.qpu_topology import QpuTopology, TopologyLimits
 from core.attack_simulation.backend_declaration import KINGSTON_BACKEND
 from core.attack_simulation.concurrency_policy import (
-    CROSSTALK_DIRECTIONS, DEFAULT_CROSSTALK_STRENGTH, EXCLUSIVE_FIFO, OVERLAP_DISJOINT_REGIONS,
+    CROSSTALK_DIRECTIONS, DEFAULT_CROSSTALK_STRENGTH, DEFAULT_RESIDUAL_ZZ_KHZ, EXCLUSIVE_FIFO, OVERLAP_DISJOINT_REGIONS,
 )
 from core.attack_simulation.grover_workload import MAX_SHOTS_PER_RUN, periodic_grover_plan, plan_parameters
 from core.attack_simulation.placement import PlacementPolicy
@@ -359,6 +359,7 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
         program_measurement_duration_us=measurement_duration,
         entry_reuse_tolerance=1e-5,
         drive_crosstalk_strength=DEFAULT_CROSSTALK_STRENGTH,
+        residual_zz_strength_khz=DEFAULT_RESIDUAL_ZZ_KHZ,
         max_local_qubits=len(region),
         max_execution_work=2_147_483_648,
     )
@@ -587,6 +588,10 @@ def _template(template_id: str, qpu: Mapping[str, object], mode: str,
         "qpu_service.runtime_execution.drive_crosstalk_strength",
         "qpu_service.runtime_execution.drive_crosstalk_direction",
         "qpu_service.runtime_execution.drive_crosstalk_detuning_mhz",
+        "qpu_service.runtime_execution.residual_zz_strength_khz",
+        "qpu_service.runtime_execution.residual_zz_model",
+        "qpu_service.runtime_execution.residual_zz_max_rank",
+        "qpu_service.runtime_execution.residual_zz_truncation",
         "qpu_service.declared_service_timing.processing_delay_us",
         "qpu_service.declared_service_timing.publication_delay_us",
         "qpu_service.declared_service_timing.denial_delay_us",
@@ -735,6 +740,14 @@ def _assumptions(snapshot: DeviceSnapshot, region: tuple[int, ...], mode: str,
                 "Which tenant's drives leak onto which tenant's qubits. Both directions let the attacker read the victim's drive activity from its own qubits."),
         _record("qpu_service.runtime_execution.drive_crosstalk_detuning_mhz", AssumptionBasis.SIMULATOR_CHOICE,
                 "Frequency difference between a leaking drive and the receiving qubit's transition, one value for every leak. The calibration snapshot gives no qubit frequencies, so the 100 MHz default is a declared sample, not a measurement of any device. 0 is a resonant leak, as from an attacker with pulse-level access that shifts its drive onto the victim's frequency."),
+        _record("qpu_service.runtime_execution.residual_zz_strength_khz", AssumptionBasis.SIMULATOR_CHOICE,
+                "Always-on residual ZZ between the two regions, zeta/2pi in kHz, one value for every coupling edge that joins them; it acts while jobs overlap and while the qubits wait. The calibration snapshot gives no ZZ. The default is 0 (off) because the joint simulation of two six-qubit regions is much slower; 0.9 kHz is the suggested sample, the median over ibm_kingston couplers reported by Farokhi et al. (arXiv:2609.34411), not a measurement of these qubits."),
+        _record("qpu_service.runtime_execution.residual_zz_model", AssumptionBasis.SIMULATOR_CHOICE,
+                "How the joint state of the two coupled regions is kept. exact keeps every term and is offered only up to 8 qubits in the two regions together. low_rank keeps the largest terms of the sum of products and accumulates the dropped Hilbert-Schmidt norm as its error bound (D79)."),
+        _record("qpu_service.runtime_execution.residual_zz_max_rank", AssumptionBasis.SIMULATOR_CHOICE,
+                "A simulation accuracy setting, not a property of the service: the most product terms the low-rank joint state keeps."),
+        _record("qpu_service.runtime_execution.residual_zz_truncation", AssumptionBasis.SIMULATOR_CHOICE,
+                "A simulation accuracy setting, not a property of the service: the largest Hilbert-Schmidt norm one low-rank compression may drop."),
         _record("qpu_service.runtime_execution.attacker_measurement_duration_us", AssumptionBasis.SIMULATOR_CHOICE,
                 "Uses the same conservative register-level maximum of per-qubit snapshot measurement durations.", evidence=evidence),
         _record("qpu_service.runtime_execution.victim_operation_duration_us", AssumptionBasis.SIMULATOR_CHOICE,
@@ -987,6 +1000,22 @@ def _fields(region: tuple[int, ...], mode: str, calibrations: Mapping[int, objec
         _number("qpu_service.runtime_execution.drive_crosstalk_detuning_mhz", "漏れの離調", -1000.0, 1000.0, "MHz",
                 "漏れた駆動の周波数と、受け取る量子ビットの遷移周波数の差です。重ねて実行のときだけ働きます。"
                 "初期値100 MHzは較正データにない仮の値です。0は共鳴で、パルスを直接扱える攻撃者が周波数を相手に合わせた場合にあたります。"),
+        _number("qpu_service.runtime_execution.residual_zz_strength_khz", "領域間の残留ZZの強さ", 0.0, 1000.0, "kHz",
+                "別領域の隣り合う量子ビットの間に常に働く結合です。相手が|1⟩のとき、自分の周波数がこの値だけずれます。"
+                "重ねて実行のときだけ働き、0で無効です。初期値は0（無効）です。較正データにZZの値はなく、"
+                "目安の仮の値は0.9 kHz（ibm_kingstonの結合の中央値、Farokhi et al., 2026）です。"
+                "有効にすると、2つの6 qubit領域を一緒に計算するため、ジョブの計算が数十倍遅くなります。"),
+        SettingField(
+            "qpu_service.runtime_execution.residual_zz_model", "残留ZZの計算方法", "choice",
+            "残留ZZでつながった2つの領域の、共同の状態の持ち方です。",
+            "low_rank: 共同の状態を積の和で持ち、小さい項を切ります。切った大きさは誤差の上限として記録します。"
+            "exact: 項を切りません。2つの領域の合計が8 qubit以下のときだけ選べます。",
+            choices=("low_rank", "exact"),
+        ),
+        _integer("qpu_service.runtime_execution.residual_zz_max_rank", "残留ZZ: 積の和の項数の上限", 1, 256,
+                 "low_rankで残す項の数の上限です。大きいほど正確で、計算に時間がかかります。サービスの性質ではありません。"),
+        _number("qpu_service.runtime_execution.residual_zz_truncation", "残留ZZ: 1回に切る大きさの上限", 0.0, 1e-2, None,
+                "low_rankで、1回の圧縮で切り捨ててよい大きさ（ヒルベルト・シュミットノルム）です。サービスの性質ではありません。"),
         SettingField(
             "qpu_service.runtime_execution.drive_crosstalk_direction", "漏れの向き", "choice",
             "どちらの利用者の駆動が、どちらの利用者の量子ビットに漏れるかです。重ねて実行のときだけ働きます。",

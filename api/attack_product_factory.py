@@ -24,6 +24,8 @@ from api.attack_workloads import DeclaredWorkloadRunner
 from core.attack_simulation.circuit_program import LocalCircuitCompiler
 from core.attack_simulation.declared_execution import DeclaredQpuExecutor
 from core.attack_simulation.concurrency_policy import OVERLAP_DISJOINT_REGIONS, cross_region_transfers
+from core.attack_simulation.coupled_regions import ResidualZZSettings
+from core.experimental_isolation_physics.coherent_crosstalk import ResidualZZCoupling
 from core.attack_simulation.concurrent_lanes import ConcurrentRegions
 from core.attack_simulation.crosstalk_samples import SAMPLE_PULSE_SHAPE
 from core.attack_simulation.declared_service_timing import DeclaredServiceTiming
@@ -293,6 +295,10 @@ class ProductEnvironmentFactory:
             "qpu_service.runtime_execution.drive_crosstalk_strength",
             "qpu_service.runtime_execution.drive_crosstalk_direction",
             "qpu_service.runtime_execution.drive_crosstalk_detuning_mhz",
+            "qpu_service.runtime_execution.residual_zz_strength_khz",
+            "qpu_service.runtime_execution.residual_zz_model",
+            "qpu_service.runtime_execution.residual_zz_max_rank",
+            "qpu_service.runtime_execution.residual_zz_truncation",
             "qpu_service.declared_service_timing.processing_delay_us",
             "qpu_service.declared_service_timing.publication_delay_us",
             "qpu_service.declared_service_timing.denial_delay_us",
@@ -395,10 +401,11 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "measure_input_state_before_transition", "placement_policy", "isolated_assignment_duration_us",
         "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
         "concurrency_policy", "drive_crosstalk_strength", "drive_crosstalk_direction", "drive_crosstalk_detuning_mhz",
+        "residual_zz_strength_khz", "residual_zz_model", "residual_zz_max_rank", "residual_zz_truncation",
         "resource_binding",
         "max_local_qubits", "max_execution_work",
     })
-    if runtime_raw["schema_version"] != "shared_qpu_runtime_v4":
+    if runtime_raw["schema_version"] != "shared_qpu_runtime_v5":
         raise ValueError("unsupported frozen QPU runtime schema")
     _validate_runtime_profile(runtime_raw)
     runtime_fields = dict(runtime_raw)
@@ -642,7 +649,23 @@ def concurrent_regions_for(parsed: Mapping[str, Any]) -> ConcurrentRegions | Non
         parsed["alternate_region"].physical_qubit_ids,
         config.drive_crosstalk_strength, config.drive_crosstalk_direction,
         2.0 * math.pi * config.drive_crosstalk_detuning_mhz)      # 1 MHz = 2 pi rad/us
-    return ConcurrentRegions(transfers, SAMPLE_PULSE_SHAPE)
+    return ConcurrentRegions(transfers, SAMPLE_PULSE_SHAPE, residual_zz=residual_zz_for(parsed))
+
+
+def residual_zz_for(parsed: Mapping[str, Any]) -> ResidualZZSettings | None:
+    """The frozen cross-region residual ZZ: one strength on every coupling edge that joins the regions (D85)."""
+    config = parsed["runtime_config"]
+    if config.concurrency_policy != OVERLAP_DISJOINT_REGIONS or config.residual_zz_strength_khz == 0.0:
+        return None
+    first = set(parsed["region"].physical_qubit_ids)
+    second = set(parsed["alternate_region"].physical_qubit_ids)
+    shift = 2.0 * math.pi * config.residual_zz_strength_khz * 1e-3      # kHz -> MHz -> rad/us
+    couplings = tuple(ResidualZZCoupling(left, right, shift) for left, right in parsed["region"].topology.gate_edges
+                      if (left in first and right in second) or (left in second and right in first))
+    if not couplings:
+        return None
+    return ResidualZZSettings(couplings, config.residual_zz_model, config.residual_zz_max_rank,
+                              config.residual_zz_truncation)
 
 
 def build_service_stack(parsed: Mapping[str, Any], manifest: ResolvedScenarioManifest,
@@ -1054,6 +1077,12 @@ def _validate_runtime_profile(raw: Mapping[str, Any]) -> None:
     detuning = raw["drive_crosstalk_detuning_mhz"]
     if type(detuning) not in (int, float) or not math.isfinite(float(detuning)):
         raise ValueError("runtime_execution.drive_crosstalk_detuning_mhz must be finite")
+    for name in ("residual_zz_strength_khz", "residual_zz_truncation"):
+        value = raw[name]
+        if type(value) not in (int, float) or not math.isfinite(float(value)) or value < 0:
+            raise ValueError(f"runtime_execution.{name} must be finite and nonnegative")
+    if type(raw["residual_zz_max_rank"]) is not int or raw["residual_zz_max_rank"] < 1:
+        raise ValueError("runtime_execution.residual_zz_max_rank must be an explicit positive integer")
 
 
 def _basis_values(value: object, name: str) -> None:

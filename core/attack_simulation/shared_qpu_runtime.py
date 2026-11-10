@@ -23,8 +23,10 @@ from core.attack_simulation.jobs import (
     scheduler_registered,
 )
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
+from core.attack_simulation.coupled_regions import ZZ_MODELS
 from core.attack_simulation.interleaved_execution import derived_seed, interleaved_work
 from core.attack_simulation.kick_application import EMPTY_PLAN, KickPlan, PlacedKick, kick_unitary
+from core.attack_simulation.shot_activity import instruction_starts
 from core.attack_simulation.program_request import STATE_INHERIT_OPERATION_ID, interleave_operation_id
 from core.attack_simulation.register_readout import register_assignment_errors
 from core.attack_simulation.request_receipts import RequestReceipt
@@ -45,7 +47,7 @@ from core.experimental_isolation_physics.reset_model import (
     ResetModelRequest,
     RegisterResetResult,
 )
-from core.experimental_isolation_physics.idle_evolution import IdleQubitSpec, IndependentIdleModel
+from core.experimental_isolation_physics.idle_evolution import IndependentIdleModel, relax_axes_in_place
 from core.gates import Matrix, density_from_ket
 from core.register_operations import (
     apply_local_depolarizing_replacement, apply_operand_operator, freeze_register, sample_measurement,
@@ -91,6 +93,13 @@ class SharedQpuRuntimeConfig:
     # (crosstalk_samples.SAMPLE_DETUNING_RAD_PER_US); 0 is a resonant leak, e.g. an attacker with
     # pulse-level access that shifts its drive onto the victim's frequency.
     drive_crosstalk_detuning_mhz: float = 100.0
+    # Residual ZZ between the two regions under overlap_disjoint_regions (D85): zeta / 2 pi in kHz, one value
+    # for every coupling edge that joins the regions (0 is off). The regions then share one joint world,
+    # kept exactly or as a low-rank sum of products (D79) with the given rank cap and per-step dropped norm.
+    residual_zz_strength_khz: float = 0.0
+    residual_zz_model: str = "low_rank"
+    residual_zz_max_rank: int = 32
+    residual_zz_truncation: float = 1e-6
     max_local_qubits: int = 8
     max_execution_work: int = 536870912
 
@@ -98,7 +107,7 @@ class SharedQpuRuntimeConfig:
         """Return every behavior-changing runtime value for pre-start freezing."""
         binding = self.resource_binding
         config = {
-            "schema_version": "shared_qpu_runtime_v4",
+            "schema_version": "shared_qpu_runtime_v5",
             "reset_model_id": self.reset_model_id,
             "reset_model_configuration_id": self.reset_model_configuration_id,
             "reset_model_mode": self.reset_model_mode.value,
@@ -118,6 +127,10 @@ class SharedQpuRuntimeConfig:
             "drive_crosstalk_strength": self.drive_crosstalk_strength,
             "drive_crosstalk_direction": self.drive_crosstalk_direction,
             "drive_crosstalk_detuning_mhz": self.drive_crosstalk_detuning_mhz,
+            "residual_zz_strength_khz": self.residual_zz_strength_khz,
+            "residual_zz_model": self.residual_zz_model,
+            "residual_zz_max_rank": self.residual_zz_max_rank,
+            "residual_zz_truncation": self.residual_zz_truncation,
             "resource_binding": None if binding is None else dict(binding.to_manifest_config()),
             "max_local_qubits": self.max_local_qubits,
             "max_execution_work": self.max_execution_work,
@@ -194,6 +207,18 @@ class SharedQpuRuntimeConfig:
         if type(detuning) not in (int, float) or not math.isfinite(float(detuning)):
             raise ValueError("drive_crosstalk_detuning_mhz must be finite")
         object.__setattr__(self, "drive_crosstalk_detuning_mhz", float(detuning))
+        zz = self.residual_zz_strength_khz
+        if type(zz) not in (int, float) or not math.isfinite(float(zz)) or not 0.0 <= zz <= 1000.0:
+            raise ValueError("residual_zz_strength_khz must be in [0, 1000]")
+        object.__setattr__(self, "residual_zz_strength_khz", float(zz))
+        if self.residual_zz_model not in ZZ_MODELS:
+            raise ValueError("unknown residual-ZZ model")
+        if type(self.residual_zz_max_rank) is not int or not 1 <= self.residual_zz_max_rank <= 256:
+            raise ValueError("residual_zz_max_rank must be an integer in [1, 256]")
+        truncation = self.residual_zz_truncation
+        if type(truncation) not in (int, float) or not math.isfinite(float(truncation)) or not 0.0 <= truncation <= 1e-2:
+            raise ValueError("residual_zz_truncation must be in [0, 0.01]")
+        object.__setattr__(self, "residual_zz_truncation", float(truncation))
         if (self.concurrency_policy == OVERLAP_DISJOINT_REGIONS
                 and placement is not PlacementPolicy.TENANT_DEDICATED_REGION):
             raise ValueError("overlapping jobs need tenant-dedicated regions")
@@ -559,6 +584,11 @@ class SharedQpuRuntime:
             # The validated final block has distinct, commuting targets and no later gates.
             # Sample its joint distribution once.
             state, bits = sample_measurement(state, measured_slots, generator)
+            # Qubits outside the measurement idle while it runs (D85). Local channels on other qubits
+            # commute with the projective measurement, so relaxing after the draw is exact.
+            if measurement_duration > 0.0 and self._active_idle_model() is not None:
+                unmeasured = tuple(s for s in range(state.shape[0].bit_length() - 1) if s not in measured_slots)
+                state = self._relax(state, {s: measurement_duration for s in unmeasured})
             for q, bit, target in zip(measured_qubits, bits, classical_targets):
                 p10, p01 = assignment[q]
                 classical[target] = int(generator.random() < p10) if bit == 0 else int(generator.random() >= p01)
@@ -611,11 +641,37 @@ class SharedQpuRuntime:
                 subsystem_count=len(snapshot.physical_qubit_ids), targets=slots,
             )
             assignment.update(enumerate(errors))
+        # Idle relaxation (D85): every register qubit relaxes whenever it is not busy with an instruction.
+        # It is applied lazily, just before the qubit is next touched: a local channel commutes with
+        # everything acting on other qubits, so the result equals relaxing it continuously.
+        idle_model = self._active_idle_model()
+        reset_us = self._active_service_durations()[0]
+        starts, measure_start = instruction_starts(operation, reset_duration_us=reset_us)
+        free = [0.0] * len(snapshot.physical_qubit_ids)
+
+        def relax_to(state, register_slots, time_us):
+            if idle_model is None:
+                return state
+            due = {s: time_us - free[s] for s in register_slots if time_us > free[s]}
+            for s in due:
+                free[s] = time_us
+            return self._relax(state, due) if due else state
+
         pending = [kick for kick in shot_kicks if kick.wait_offset_us is None]
         for index, instruction in enumerate(operation.instructions):
             while pending and pending[0].position <= index:
-                state = self._apply_kick(state, pending.pop(0))
+                kick = pending.pop(0)
+                at = starts[kick.position] if kick.position < len(starts) else None
+                state = relax_to(state, (self._slot_of(kick.qubit),), measure_start if at is None else at)
+                state = self._apply_kick(state, kick)
             operands = tuple(slots[q] for q in instruction.qubits)
+            if instruction.kind != "measure":
+                start = starts[index]
+                state = relax_to(state, operands, start)
+                busy = (reset_us if instruction.kind in {"initialize", "reset"}
+                        else instruction.intrinsic_us if instruction.kind == "unitary" else 0.0)
+                for s in operands:
+                    free[s] = max(free[s], start + busy)
             if instruction.kind in {"initialize", "reset"}:
                 readout = self._active_reset_models().run_register(self.config.reset_model_id, ResetModelRequest(
                     input_state=freeze_register(state), reset_count=1, victim_measurement=False,
@@ -635,13 +691,15 @@ class SharedQpuRuntime:
                     )
                 duration += instruction.duration_us
             elif instruction.kind == "delay":
-                if instruction.wait_us > 0.0:
-                    state = self._idle_subset(state, operands, instruction.wait_us)
+                # A declared wait is idle time like any other; the lazy relaxation above covers it.
+                if instruction.wait_us > 0.0 and idle_model is None:
+                    raise ValueError("a delay needs an explicit idle model")
                 duration += instruction.duration_us
             elif instruction.kind == "measure":
                 continue  # the final measurement block is sampled by the caller
             else:
                 raise ValueError("unknown compiled circuit instruction")
+        state = relax_to(state, range(len(free)), measure_start)
         for placed in pending:
             state = self._apply_kick(state, placed)
         state = np.array(state, dtype=complex)
@@ -653,14 +711,15 @@ class SharedQpuRuntime:
         slot = self.state_store.read().physical_qubit_ids.index(placed.qubit)
         return apply_operand_operator(state, kick_unitary(placed), (slot,))
 
-    def _idle_subset(self, state, slots: tuple[int, ...], elapsed_us: float):
-        """Relax only the named register slots; the other qubits are left untouched."""
+    def _relax(self, state: np.ndarray, elapsed_by_slot: Mapping[int, float]) -> np.ndarray:
+        """Relax each named register slot for its own idle time; the other qubits are left untouched."""
         model = self._active_idle_model()
-        disabled = IdleQubitSpec(math.inf, math.inf, 0.0)
-        subset = IndependentIdleModel(
-            tuple(spec if index in slots else disabled for index, spec in enumerate(model.qubits)),
-            model.max_local_qubits)
-        return np.asarray(subset.evolve(state, elapsed_us=elapsed_us), dtype=complex)
+        result = np.array(state, dtype=complex, copy=True, order="C")
+        relax_axes_in_place(result, tuple((s, model.qubits[s], t) for s, t in sorted(elapsed_by_slot.items())))
+        return result
+
+    def _slot_of(self, physical_qubit: int) -> int:
+        return self.state_store.read().physical_qubit_ids.index(physical_qubit)
 
     def _active_idle_model(self) -> IndependentIdleModel:
         if self.tenant_regions:

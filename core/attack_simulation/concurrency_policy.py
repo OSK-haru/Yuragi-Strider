@@ -27,6 +27,12 @@ CROSSTALK_DIRECTIONS = (BOTH, VICTIM_TO_ATTACKER, ATTACKER_TO_VICTIM)
 # Compatibility for the current product scenario builder; new scenario code
 # should persist a strength on each CrosstalkDeclaration.
 DEFAULT_CROSSTALK_STRENGTH = 0.02
+# Residual ZZ between the regions, zeta / 2 pi in kHz. Off by default: on two six-qubit regions the joint
+# low-rank simulation is still one to two orders of magnitude slower than the region-by-region path (D85).
+# SAMPLE_RESIDUAL_ZZ_KHZ is the median ZZ of ibm_kingston couplers (903 Hz) reported by Farokhi et al.,
+# arXiv:2609.34411; the calibration snapshot itself has no ZZ.
+DEFAULT_RESIDUAL_ZZ_KHZ = 0.0
+SAMPLE_RESIDUAL_ZZ_KHZ = 0.9
 
 @dataclass(frozen=True)
 class CrosstalkDeclaration:

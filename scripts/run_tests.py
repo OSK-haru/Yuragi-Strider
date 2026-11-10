@@ -27,7 +27,8 @@ PROFILE_MODULES: dict[str, tuple[str, ...]] = {
 PROFILE_GLOBS: dict[str, tuple[str, ...]] = {
     "gate-aware": ("test_gate_*.py",),
     "pulse": ("test_pulse_*api*.py",),
-    "attack": ("test_attack*.py", "test_*challenge*.py", "test_crosstalk*.py", "test_concurrent*.py"),
+    "attack": ("test_attack*.py", "test_*challenge*.py", "test_crosstalk*.py", "test_concurrent*.py",
+               "test_coupled*.py"),
 }
 
 

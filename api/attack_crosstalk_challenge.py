@@ -98,6 +98,8 @@ def _preset(base, region: tuple[int, ...], snapshot: DeviceSnapshot, settings: C
     execution["concurrency_policy"] = OVERLAP_DISJOINT_REGIONS
     execution["drive_crosstalk_strength"] = settings.drive_crosstalk_strength
     execution["drive_crosstalk_direction"] = BOTH
+    # The challenge was tuned without residual ZZ (D83); it keeps that until it is re-tuned with ZZ (D85).
+    execution["residual_zz_strength_khz"] = 0.0
     edges = qpu["topology"]["gate_edges"]
     clock_domain = thaw(template.experiment_config)["world_clock"]["clock_domain"]
     # The same victim a free-mode author gets by enabling the periodic Grover setting with these values.

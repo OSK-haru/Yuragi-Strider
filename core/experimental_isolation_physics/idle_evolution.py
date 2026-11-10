@@ -84,25 +84,38 @@ class IndependentIdleModel:
         result = np.array(state, dtype=np.complex128, copy=True, order="C")
         if elapsed == 0.0:
             return result
-        n = len(self.qubits)
-        tensor = result.reshape((2,) * (2 * n))
-        for axis, spec in enumerate(self.qubits):
-            if math.isinf(spec.t1_us) and math.isinf(spec.tphi_us):
-                continue
-            relaxation = elapsed / spec.t1_us
-            damping = -math.expm1(-relaxation)
-            coherence = math.exp(-0.5 * relaxation - elapsed / spec.tphi_us)
-            population = spec.equilibrium_excited_population
-            blocks = np.moveaxis(tensor, (axis, n + axis), (0, 1))
-            old_zero = blocks[0, 0].copy()
-            old_one = blocks[1, 1].copy()
-            blocks[0, 0] = ((1.0 - population * damping) * old_zero
-                            + (1.0 - population) * damping * old_one)
-            blocks[1, 1] = (population * damping * old_zero
-                            + (1.0 - (1.0 - population) * damping) * old_one)
-            blocks[0, 1] *= coherence
-            blocks[1, 0] *= coherence
+        relax_axes_in_place(result, tuple((axis, spec, elapsed) for axis, spec in enumerate(self.qubits)))
         return result
+
+
+def relax_axes_in_place(matrix: np.ndarray, items) -> None:
+    """Apply each ``(axis, IdleQubitSpec, elapsed_us)`` relaxation to ``matrix`` in place.
+
+    The same local semigroup as :meth:`IndependentIdleModel.evolve`, with its own elapsed time per axis
+    and no density-matrix validation: it is linear, so callers may pass any square operator on the
+    register (for example one term of a sum of products). The caller owns the validity of the result.
+    A three-dimensional array is a stack of such operators, each relaxed alike.
+    """
+    lead = matrix.shape[:-2]
+    n = matrix.shape[-1].bit_length() - 1
+    tensor = matrix.reshape(lead + (2,) * (2 * n))
+    base = len(lead)
+    for axis, spec, elapsed in items:
+        if elapsed == 0.0 or (math.isinf(spec.t1_us) and math.isinf(spec.tphi_us)):
+            continue
+        relaxation = elapsed / spec.t1_us
+        damping = -math.expm1(-relaxation)
+        coherence = math.exp(-0.5 * relaxation - elapsed / spec.tphi_us)
+        population = spec.equilibrium_excited_population
+        blocks = np.moveaxis(tensor, (base + axis, base + n + axis), (0, 1))
+        old_zero = blocks[0, 0].copy()
+        old_one = blocks[1, 1].copy()
+        blocks[0, 0] = ((1.0 - population * damping) * old_zero
+                        + (1.0 - population) * damping * old_one)
+        blocks[1, 1] = (population * damping * old_zero
+                        + (1.0 - (1.0 - population) * damping) * old_one)
+        blocks[0, 1] *= coherence
+        blocks[1, 0] *= coherence
 
 
 def _real(value: float, name: str) -> float:

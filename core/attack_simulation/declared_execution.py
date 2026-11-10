@@ -17,6 +17,7 @@ from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.concurrent_lanes import (
     ConcurrentRegions, RegionLane, build_lane_stores, execution_window, kicks_for,
 )
+from core.attack_simulation.coupled_regions import CoupledRegionWorld, RegionSide, WorldJob
 from core.attack_simulation.kick_application import EMPTY_PLAN
 from core.attack_simulation.declared_ingress import IngressReservation, _producer
 from core.attack_simulation.event_commit_boundary import EventOrderError, EventPosition
@@ -70,6 +71,8 @@ class PreparedExecution:
     state_batch: object
     job_success: object
     next_event_sequence: int
+    # Residual ZZ (D85): the joint world this computation started from and the one it advanced to.
+    world: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +154,22 @@ class DeclaredQpuExecutor:
                 store.bind_transaction_lock(gate)
             self._lanes = {region: RegionLane(region, store) for region, store in stores.items()}
             runtime.scheduler.bind_lanes(lambda command: runtime.tenant_regions[command.tenant_id])
+        # Residual ZZ entangles the two regions: they then share one joint world, advanced in time order (D85).
+        self._world = None
+        self._world_side: dict[tuple[int, ...], int] = {}
+        if concurrent_regions is not None and concurrent_regions.residual_zz is not None:
+            regions = tuple(self._lanes)
+            durations = runtime.regional_service_durations
+            if any(runtime.regional_idle_models.get(region) is None for region in regions):
+                raise ValueError("residual ZZ needs an explicit idle model for both regions")
+            sides = tuple(RegionSide(region, runtime.regional_idle_models[region], runtime.regional_reset_models[region],
+                                     runtime.config.reset_model_id, *durations[region]) for region in regions)
+            self._world = CoupledRegionWorld(
+                sides, concurrent_regions.residual_zz,
+                tuple(np.asarray(self._lanes[region].store.read().density_matrix, dtype=complex)
+                      for region in regions),
+                repetition_delay_us=runtime.config.repetition_delay_us)
+            self._world_side = {region: index for index, region in enumerate(regions)}
         runtime._declared_executor = self
         runtime._declared_event_limit = max_events_per_job
 
@@ -565,6 +584,49 @@ class DeclaredQpuExecutor:
         return (target, lane.last_window, others, self._concurrent, job.command.operation,
                 job.command.layout.physical_qubit_ids, reset_us)
 
+    def _world_inputs(self):
+        """Every started job of either region with what its leak plan needs; read under the gate."""
+        found = []
+        for job_id, target in self._xwindows.items():
+            job = self.runtime.scheduler.get(job_id)
+            if job.status not in (JobStatus.RUNNING, JobStatus.SUCCEEDED):
+                continue
+            lane = self._lanes[self.runtime.tenant_regions[job.command.tenant_id]]
+            kick_inputs = (self._kick_inputs(lane, job, None)
+                           if self._concurrent.transfers and job.status is JobStatus.RUNNING else None)
+            found.append((job, lane.region, target, kick_inputs))
+        return tuple(found)
+
+    def _advanced_world(self, base, world_inputs, time_us: float, settle=()):
+        """A copy of the joint world advanced to ``time_us``; numerical work, run outside the gate."""
+        world = base.copy()
+        jobs = []
+        for job, region, target, kick_inputs in world_inputs:
+            progress = world.progress.get(job.job_id)
+            plan = (kicks_for(*kick_inputs) if kick_inputs is not None and not (progress and progress.done)
+                    else EMPTY_PLAN)
+            layout = job.command.layout.physical_qubit_ids
+            jobs.append(WorldJob(job.job_id, self._world_side[region], job.command.operation,
+                                 tuple(region.index(q) for q in layout), target.start.time_us,
+                                 target.finish.time_us, lambda plan=plan: plan))
+        world.advance_to(time_us, jobs)
+        for side in settle:
+            world.settle(side, time_us)
+        return world
+
+    def _commit_world_records(self, detached, job, world):
+        """Write the job's per-shot region states from the joint world as its ``program_shot`` events."""
+        detached._authorize(job.command)
+        detached._validate_job_target(job.command)
+        owner = detached.state_store.read().owner_tenant_id
+        if owner is not None and owner != job.command.tenant_id:
+            raise ValueError("a coupled region never changes tenant")
+        records, counts = world.records(job.job_id)
+        for state, duration in records:
+            detached._commit_event(job=job, event_kind="program_shot", next_state=freeze_register(state),
+                                   duration_us=duration, next_owner_tenant_id=job.command.tenant_id)
+        return {"shots": job.command.operation.shots, "counts": dict(counts)}
+
     def _prune_windows(self) -> None:
         """Drop windows that ended before every lane's computed time and so can never leak again."""
         threshold = min((lane.last_finish.time_us if lane.last_finish is not None else 0.0)
@@ -628,6 +690,8 @@ class DeclaredQpuExecutor:
                         store._rollback_prepared_commit(idle_batch)
                     raise
                 self.runtime._next_event_sequence = store.read().revision + 1
+                if world is not None:
+                    self._world = world[1]
                 active = (running, window, store.read(), 0.0)
                 if lane is None:
                     self._physical_end = window.start.time_us
@@ -638,14 +702,22 @@ class DeclaredQpuExecutor:
                     self._job_lane[job.job_id] = lane
                 return active
             self.frontier._validate_confirmation(window.start)
+            world_inputs = self._world_inputs() if lane is not None and self._world is not None else None
+            base_world = self._world
         # Idle physics must already be authoritative when START is confirmed.
         # Compute and validate outside the shared authority gate, then recheck
         # queue/state/closure before publishing idle + RUNNING + start together.
         idle_batch = None
+        world = None
+        if world_inputs is not None:
+            # The region's state at START is its share of the joint world, which the other region keeps changing.
+            world = (base_world, self._advanced_world(base_world, world_inputs, window.start.time_us,
+                                                      settle=(self._world_side[lane.region],)))
         if gap:
             scratch = store.clone_detached()
             detached = self._detached_runtime(scratch)
-            state = idle_model.evolve(np.asarray(snapshot.density_matrix), elapsed_us=gap)
+            state = (idle_model.evolve(np.asarray(snapshot.density_matrix), elapsed_us=gap) if world is None
+                     else world[1].reduced_state(self._world_side[lane.region]))
             detached._commit_event(job=job, event_kind="declared_idle", next_state=freeze_register(state),
                 duration_us=gap, next_owner_tenant_id=snapshot.owner_tenant_id)
             idle_batch = store.prepare_batch(snapshot, scratch.read(), scratch.events(),
@@ -658,6 +730,8 @@ class DeclaredQpuExecutor:
                     or self._windows.get(job.job_id) is not window
                     or self.runtime.scheduler.get(job.job_id).status is not JobStatus.QUEUED):
                 raise RuntimeError("physical start changed during idle preparation")
+            if world is not None and self._world is not world[0]:
+                raise RuntimeError("the joint world changed during idle preparation")
             if idle_batch is not None:
                 store.validate_prepared(idle_batch)
             return self.frontier.commit_with(window.start, begin)
@@ -686,11 +760,19 @@ class DeclaredQpuExecutor:
                     return self._get_prepared(lane)
                 job, window, snapshot, gap = active
                 self.frontier._validate_confirmation(window.finish)
-                inputs = self._kick_inputs(lane, job, window) if lane is not None else None
+                coupled = lane is not None and self._world is not None
+                inputs = self._kick_inputs(lane, job, window) if lane is not None and not coupled else None
+                world_inputs = self._world_inputs() if coupled else None
+                base_world = self._world
             scratch = store.clone_detached()
             detached = self._detached_runtime(scratch)
-            result = (detached._execute(job) if inputs is None
-                      else detached._execute(job, kicks_for(*inputs)))
+            world = None
+            if coupled:
+                world = (base_world, self._advanced_world(base_world, world_inputs, window.finish.time_us))
+                result = self._commit_world_records(detached, job, world[1])
+            else:
+                result = (detached._execute(job) if inputs is None
+                          else detached._execute(job, kicks_for(*inputs)))
             expected_time = snapshot.device_time_us + self._duration(job, snapshot)
             if not math.isclose(scratch.read().device_time_us, expected_time, rel_tol=1e-12, abs_tol=1e-10):
                 raise ValueError("computed event duration differs from the declared physical finish")
@@ -698,7 +780,7 @@ class DeclaredQpuExecutor:
                                         max_events=self._max_events,
                                         final_inactive_region=scratch.inactive_region())
             success = self.runtime.scheduler.prepare_success(job.job_id, result)
-            prepared = PreparedExecution(job.job_id, window, batch, success, detached._next_event_sequence)
+            prepared = PreparedExecution(job.job_id, window, batch, success, detached._next_event_sequence, world)
             with self._gate:
                 self._open()
                 if self._get_active(lane) is not active:
@@ -736,6 +818,8 @@ class DeclaredQpuExecutor:
             store = self._store(lane)
             store.validate_prepared(prepared.state_batch)
             self.runtime.scheduler.validate_prepared(prepared.job_success)
+            if prepared.world is not None and self._world is not prepared.world[0]:
+                raise ValueError("the joint world changed after this computation")
             def publish():
                 try:
                     store.commit_prepared(prepared.state_batch)
@@ -749,6 +833,8 @@ class DeclaredQpuExecutor:
                     raise
                 self.runtime._next_event_sequence = prepared.next_event_sequence
                 self._finished.add(prepared.job_id)
+                if prepared.world is not None:
+                    self._world = prepared.world[1]
                 if lane is None:
                     self._physical_end = prepared.window.finish.time_us
                     self._active = self._prepared = None

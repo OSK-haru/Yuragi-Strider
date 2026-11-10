@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
+from core.attack_simulation.coupled_regions import ResidualZZSettings
 from core.attack_simulation.concurrent_windows import (
     DriveSchedule, ExecutionWindow, gap_before, gap_leaks, leaks_into,
 )
@@ -30,8 +31,12 @@ class ConcurrentRegions:
 
     transfers: tuple[DriveCrosstalkTransfer, ...] = ()
     pulse_shape: PulseShape = SQUARE_SHAPE
+    # Cross-region residual ZZ; when present the two regions share one joint world (D85).
+    residual_zz: ResidualZZSettings | None = None
 
     def __post_init__(self) -> None:
+        if self.residual_zz is not None and type(self.residual_zz) is not ResidualZZSettings:
+            raise TypeError("residual_zz must be ResidualZZSettings")
         transfers = tuple(self.transfers)
         if any(type(item) is not DriveCrosstalkTransfer for item in transfers):
             raise TypeError("transfers must contain DriveCrosstalkTransfer values")
