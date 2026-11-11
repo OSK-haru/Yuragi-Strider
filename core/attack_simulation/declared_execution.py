@@ -30,6 +30,14 @@ from core.experimental_isolation_physics.idle_evolution import IndependentIdleMo
 from core.register_operations import freeze_register
 
 
+_NO_TENANT = object()
+
+
+def _hands_over(previous_tenant_id: str | None, tenant_id: str) -> bool:
+    """A job of another tenant than the region's holder first runs the handover service reset."""
+    return previous_tenant_id is not None and previous_tenant_id != tenant_id
+
+
 class DeclaredExecutionCapacityError(RuntimeError):
     """Host evidence bound, not a QPU error or service quota outcome."""
 
@@ -144,6 +152,7 @@ class DeclaredQpuExecutor:
         self._lanes: dict[tuple[int, ...], RegionLane] = {}
         self._job_lane: dict[str, RegionLane] = {}
         self._xwindows: dict[str, object] = {}
+        self._handover: dict[str, bool] = {}       # started jobs of a concurrent lane: ran the handover reset
         if concurrent_regions is not None:
             if type(concurrent_regions) is not ConcurrentRegions:
                 raise TypeError("a ConcurrentRegions choice is required")
@@ -153,7 +162,7 @@ class DeclaredQpuExecutor:
             for store in stores.values():
                 store.bind_transaction_lock(gate)
             self._lanes = {region: RegionLane(region, store) for region, store in stores.items()}
-            runtime.scheduler.bind_lanes(lambda command: runtime.tenant_regions[command.tenant_id])
+            runtime.scheduler.bind_lanes(runtime.region_of)
         # Residual ZZ entangles the two regions: they then share one joint world, advanced in time order (D85).
         self._world = None
         self._world_side: dict[tuple[int, ...], int] = {}
@@ -163,7 +172,10 @@ class DeclaredQpuExecutor:
             if any(runtime.regional_idle_models.get(region) is None for region in regions):
                 raise ValueError("residual ZZ needs an explicit idle model for both regions")
             sides = tuple(RegionSide(region, runtime.regional_idle_models[region], runtime.regional_reset_models[region],
-                                     runtime.config.reset_model_id, *durations[region]) for region in regions)
+                                     runtime.config.reset_model_id, *durations[region],
+                                     handover_reset_count=runtime.config.reset_count,
+                                     handover_measures_input=runtime.config.measure_input_state_before_transition)
+                          for region in regions)
             self._world = CoupledRegionWorld(
                 sides, concurrent_regions.residual_zz,
                 tuple(np.asarray(self._lanes[region].store.read().density_matrix, dtype=complex)
@@ -421,7 +433,7 @@ class DeclaredQpuExecutor:
                 op, job.command.tenant_id, snapshot.owner_tenant_id,
                 config.reset_duration_us, config.program_measurement_duration_us,
             ).duration_us
-        target = (self.runtime.tenant_regions[job.command.tenant_id] if dedicated else None)
+        target = (self.runtime.region_of(job.command) if dedicated else None)
         reset_duration, measurement_duration = (
             self.runtime.regional_service_durations[target]
             if dedicated else
@@ -433,9 +445,8 @@ class DeclaredQpuExecutor:
             i.time_group for i in op.instructions if i.kind == "measure"})
         duration *= op.shots
         duration += config.repetition_delay_us * (op.shots - 1)
-        if snapshot.owner_tenant_id is not None and snapshot.owner_tenant_id != job.command.tenant_id:
-            if not dedicated:
-                duration += config.reset_duration_us
+        if _hands_over(snapshot.owner_tenant_id, job.command.tenant_id):
+            duration += reset_duration
         if config.placement_policy.value == "isolated_physical_resource":
             raise ValueError("declared adapter does not support resource reassignment")
         if dedicated and snapshot.physical_qubit_ids != target:
@@ -483,7 +494,7 @@ class DeclaredQpuExecutor:
         if lane is None:
             return queued[0] if queued else None
         for job_id in queued:
-            if self.runtime.tenant_regions[self.runtime.scheduler.get(job_id).command.tenant_id] == lane.region:
+            if self.runtime.region_of(self.runtime.scheduler.get(job_id).command) == lane.region:
                 return job_id
         return None
 
@@ -503,7 +514,7 @@ class DeclaredQpuExecutor:
         """The FIFO lane a job queues in: its region under concurrent sharing, else one shared lane."""
         if not self._concurrent:
             return None
-        return self.runtime.tenant_regions[self.runtime.scheduler.get(job_id).command.tenant_id]
+        return self.runtime.region_of(self.runtime.scheduler.get(job_id).command)
 
     def plan_anchor(self, key):
         """``(previous_finish, previous_tenant_id)`` for planning the next job of a lane."""
@@ -559,10 +570,26 @@ class DeclaredQpuExecutor:
                 best = candidate
         return None if best is None else best[:4]
 
-    def _register_lane_window(self, job_id: str, window: JobExecutionWindow) -> None:
-        """Keep the job's drive schedule as an execution window for the other regions' leaks."""
+    def _planned_previous_tenant(self, job_id: str, region) -> str | None:
+        """The tenant the region will hold when ``job_id`` starts: the last queued job ahead of it, else now."""
+        previous = _NO_TENANT
+        for queued in self.runtime.scheduler.queued_job_ids():
+            if queued == job_id:
+                break
+            command = self.runtime.scheduler.get(queued).command
+            if self.runtime.region_of(command) == region:
+                previous = command.tenant_id
+        return self.plan_anchor(region)[1] if previous is _NO_TENANT else previous
+
+    def _register_lane_window(self, job_id: str, window: JobExecutionWindow, previous_tenant=_NO_TENANT) -> None:
+        """Keep the job's drive schedule as an execution window for the other regions' leaks.
+
+        A region that changes tenant first runs the handover reset, which delays the job's shots.
+        """
         job = self.runtime.scheduler.get(job_id)
-        region = self.runtime.tenant_regions[job.command.tenant_id]
+        region = self.runtime.region_of(job.command)
+        if previous_tenant is _NO_TENANT:
+            previous_tenant = self._planned_previous_tenant(job_id, region)
         taken = self.taken_keys(job_id)
         if window.start.key in taken or window.finish.key in taken:
             raise EventOrderError("physical event positions of concurrent regions must be distinct")
@@ -574,6 +601,7 @@ class DeclaredQpuExecutor:
             measurement_duration_us=measurement_us,
             repetition_delay_us=self.runtime.config.repetition_delay_us,
             pulse_shape=self._concurrent.pulse_shape,
+            handover_us=reset_us if _hands_over(previous_tenant, job.command.tenant_id) else 0.0,
             schedule=None if previous is None else previous.schedule)
 
     def _kick_inputs(self, lane, job, window):
@@ -591,24 +619,24 @@ class DeclaredQpuExecutor:
             job = self.runtime.scheduler.get(job_id)
             if job.status not in (JobStatus.RUNNING, JobStatus.SUCCEEDED):
                 continue
-            lane = self._lanes[self.runtime.tenant_regions[job.command.tenant_id]]
+            lane = self._lanes[self.runtime.region_of(job.command)]
             kick_inputs = (self._kick_inputs(lane, job, None)
                            if self._concurrent.transfers and job.status is JobStatus.RUNNING else None)
-            found.append((job, lane.region, target, kick_inputs))
+            found.append((job, lane.region, target, kick_inputs, self._handover.get(job_id, False)))
         return tuple(found)
 
     def _advanced_world(self, base, world_inputs, time_us: float, settle=()):
         """A copy of the joint world advanced to ``time_us``; numerical work, run outside the gate."""
         world = base.copy()
         jobs = []
-        for job, region, target, kick_inputs in world_inputs:
+        for job, region, target, kick_inputs, handover in world_inputs:
             progress = world.progress.get(job.job_id)
             plan = (kicks_for(*kick_inputs) if kick_inputs is not None and not (progress and progress.done)
                     else EMPTY_PLAN)
             layout = job.command.layout.physical_qubit_ids
             jobs.append(WorldJob(job.job_id, self._world_side[region], job.command.operation,
                                  tuple(region.index(q) for q in layout), target.start.time_us,
-                                 target.finish.time_us, lambda plan=plan: plan))
+                                 target.finish.time_us, lambda plan=plan: plan, handover))
         world.advance_to(time_us, jobs)
         for side in settle:
             world.settle(side, time_us)
@@ -619,8 +647,13 @@ class DeclaredQpuExecutor:
         detached._authorize(job.command)
         detached._validate_job_target(job.command)
         owner = detached.state_store.read().owner_tenant_id
-        if owner is not None and owner != job.command.tenant_id:
-            raise ValueError("a coupled region never changes tenant")
+        handover = world.handover_record(job.job_id)
+        if _hands_over(owner, job.command.tenant_id) != (handover is not None):
+            raise ValueError("the joint world and the region disagree on the tenant handover")
+        if handover is not None:
+            state, duration = handover
+            detached._commit_event(job=job, event_kind="service_reset", next_state=freeze_register(state),
+                                   duration_us=duration, next_owner_tenant_id=None)
         records, counts = world.records(job.job_id)
         for state, duration in records:
             detached._commit_event(job=job, event_kind="program_shot", next_state=freeze_register(state),
@@ -635,6 +668,7 @@ class DeclaredQpuExecutor:
         for job_id in [j for j, w in self._xwindows.items()
                        if w.finish.time_us <= threshold and id(w) not in keep]:
             del self._xwindows[job_id]
+            self._handover.pop(job_id, None)
 
     def _begin(self, lane=None):
         store = self._store(lane)
@@ -650,6 +684,9 @@ class DeclaredQpuExecutor:
             if window is None:
                 raise ValueError("FIFO head has no declared physical window")
             snapshot = store.read()
+            if lane is not None:
+                # The holder at START is authoritative; the window registered earlier only predicted it.
+                self._register_lane_window(job.job_id, window, snapshot.owner_tenant_id)
             if window.start.time_us < self._get_end(lane):
                 raise EventOrderError("single-region physical windows overlap")
             gap = window.start.time_us - self._get_end(lane)
@@ -671,11 +708,9 @@ class DeclaredQpuExecutor:
                 op, job.command.tenant_id, snapshot.owner_tenant_id,
                 self.runtime.config.reset_duration_us, self.runtime.config.program_measurement_duration_us,
             ).event_count + int(gap > 0)) if op.interleave is not None else (
-                op.shots + int(gap > 0) + int(
-                    snapshot.owner_tenant_id is not None and snapshot.owner_tenant_id != job.command.tenant_id
-                    and not self.runtime.tenant_regions))
+                op.shots + int(gap > 0) + int(_hands_over(snapshot.owner_tenant_id, job.command.tenant_id)))
             if (self.runtime.tenant_regions
-                    and snapshot.physical_qubit_ids != self.runtime.tenant_regions[job.command.tenant_id]):
+                    and snapshot.physical_qubit_ids != self.runtime.region_of(job.command)):
                 event_count += 1
             if event_count > self._max_events:
                 raise DeclaredExecutionCapacityError("physical event batch exceeds host bound")
@@ -699,6 +734,7 @@ class DeclaredQpuExecutor:
                 else:
                     lane.end_us = window.start.time_us
                     lane.active = active
+                    self._handover[job.job_id] = _hands_over(snapshot.owner_tenant_id, job.command.tenant_id)
                     self._job_lane[job.job_id] = lane
                 return active
             self.frontier._validate_confirmation(window.start)

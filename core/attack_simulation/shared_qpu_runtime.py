@@ -301,6 +301,7 @@ class SharedQpuRuntime:
         self.regional_reset_models = dict(regional_reset_models or {})
         self.regional_idle_models = dict(regional_idle_models or {})
         self.regional_service_durations = dict(regional_service_durations or {})
+        self._dedicated_regions = tuple(dict.fromkeys(self.tenant_regions.values()))
         self.idle_model = idle_model
         self.scheduler = scheduler or create_scheduler(
             config.queue_policy_id, config.cancellation_policy_id,
@@ -439,7 +440,7 @@ class SharedQpuRuntime:
         """Region/resource assignment and the tenant-handover service reset."""
         snapshot = self.state_store.read()
         if self.config.placement_policy is PlacementPolicy.TENANT_DEDICATED_REGION:
-            target_region = self.tenant_regions[job.command.tenant_id]
+            target_region = self.region_of(job.command)
             if snapshot.physical_qubit_ids != target_region:
                 self._assign_tenant_region(job, target_region)
                 snapshot = self.state_store.read()
@@ -726,6 +727,22 @@ class SharedQpuRuntime:
             return self.regional_idle_models[self.state_store.read().physical_qubit_ids]
         return self.idle_model
 
+    def region_of(self, command: JobCommand) -> tuple[int, ...]:
+        """The dedicated region a job runs on: the one holding its layout, else its tenant's home region.
+
+        ``tenant_regions`` names each tenant's home region; which regions a tenant may use is the job
+        service's permission, not a physical rule, so a later job of another tenant may take over a region
+        and inherit what the previous tenant left behind (handover reset first, as in shared placement).
+        """
+        layout = command.layout
+        if layout is None:
+            return self.tenant_regions[command.tenant_id]
+        qubits = set(layout.physical_qubit_ids)
+        for region in self._dedicated_regions:
+            if qubits <= set(region):
+                return region
+        raise ValueError("program layout is outside every dedicated region")
+
     def _service_reset(self, job: JobRecord) -> ResetModelResult | RegisterResetResult:
         snapshot = self.state_store.read()
         isolated = (
@@ -745,10 +762,18 @@ class SharedQpuRuntime:
                 subsystem_count=len(snapshot.physical_qubit_ids), targets=targets,
             ))
             self.state_store.validate_state(outcome.post_reset_state)
+            duration = self._active_service_durations()[0]
+            next_state = outcome.post_reset_state
+            idle = None if isolated else self._active_idle_model()
+            if idle is not None and duration > 0.0:
+                # The region's other qubits are not reset; they keep relaxing while the layout resets.
+                rest = {slot: duration for slot in range(len(snapshot.physical_qubit_ids)) if slot not in targets}
+                if rest:
+                    next_state = freeze_register(self._relax(np.asarray(next_state, dtype=complex), rest))
             if isolated:
                 self._assign_isolated_resource(job, self._target_qubit_id(job))
-            self._commit_event(job=job, event_kind="service_reset", next_state=outcome.post_reset_state,
-                duration_us=self._active_service_durations()[0], next_owner_tenant_id=None)
+            self._commit_event(job=job, event_kind="service_reset", next_state=next_state,
+                duration_us=duration, next_owner_tenant_id=None)
             return outcome
         model = self._active_reset_models().get(self.config.reset_model_id)
         outcome = model.run(ResetModelRequest(
@@ -781,7 +806,7 @@ class SharedQpuRuntime:
 
     def _validate_job_target(self, command: JobCommand) -> None:
         snapshot = self.state_store.read()
-        physical_ids = (self.tenant_regions[command.tenant_id]
+        physical_ids = (self.region_of(command)
                         if self.config.placement_policy is PlacementPolicy.TENANT_DEDICATED_REGION
                         else snapshot.physical_qubit_ids)
         if isinstance(command.operation, CircuitExecutionOperation):

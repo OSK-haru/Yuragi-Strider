@@ -2,6 +2,7 @@
 
 import math
 import unittest
+from dataclasses import replace
 
 import numpy as np
 from scipy.linalg import expm
@@ -46,15 +47,15 @@ def operation(columns, physical, *, shots=1, seed=1, gate_us=SX_US, qubits=None)
     return compiler(gate_us).compile(request, sampling_seed=seed, physical_qubit_ids=physical)
 
 
-def registry():
-    model = PhenomenologicalResetModel(ImperfectResetSpec(1.0, (1.0, 0.0)))
+def registry(success=1.0):
+    model = PhenomenologicalResetModel(ImperfectResetSpec(success, (1.0, 0.0)))
     reg = ResetModelRegistry()
     reg.register(model)
     return model, reg
 
 
-def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf):
-    model, reg = registry()
+def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.0):
+    model, reg = registry(reset_success)
     idle = IndependentIdleModel((IdleQubitSpec(t1, tphi, 0.0),) * 2, 2)
     runtime = SharedQpuRuntime(
         state_store=regional_store(), reset_models=reg,
@@ -77,12 +78,24 @@ def submit(runtime, tenant, columns, key, shots=1, seed=1):
     return runtime.submit(JobCommand(tenant, op, key, layout=PhysicalQubitLayout("qpu-1", REGIONS[tenant])))
 
 
-def register(executor, job, start, order):
-    lane = executor._lanes[REGIONS[job.command.tenant_id]]
-    duration = executor._duration(job, lane.store.read())
+def register(executor, job, start, order, previous_tenant=None):
+    """Declare the job's window; ``previous_tenant`` is who holds its region when it starts (handover)."""
+    lane = executor._lanes[executor.runtime.region_of(job.command)]
+    snapshot = lane.store.read()
+    if previous_tenant is not None:
+        snapshot = replace(snapshot, owner_tenant_id=previous_tenant)
+    duration = executor._duration(job, snapshot)
     executor.register_job(job.job_id, JobExecutionWindow(pos(start - 0.5, order), pos(start, order + 1),
                                                          pos(start + duration, order + 2),
                                                          pos(start + duration + 1.0, order + 3)))
+
+
+def submit_on(runtime, tenant, region, columns, key, *, qubits=None, seed=1):
+    """A job of ``tenant`` laid out on ``region``'s first ``qubits`` qubits (any region, not only its home)."""
+    qubits = len(region) if qubits is None else qubits
+    physical = tuple(region[:qubits])
+    op = operation(columns, physical, seed=seed, qubits=qubits)
+    return runtime.submit(JobCommand(tenant, op, key, layout=PhysicalQubitLayout("qpu-1", physical)))
 
 
 def ramsey(wait_us):
@@ -193,6 +206,55 @@ def dense_reference(jobs, sides, couplings, until_us):
         full = single(np.asarray(instruction.unitary, dtype=complex), targets[0])
         rho = full @ rho @ full.conj().T
     return rho
+
+
+class HandoverTests(unittest.TestCase):
+    """A region may change tenant: the next tenant's job first runs the service reset on its layout."""
+
+    def run_handover(self, zz, *, reset_success=0.6, t1=40.0, tphi=60.0):
+        runtime, executor = build(zz=zz, t1=t1, tphi=tphi, reset_success=reset_success)
+        victim = submit_on(runtime, "victim", REGIONS["victim"], [[{"type": "X", "targets": [0]},
+                                                                  {"type": "X", "targets": [1]}]], "v")
+        neighbor = submit_on(runtime, "attacker", REGIONS["attacker"],
+                             [[{"type": "H", "targets": [0]}],
+                              [{"type": "I", "targets": [0], "params": {"duration_us": 12.0}}]], "a1", seed=4)
+        # The attacker's next job takes over the victim's region and reads what the reset left on qubit 0.
+        takeover = submit_on(runtime, "attacker", REGIONS["victim"], [], "a2", qubits=1, seed=9)
+        register(executor, neighbor, 1.0, 0)
+        register(executor, victim, 2.0, 4)
+        register(executor, takeover, 6.0, 8, previous_tenant="victim")
+        run_in_order(executor)
+        return runtime, executor, (victim, neighbor, takeover)
+
+    def test_zero_coupling_handover_matches_the_region_by_region_path(self):
+        outcomes = []
+        for zz in (None, ResidualZZSettings((ResidualZZCoupling(1, 2, 0.0),), model="exact")):
+            runtime, executor, jobs = self.run_handover(zz)
+            store = executor._lanes[REGIONS["victim"]].store
+            outcomes.append(([runtime.scheduler.get(job.job_id).result for job in jobs],
+                             np.asarray(store.read().density_matrix),
+                             [(e.event_kind, e.device_time_start_us, e.device_time_end_us, e.owner_after)
+                              for e in store.events()]))
+        plain, coupled = outcomes
+        self.assertEqual(plain[0], coupled[0])
+        np.testing.assert_allclose(coupled[1], plain[1], atol=1e-10)
+        self.assertEqual([e[0] for e in plain[2]], [e[0] for e in coupled[2]])
+        for a, b in zip(plain[2], coupled[2]):
+            self.assertAlmostEqual(a[1], b[1], places=12)
+            self.assertAlmostEqual(a[2], b[2], places=12)
+            self.assertEqual(a[3], b[3])
+        handover = [e for e in plain[2] if e[0] == "service_reset"]
+        self.assertEqual(len(handover), 1)
+        self.assertAlmostEqual(handover[0][2] - handover[0][1], 1.0)       # the region's reset duration
+        self.assertIsNone(handover[0][3])
+
+    def test_the_reset_residue_reaches_the_next_tenant_through_the_joint_world(self):
+        zz = ResidualZZSettings((ResidualZZCoupling(1, 2, 0.3),), model="exact")
+        _, executor, jobs = self.run_handover(zz, reset_success=0.0, t1=math.inf, tphi=math.inf)
+        # Handover and initializing resets that never succeed hand the victim's |1> on qubit 0 to the next tenant.
+        self.assertEqual(executor.runtime.scheduler.get(jobs[2].job_id).result["counts"]["1"], 1)
+        _, executor, jobs = self.run_handover(zz, reset_success=1.0, t1=math.inf, tphi=math.inf)
+        self.assertEqual(executor.runtime.scheduler.get(jobs[2].job_id).result["counts"]["0"], 1)
 
 
 class WorldTests(unittest.TestCase):

@@ -89,6 +89,8 @@ class RegionSide:
     reset_model_id: str
     reset_us: float
     measurement_us: float
+    handover_reset_count: int = 1           # the runtime's service reset when the region changes tenant
+    handover_measures_input: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,7 @@ class WorldJob:
     start_us: float
     finish_us: float
     kicks: Callable[[], KickPlan] = lambda: EMPTY_PLAN
+    handover: bool = False          # the region changes tenant: service reset of the layout before the shots
 
 
 @dataclass
@@ -118,13 +121,15 @@ class _Progress:
     assignment: dict = field(default_factory=dict)
     duration: float = 0.0
     classical: list = field(default_factory=list)
+    first_shot_us: float = 0.0
+    handover: tuple | None = None   # (reduced state, duration) of the handover service reset
 
     def copy(self) -> "_Progress":
         generator = random.Random()
         generator.setstate(self.generator.getstate())
         return _Progress(self.actions, self.layout, self.pointer, self.last_seq, self.last_time, Counter(self.applied), generator,
                          dict(self.counts), list(self.records), dict(self.assignment), self.duration,
-                         list(self.classical))
+                         list(self.classical), self.first_shot_us, self.handover)
 
     @property
     def done(self) -> bool:
@@ -255,6 +260,13 @@ class CoupledRegionWorld:
             raise ValueError("the job has not been simulated through its finish")
         return progress.records, progress.counts
 
+    def handover_record(self, job_id: str) -> tuple | None:
+        """``(reduced state, duration)`` after the job's handover service reset, or None without one."""
+        progress = self.progress[job_id]
+        if not progress.done:
+            raise ValueError("the job has not been simulated through its finish")
+        return progress.handover
+
     # ----- actions ---------------------------------------------------------------------------------------
 
     def _start(self, job: WorldJob) -> _Progress:
@@ -264,9 +276,10 @@ class CoupledRegionWorld:
         groups = len({i.time_group for i in operation.instructions if i.kind == "measure"})
         shot_length = measure_start + side.measurement_us * groups
         count = len(operation.instructions)
-        actions = []
+        first = job.start_us + (side.reset_us if job.handover else 0.0)
+        actions = [(job.start_us, (-1, 0, 0, 0), "handover", None)] if job.handover else []
         for shot in range(operation.shots):
-            begin = job.start_us + shot * (shot_length + self.repetition_delay_us)
+            begin = first + shot * (shot_length + self.repetition_delay_us)
             actions.append((begin, (shot, -2, 0, 0), "shot", shot))
             for index, (instruction, start) in enumerate(zip(operation.instructions, starts)):
                 if instruction.kind != "measure":
@@ -275,7 +288,7 @@ class CoupledRegionWorld:
             actions.append((begin + shot_length, (shot, count + 1, 1, 0), "commit", shot))
         return _Progress(actions, (starts, measure_start, shot_length),
                          generator=random.Random(operation.sampling_seed),
-                         counts={"0": 0, "1": 0} if operation.classical_bits == 1 else {})
+                         counts={"0": 0, "1": 0} if operation.classical_bits == 1 else {}, first_shot_us=first)
 
     def _pending(self, job: WorldJob, progress: _Progress) -> list:
         """Remaining actions with the kicks known now, in program order, each with a non-decreasing time."""
@@ -284,7 +297,7 @@ class CoupledRegionWorld:
         plan = job.kicks()
         kicks = []
         for shot in range(job.operation.shots):
-            begin = job.start_us + shot * (shot_length + self.repetition_delay_us)
+            begin = progress.first_shot_us + shot * (shot_length + self.repetition_delay_us)
             for order, kick in enumerate(plan.of_shot(shot)):
                 if kick.wait_offset_us is not None:
                     kicks.append((begin - self.repetition_delay_us + kick.wait_offset_us, (shot, -3, 0, order),
@@ -294,7 +307,7 @@ class CoupledRegionWorld:
                     kicks.append((begin + (measure_start if at is None else at), (shot, kick.position, 0, order),
                                   (shot, kick)))
         last = job.operation.shots - 1
-        end = job.start_us + last * (shot_length + self.repetition_delay_us) + shot_length
+        end = progress.first_shot_us + last * (shot_length + self.repetition_delay_us) + shot_length
         kicks.extend((end, (last, count + 1, 0, order), (last, kick)) for order, kick in enumerate(plan.trailing))
         seen = Counter(progress.applied)
         fresh, late = [], []
@@ -317,7 +330,21 @@ class CoupledRegionWorld:
         side_index, side = job.side, self.sides[job.side]
         operation = job.operation
         starts, measure_start, shot_length = progress.layout
+        if kind == "handover":
+            # As the runtime's service reset: only the new layout is reset; the rest of the region keeps
+            # what the previous tenant left (and keeps relaxing / coupling meanwhile).
+            self._touch(side_index, job.slots, when)
+            self._relax_to(side_index, job.slots, actual)
+            self._reset(side_index, job.slots, count=side.handover_reset_count,
+                        measures_input=side.handover_measures_input)
+            for slot in job.slots:
+                self.free[side_index][slot] = max(self.free[side_index][slot], actual + side.reset_us)
+            return
         if kind == "shot":
+            if job.handover and progress.handover is None:
+                # The service-reset record is the region when the reset ends, i.e. when the first shot begins.
+                self.settle(side_index, when)
+                progress.handover = (self.reduced_state(side_index), side.reset_us)
             progress.assignment = {}
             progress.duration = self.repetition_delay_us if payload else 0.0
             if operation.initialization == "inherit":
@@ -472,7 +499,7 @@ class CoupledRegionWorld:
             mixed = _replace_with_mixed(mixed, slot)
         self._set(side, (1.0 - probability) * stack + probability * mixed)
 
-    def _reset(self, side: int, slots: tuple[int, ...]):
+    def _reset(self, side: int, slots: tuple[int, ...], *, count: int = 1, measures_input: bool = False):
         """The region's reset model on every factor, by linearity over valid density matrices."""
         spec = self.sides[side]
         size = len(spec.region)
@@ -489,7 +516,7 @@ class CoupledRegionWorld:
                         continue
                     density = (vectors * (selected / total)) @ vectors.conj().T
                     reset = spec.reset_models.run_register(spec.reset_model_id, ResetModelRequest(
-                        input_state=freeze_register(density), reset_count=1, victim_measurement=False,
+                        input_state=freeze_register(density), reset_count=count, victim_measurement=measures_input,
                         subsystem_count=size, targets=slots))
                     errors = reset.assignment_errors
                     out += weight * sign * total * np.asarray(reset.post_reset_state, dtype=complex)

@@ -9,7 +9,7 @@ own finish. This module holds the lane bookkeeping and the kick assembly; the ex
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
@@ -85,18 +85,19 @@ def build_lane_stores(base: QpuStateStore) -> dict[tuple[int, ...], QpuStateStor
 def execution_window(job_id: str, tenant_id: str, operation: CircuitExecutionOperation,
                      layout_qubit_ids: Sequence[int], region: Sequence[int], start: EventPosition,
                      finish: EventPosition, *, reset_duration_us: float, measurement_duration_us: float,
-                     repetition_delay_us: float, pulse_shape: PulseShape,
+                     repetition_delay_us: float, pulse_shape: PulseShape, handover_us: float = 0.0,
                      schedule: DriveSchedule | None = None) -> ExecutionWindow:
     """The job's window with the whole region as receivers (program qubits first, then the rest).
 
     The region's qubits outside the program receive leaks too; ``place_kicks`` treats them as qubits
-    without a program of their own.
+    without a program of their own. ``handover_us`` is the service reset before the first shot when the
+    region changes tenant; it drives nothing and only delays the shots.
     """
-    if schedule is None:
+    if schedule is None or schedule.offset_us != handover_us:
         schedule = DriveSchedule(
             shot_activity(operation, reset_duration_us=reset_duration_us,
                           measurement_duration_us=measurement_duration_us, pulse_shape=pulse_shape),
-            operation.shots, repetition_delay_us)
+            operation.shots, repetition_delay_us, handover_us)
     layout = tuple(layout_qubit_ids)
     qubits = layout + tuple(q for q in region if q not in layout)
     return ExecutionWindow(job_id, tenant_id, qubits, start, finish, schedule)
@@ -119,7 +120,3 @@ def kicks_for(target: ExecutionWindow, previous: ExecutionWindow | None,
         return EMPTY_PLAN
     return place_kicks(leaks, operation, target.schedule, window_start_us=target.start.time_us,
                        reset_duration_us=reset_duration_us, layout_qubit_ids=layout_qubit_ids)
-
-
-def lane_key_of_tenant(tenant_regions: Mapping[str, tuple[int, ...]], tenant_id: str) -> tuple[int, ...]:
-    return tenant_regions[tenant_id]
