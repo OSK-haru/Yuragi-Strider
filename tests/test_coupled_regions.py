@@ -208,16 +208,112 @@ def dense_reference(jobs, sides, couplings, until_us):
     return rho
 
 
+def dense_reference_with_resets(jobs, sides, couplings, until_us, initial, success):
+    """Union-register Lindblad evolution with timed resets, written apart from the world's machinery.
+
+    A reset is ``E(rho) = (1 - s) rho + s |0><0| Tr`` on one qubit at its start time; the qubit then stays
+    busy (no relaxation, ZZ still on) for the side's reset time. Unitaries have zero duration. A handover job
+    resets its layout first and starts its shots one reset time later.
+    """
+    sizes = [len(side.region) for side in sides]
+    n = sum(sizes)
+    offset = (0, sizes[0])
+    dim = 1 << n
+
+    def single(op, q):
+        out = np.eye(1)
+        for k in range(n):
+            out = np.kron(out, op if k == q else np.eye(2))
+        return out
+
+    number = np.array([[0, 0], [0, 1]], dtype=complex)
+    hamiltonian = np.zeros((dim, dim), dtype=complex)
+    for (sa, qa), (sb, qb), zeta in couplings:
+        hamiltonian += zeta * single(number, offset[sa] + qa) @ single(number, offset[sb] + qb)
+    eye = np.eye(dim)
+
+    def generator(busy):
+        out = -1j * (np.kron(eye, hamiltonian) - np.kron(hamiltonian.T, eye))
+        for s, side in enumerate(sides):
+            for q, spec in enumerate(side.idle_model.qubits):
+                g = offset[s] + q
+                if g in busy:
+                    continue
+                ops = []
+                if math.isfinite(spec.t1_us):
+                    ops.append(math.sqrt(1.0 / spec.t1_us) * single(np.array([[0, 1], [0, 0]], dtype=complex), g))
+                if math.isfinite(spec.tphi_us):
+                    ops.append(math.sqrt(0.5 / spec.tphi_us) * single(np.diag([1, -1]).astype(complex), g))
+                for c in ops:
+                    cc = c.conj().T @ c
+                    out = out + np.kron(c.conj(), c) - 0.5 * np.kron(eye, cc) - 0.5 * np.kron(cc.T, eye)
+        return out
+
+    def reset(rho, g):
+        lowered = single(np.array([[1, 0], [0, 0]], dtype=complex), g)
+        raised = single(np.array([[0, 1], [0, 0]], dtype=complex), g)
+        to_zero = lowered @ rho @ lowered + raised @ rho @ raised.conj().T
+        return (1.0 - success) * rho + success * to_zero
+
+    events = []   # (time, order, kind, global qubits, payload)
+    for job in jobs:
+        side = sides[job.side]
+        first = job.start_us
+        if job.handover:
+            for slot in job.slots:
+                events.append((job.start_us, len(events), "reset", offset[job.side] + slot, side.reset_us))
+            first += side.reset_us
+        starts, _ = instruction_starts(job.operation, reset_duration_us=side.reset_us)
+        for instruction, start in zip(job.operation.instructions, starts):
+            if start is None:
+                continue
+            targets = [offset[job.side] + job.slots[q] for q in instruction.qubits]
+            if instruction.kind in {"initialize", "reset"}:
+                for g in targets:
+                    events.append((first + start, len(events), "reset", g, side.reset_us))
+            elif instruction.kind == "unitary":
+                if len(targets) != 1:
+                    raise ValueError("the reference only takes one-qubit gates")
+                events.append((first + start, len(events), "unitary", targets[0], instruction.unitary))
+    events = sorted((e for e in events if e[0] <= until_us), key=lambda e: (e[0], e[1]))
+    busy_until = {}
+    rho = np.array(initial, dtype=complex)
+    now = 0.0
+    pending = list(events)
+    while True:
+        busy = {g for g, end in busy_until.items() if end > now}
+        ends = [end for end in busy_until.values() if now < end < until_us]
+        next_time = min([pending[0][0]] if pending else [until_us])
+        step_to = min([next_time] + ends + [until_us])
+        if step_to > now:
+            vec = rho.reshape(-1, order="F")
+            rho = (expm(generator(busy) * (step_to - now)) @ vec).reshape(dim, dim, order="F")
+            now = step_to
+        if pending and pending[0][0] <= now:
+            _, _, kind, g, payload = pending.pop(0)
+            if kind == "reset":
+                rho = reset(rho, g)
+                busy_until[g] = max(busy_until.get(g, 0.0), now + payload)
+            else:
+                full = single(np.asarray(payload, dtype=complex), g)
+                rho = full @ rho @ full.conj().T
+            continue
+        if now >= until_us:
+            return rho
+
+
 class HandoverTests(unittest.TestCase):
     """A region may change tenant: the next tenant's job first runs the service reset on its layout."""
 
-    def run_handover(self, zz, *, reset_success=0.6, t1=40.0, tphi=60.0):
-        runtime, executor = build(zz=zz, t1=t1, tphi=tphi, reset_success=reset_success)
+    def run_handover(self, zz, *, reset_success=0.6, t1=40.0, tphi=60.0, transfers=()):
+        runtime, executor = build(zz=zz, t1=t1, tphi=tphi, reset_success=reset_success, transfers=transfers)
         victim = submit_on(runtime, "victim", REGIONS["victim"], [[{"type": "X", "targets": [0]},
                                                                   {"type": "X", "targets": [1]}]], "v")
         neighbor = submit_on(runtime, "attacker", REGIONS["attacker"],
                              [[{"type": "H", "targets": [0]}],
-                              [{"type": "I", "targets": [0], "params": {"duration_us": 12.0}}]], "a1", seed=4)
+                              [{"type": "I", "targets": [0], "params": {"duration_us": 4.5}}],
+                              [{"type": "X", "targets": [0]}],     # at about 6.5 us, inside the handover reset
+                              [{"type": "I", "targets": [0], "params": {"duration_us": 6.0}}]], "a1", seed=4)
         # The attacker's next job takes over the victim's region and reads what the reset left on qubit 0.
         takeover = submit_on(runtime, "attacker", REGIONS["victim"], [], "a2", qubits=1, seed=9)
         register(executor, neighbor, 1.0, 0)
@@ -227,9 +323,11 @@ class HandoverTests(unittest.TestCase):
         return runtime, executor, (victim, neighbor, takeover)
 
     def test_zero_coupling_handover_matches_the_region_by_region_path(self):
+        # The neighbor's drive leaks onto the victim region, also while the handover reset runs there.
+        transfers = [DriveCrosstalkTransfer(2, 0, 0.0, 0.3), DriveCrosstalkTransfer(2, 1, 0.2, 0.1)]
         outcomes = []
         for zz in (None, ResidualZZSettings((ResidualZZCoupling(1, 2, 0.0),), model="exact")):
-            runtime, executor, jobs = self.run_handover(zz)
+            runtime, executor, jobs = self.run_handover(zz, transfers=transfers)
             store = executor._lanes[REGIONS["victim"]].store
             outcomes.append(([runtime.scheduler.get(job.job_id).result for job in jobs],
                              np.asarray(store.read().density_matrix),
@@ -308,6 +406,29 @@ class WorldTests(unittest.TestCase):
         couplings = (ResidualZZCoupling(1, 2, 1.1), ResidualZZCoupling(1, 3, 0.6))
         world, sides, jobs = self.run_world(size, ResidualZZSettings(couplings, model="exact"), until)
         reference = dense_reference(jobs, sides, [((0, 1), (1, 0), 1.1), ((0, 1), (1, 1), 0.6)], until)
+        np.testing.assert_allclose(self.joint(world), reference, atol=1e-10)
+
+    def test_handover_with_coupling_matches_an_independent_reference(self):
+        """Timed resets (busy, ZZ on), an imperfect handover reset, and the shifted shots, against SciPy."""
+        # Before job a's measurement (0.25 + 0.4 reset + 2.2 waits = 2.85); b's shot starts at 1.0 after handover.
+        size, until, success, reset_us = 2, 2.6, 0.7, 0.4
+        model, reg = registry(success)
+        idle = IndependentIdleModel((IdleQubitSpec(30.0, 50.0, 0.0),) * size, size)
+        sides = (RegionSide((0, 1), idle, reg, model.model_id, reset_us, 1.0),
+                 RegionSide((2, 3), idle, reg, model.model_id, reset_us, 1.0))
+        a, b = self.scenario(size)
+        b = replace(b, handover=True)
+        plus_one = np.kron(np.array([[0.5, 0.5], [0.5, 0.5]]), np.array([[0, 0], [0, 1]])).astype(complex)
+        zero = np.zeros((4, 4), dtype=complex)
+        zero[0, 0] = 1.0
+        couplings = (ResidualZZCoupling(1, 2, 1.3),)
+        world = CoupledRegionWorld(sides, ResidualZZSettings(couplings, model="exact"), (zero, plus_one),
+                                   repetition_delay_us=0.0)
+        world.advance_to(until, (a, b))
+        world.settle(0, until)
+        world.settle(1, until)
+        reference = dense_reference_with_resets((a, b), sides, [((0, 1), (1, 0), 1.3)], until,
+                                                np.kron(zero, plus_one), success)
         np.testing.assert_allclose(self.joint(world), reference, atol=1e-10)
 
     def test_low_rank_stays_within_its_dropped_norm(self):
