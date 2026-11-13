@@ -775,6 +775,11 @@ def _assumptions(snapshot: DeviceSnapshot, region: tuple[int, ...], mode: str,
                 "Number of reset attempts at one service transition; it is not a per-shot reset claim. An interleaved observation run applies the same reset at every victim/attacker handover, so a higher count suppresses the leaked bit."),
         _record("qpu_service.runtime_execution.handover_reset_scope", AssumptionBasis.SIMULATOR_CHOICE,
                 "Which qubits the service resets when a region changes tenant: the new tenant's layout only, or the whole region. An operator policy, not physics; IBM documents a reset of the circuit's qubits before each shot (init_qubits) but not what is reset between tenants. Qubits outside the reset keep the previous tenant's state and only relax."),
+        _record("qpu_service.runtime_execution.readout_dephasing_per_us", AssumptionBasis.SIMULATOR_CHOICE,
+                "Measurement-induced dephasing rate during a readout, under which a drive leak in the first half of a"
+                " qubit's readout evolves (quantum Zeno). The calibration snapshot gives no such rate; null is the"
+                " strong-measurement limit, where such a leak does not change the result and only turns the state the"
+                " measurement leaves."),
         _record("qpu_service.runtime_execution.measure_input_state_before_transition",
                 AssumptionBasis.SIMULATOR_CHOICE,
                 "At a user transition, measure the input qubits before conditional-X reset; this models a measurement-based reset mechanism, not a guaranteed policy of the referenced service."),

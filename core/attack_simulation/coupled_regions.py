@@ -35,7 +35,9 @@ import random
 import numpy as np
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
-from core.attack_simulation.kick_application import EMPTY_PLAN, KickPlan, PlacedKick, kick_unitary
+from core.attack_simulation.kick_application import (
+    EMPTY_PLAN, KickPlan, PlacedKick, apply_readout_decisions, kick_unitary,
+)
 from core.attack_simulation.register_readout import register_assignment_errors
 from core.attack_simulation.shot_activity import instruction_starts
 from core.cptp_liouvillian import dense_matrix_exponential, gksl_liouvillian_superoperator
@@ -94,6 +96,7 @@ class RegionSide:
     handover_reset_count: int = 1           # the runtime's service reset when the region changes tenant
     handover_measures_input: bool = False
     handover_scope: str = "layout"          # "layout": the new tenant's qubits; "region": every qubit
+    readout_dephasing_per_us: float | None = None   # None: strong-measurement (Zeno) limit
 
 
 @dataclass(frozen=True)
@@ -311,7 +314,13 @@ class CoupledRegionWorld:
             for order, kick in enumerate(plan.of_shot(shot)):
                 if kick.before_handover and not job.handover:
                     raise ValueError("leaks were placed before a handover that does not happen")
-                if kick.in_reset:
+                if kick.readout is not None:
+                    # Folded into the shot's measurement (``_readout``); late once that is simulated.
+                    end = (shot, count, 2, 0)
+                    if end > progress.last_seq:
+                        continue
+                    kicks.append((begin + measure_start, end, (shot, kick)))
+                elif kick.in_reset:
                     # Folded into its reset's end (``_feedback``). Once that end is simulated, a kick
                     # learned only now is late: it then acts as a plain rotation (counted below).
                     end = (-1, 1, 0, 0) if kick.before_handover else (shot, kick.position, 1, 1)
@@ -422,7 +431,17 @@ class CoupledRegionWorld:
             measured_slots = tuple(job.slots[q] for q in measured_qubits)
             self._flush(when)
             self._relax_to(side_index, range(len(side.region)), actual)
+            readout = self._readout(job, progress, payload)
+            # A leak during a qubit's readout acts on the collapsed state (strong measurement, quantum Zeno);
+            # the thresholded result is the state at the window's middle (``kick_application``).
+            if any(kick.readout == "decision" for kick in readout):
+                self._set(side_index, np.array([
+                    apply_readout_decisions(term, readout, side.region.index, side.readout_dephasing_per_us)
+                    for term in self.factors[side_index]]))
             bits = self._sample(side_index, measured_slots, progress.generator)
+            for kick in readout:
+                if kick.readout == "after":
+                    self._unitary(side_index, kick_unitary(kick), (side.region.index(kick.qubit),))
             classical = [0] * operation.classical_bits
             for q, bit, target in zip(measured_qubits, bits, targets):
                 p10, p01 = progress.assignment[q]
@@ -536,6 +555,20 @@ class CoupledRegionWorld:
         for slot in slots:
             mixed = _replace_with_mixed(mixed, slot)
         self._set(side, (1.0 - probability) * stack + probability * mixed)
+
+    def _readout(self, job: WorldJob, progress: _Progress, shot: int) -> list:
+        """The kicks known now that arrive during this shot's readout of a measured qubit."""
+        found = []
+        seen = Counter(progress.applied)
+        for kick in job.kicks().of_shot(shot):
+            if kick.readout is None:
+                continue
+            if seen[(shot, kick)] > 0:
+                seen[(shot, kick)] -= 1
+                continue
+            progress.applied[(shot, kick)] += 1
+            found.append(kick)
+        return found
 
     def _feedback(self, job: WorldJob, progress: _Progress, shot: int, position: int | None) -> list:
         """The kicks known now that arrive in the feedback of this reset (``position`` None: the handover)."""

@@ -25,8 +25,13 @@ How a leak becomes a kick, in the simulator's frame (virtual Z applied to the st
   the reset, which may erase it. A leak during the feedback acts on the collapsed branch and is flipped
   with it: it is marked ``in_reset`` and the runtime folds it into that reset
   (``apply_reset_with_feedback_kick``).
-* A leak while the target does something else (waits, a two-qubit gate, measurement, or has no program
-  on that qubit) is placed before the first instruction that starts after the leak begins, with the axis
+* A leak on a qubit while it is read out: the readout is a strong measurement, so the qubit's coherence is
+  gone at once and the leak acts on the collapsed state (quantum Zeno); the integrated readout signal is
+  thresholded, so for one change of state the result is the state at the middle of the window. A leak in
+  the first half is marked ``readout="decision"`` (it turns the collapsed state before the result is
+  decided); one in the second half ``readout="after"`` (it only changes the state the measurement leaves).
+* A leak while the target does something else (waits, a two-qubit gate, or has no program on that
+  qubit) is placed before the first instruction that starts after the leak begins, with the axis
   at the frame in force there.
 * A leak before the window starts (the gap since the previous job) or in the wait between shots goes to
   the start of the next shot. When the window begins with the handover reset, the gap and the handover
@@ -48,6 +53,7 @@ import numpy as np
 from core.attack_simulation.concurrent_windows import DriveLeak, DriveSchedule
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.shot_activity import instruction_starts
+from core.register_operations import apply_local_bloch_map, driven_dephasing_bloch
 
 # Accuracy against cost. These favour computation time (the decision of 2026-10-19): about 1% of the
 # leak's effect is lost for a far-detuned drive, and the cost hardly moves with them, because it is the
@@ -76,6 +82,8 @@ class PlacedKick:
     wait_offset_us: float | None = None
     before_handover: bool = False       # acts before the window's handover reset (shot 0, position 0)
     in_reset: bool = False              # arrives in the feedback part of the reset it is placed before
+    readout: str | None = None          # "decision" / "after": in the first / second half of the qubit's readout
+    readout_span: tuple[float, float] | None = None   # decision: (start after the readout begins, duration), us
 
     def __post_init__(self) -> None:
         if type(self.position) is not int or self.position < 0:
@@ -95,6 +103,16 @@ class PlacedKick:
             raise ValueError("a kick before the handover sits at the window start")
         if self.in_reset and self.wait_offset_us is not None:
             raise ValueError("a kick in a reset's feedback is not in a wait")
+        if self.readout not in (None, "decision", "after") or (self.readout and (
+                self.in_reset or self.before_handover or self.wait_offset_us is not None)):
+            raise ValueError("a readout kick is only 'decision' or 'after', inside a shot's readout")
+        if (self.readout == "decision") != (self.readout_span is not None):
+            raise ValueError("a decision kick needs its place in the readout window")
+        if self.readout_span is not None:
+            offset, length = (float(value) for value in self.readout_span)
+            if not (math.isfinite(offset) and math.isfinite(length)) or offset < 0.0 or length < 0.0:
+                raise ValueError("a readout span is a finite nonnegative (offset, duration)")
+            object.__setattr__(self, "readout_span", (offset, length))
 
 
 @dataclass(frozen=True)
@@ -109,6 +127,29 @@ class KickPlan:
 
 
 EMPTY_PLAN = KickPlan(())
+
+
+def apply_readout_decisions(state: np.ndarray, kicks: Sequence[PlacedKick], slot_of,
+                            dephasing_per_us: float | None) -> np.ndarray:
+    """The ``readout="decision"`` kicks of one shot, before the result is drawn.
+
+    The strong readout dephases the qubit at ``dephasing_per_us`` (the measurement-induced rate); each leak is a
+    constant drive over its span, evolved exactly with that dephasing, after the decay since the readout began
+    (``driven_dephasing_bloch``). ``None`` is the strong-measurement limit: the quantum Zeno effect freezes the
+    population, so these leaks do not change the result (they still act through ``readout="after"``).
+    """
+    if dephasing_per_us is None:
+        return state
+    clock: dict[int, float] = {}
+    for kick in sorted((k for k in kicks if k.readout == "decision"), key=lambda k: k.readout_span[0]):
+        slot = slot_of(kick.qubit)
+        offset, length = kick.readout_span
+        wait = max(offset - clock.get(slot, 0.0), 0.0)
+        bloch = driven_dephasing_bloch(kick.rotation, length, dephasing_per_us) @ driven_dephasing_bloch(
+            (0.0, 0.0, 0.0), wait, dephasing_per_us)
+        state = apply_local_bloch_map(state, slot, bloch)
+        clock[slot] = offset + length
+    return state
 
 
 def kick_unitary(placed: PlacedKick) -> np.ndarray:
@@ -230,7 +271,16 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
     reset_spans = [(start, start + reset_duration_us, index, frozenset(instruction.qubits))
                    for index, (instruction, start) in enumerate(zip(operation.instructions, starts))
                    if instruction.kind in {"initialize", "reset"} and reset_duration_us > 0.0]
-    cuts = sorted({edge for begin, end, _, _ in reset_spans for edge in (begin, begin + measuring, end)})
+    # Readout windows of the measured program qubits: (start, middle, end, program qubit).
+    readouts = [(item.start_us, 0.5 * (item.start_us + item.end_us), item.end_us, item.qubit)
+                for item in schedule.shot.intervals if item.kind == "measure"]
+
+    def cuts_for(program: int | None) -> list[float]:
+        """Where a leak on this program qubit changes role: its resets' and its readout's edges."""
+        return sorted({edge for begin, end, _, targets in reset_spans if program in targets
+                       for edge in (begin, begin + measuring, end)}
+                      | {edge for begin, middle, end, qubit in readouts if qubit == program
+                         for edge in (begin, middle, end)})
     target_shape = schedule.shot.pulse_shape
     timelines: dict[int, _Timeline] = {}
 
@@ -244,8 +294,10 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
     accumulated: dict[tuple[int | None, int, int, float, float, float | None], list] = {}
 
     def add(shot: int | None, position: int, leak: DriveLeak, vector: np.ndarray,
-            begin: float, end: float, wait_offset: float | None = None, in_reset: bool = False) -> None:
-        entry = accumulated.setdefault((shot, position, leak.qubit, begin, end, wait_offset, in_reset),
+            begin: float, end: float, wait_offset: float | None = None, in_reset: bool = False,
+            readout: str | None = None, readout_start: float | None = None) -> None:
+        span = None if readout != "decision" else (begin - readout_start, end - begin)
+        entry = accumulated.setdefault((shot, position, leak.qubit, begin, end, wait_offset, in_reset, readout, span),
                                        [np.zeros(3), set()])
         entry[0] += vector
         entry[1].add(leak.source_job_id)
@@ -284,15 +336,20 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
         program = program_qubit.get(leak.qubit)
         # A cut within rounding of an end would only add an empty slice.
         tolerance = 1e-12 * max(1.0, abs(begin), abs(end))
-        edges = [begin] + [cut for cut in cuts if begin + tolerance < cut < end - tolerance] + [end]
+        edges = [begin] + [cut for cut in cuts_for(program) if begin + tolerance < cut < end - tolerance] + [end]
         for low, high in zip(edges, edges[1:]):
             span = next(((start, index) for start, stop, index, targets in reset_spans
                          if start <= low < stop and program in targets), None)
             position = bisect_right(keys, low) if span is None else span[1]
             feedback = span is not None and low >= span[0] + measuring
+            window = next(((start, middle) for start, middle, stop, qubit in readouts
+                           if qubit == program and start <= low < stop), None)
+            readout = None if window is None else "decision" if low < window[1] else "after"
+            if readout is not None:
+                position = end_position
             frame = 0.0 if frames is None else frames[position]
             add(shot, position, leak, plain(leak, base + low, base + high, frame), base + low, base + high,
-                in_reset=feedback)
+                in_reset=feedback, readout=readout, readout_start=None if window is None else base + window[0])
 
     for leak in sorted(leaks, key=lambda k: (k.start_us, k.qubit, k.source_job_id, k.source_qubit)):
         program = program_qubit.get(leak.qubit)
@@ -354,10 +411,10 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
     per_shot: list[list[PlacedKick]] = [[] for _ in range(shots)]
     trailing: list[PlacedKick] = []
     # shot -1 marks the kicks before the handover reset; they lead shot 0's list.
-    for (shot, position, qubit, _begin, _end, wait_offset, in_reset), (vector, sources) in sorted(
+    for (shot, position, qubit, _begin, _end, wait_offset, in_reset, readout, span), (vector, sources) in sorted(
             accumulated.items(), key=lambda item: (-2 if item[0][0] is None else item[0][0], item[0][1],
                                                    item[0][2], item[0][3])):
         placed = PlacedKick(position, qubit, tuple(vector), tuple(sorted(sources)), wait_offset, shot == -1,
-                            in_reset)
+                            in_reset, readout, span)
         (trailing if shot is None else per_shot[max(shot, 0)]).append(placed)
     return KickPlan(tuple(tuple(shot) for shot in per_shot), tuple(trailing))

@@ -25,7 +25,9 @@ from core.attack_simulation.jobs import (
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.coupled_regions import ZZ_MODELS
 from core.attack_simulation.interleaved_execution import derived_seed, interleaved_work
-from core.attack_simulation.kick_application import EMPTY_PLAN, KickPlan, PlacedKick, kick_unitary
+from core.attack_simulation.kick_application import (
+    EMPTY_PLAN, KickPlan, PlacedKick, apply_readout_decisions, kick_unitary,
+)
 from core.attack_simulation.shot_activity import instruction_starts
 from core.attack_simulation.program_request import STATE_INHERIT_OPERATION_ID, interleave_operation_id
 from core.attack_simulation.register_readout import register_assignment_errors
@@ -74,6 +76,10 @@ class SharedQpuRuntimeConfig:
     # Which qubits the handover reset covers: the new tenant's layout, or the whole region. An operator
     # policy, not physics; no public source states what a cloud provider resets between tenants.
     handover_reset_scope: str = "layout"
+    # Measurement-induced dephasing during a readout, 1/us; a drive leak in the first half of a qubit's readout
+    # evolves under it (quantum Zeno). None is the strong-measurement limit (such leaks do not change the result).
+    # Not in calibration data; sweep it in a study.
+    readout_dephasing_per_us: float | None = None
     placement_policy: PlacementPolicy = (
         PlacementPolicy.GUARANTEED_SAME_PHYSICAL_QUBIT
     )
@@ -113,7 +119,7 @@ class SharedQpuRuntimeConfig:
         """Return every behavior-changing runtime value for pre-start freezing."""
         binding = self.resource_binding
         config = {
-            "schema_version": "shared_qpu_runtime_v6",
+            "schema_version": "shared_qpu_runtime_v7",
             "reset_model_id": self.reset_model_id,
             "reset_model_configuration_id": self.reset_model_configuration_id,
             "reset_model_mode": self.reset_model_mode.value,
@@ -125,6 +131,7 @@ class SharedQpuRuntimeConfig:
             "cancellation_policy_id": self.cancellation_policy_id,
             "measure_input_state_before_transition": self.measure_input_state_before_transition,
             "handover_reset_scope": self.handover_reset_scope,
+            "readout_dephasing_per_us": self.readout_dephasing_per_us,
             "placement_policy": self.placement_policy.value,
             "isolated_assignment_duration_us": self.isolated_assignment_duration_us,
             "program_measurement_duration_us": self.program_measurement_duration_us,
@@ -176,6 +183,11 @@ class SharedQpuRuntimeConfig:
         object.__setattr__(self, "reset_count", count)
         if self.handover_reset_scope not in HANDOVER_RESET_SCOPES:
             raise ValueError("handover_reset_scope must be layout or region")
+        rate = self.readout_dephasing_per_us
+        if rate is not None:
+            if type(rate) not in (int, float) or not math.isfinite(rate) or rate < 0.0:
+                raise ValueError("readout_dephasing_per_us must be None or a finite nonnegative rate")
+            object.__setattr__(self, "readout_dephasing_per_us", float(rate))
         for name in (
             "reset_duration_us",
             "victim_operation_duration_us",
@@ -595,10 +607,13 @@ class SharedQpuRuntime:
             # the tolerance of an earlier one reuses its result; the random draws are unchanged.
             # A shot with kicks depends on more than its entry state, so it neither reuses nor is reused.
             shot_kicks = kicks.of_shot(shot_index)
+            readout_kicks = tuple(kick for kick in shot_kicks if kick.readout is not None)
             cached = None if shot_kicks else _find_reusable(
                 cache, shot_index > 0, entry_state, self.config.entry_reuse_tolerance)
             if cached is None:
-                cached = self._run_before_measurement(operation, slots, entry_state, shot_index, shot_kicks)
+                cached = self._run_before_measurement(
+                    operation, slots, entry_state, shot_index,
+                    tuple(kick for kick in shot_kicks if kick.readout is None))
                 computed += 1
                 if not shot_kicks:
                     if len(cache) >= _entry_cache_size(entry_state):
@@ -610,7 +625,13 @@ class SharedQpuRuntime:
             classical = [0] * operation.classical_bits
             # The validated final block has distinct, commuting targets and no later gates.
             # Sample its joint distribution once.
+            # A leak during a qubit's readout (strong measurement, quantum Zeno) acts on the collapsed state; the
+            # thresholded result is the state at the window's middle (``kick_application``).
+            state = apply_readout_decisions(state, readout_kicks, self._slot_of, self.config.readout_dephasing_per_us)
             state, bits = sample_measurement(state, measured_slots, generator)
+            for placed in readout_kicks:
+                if placed.readout == "after":
+                    state = self._apply_kick(state, placed)
             # Qubits outside the measurement idle while it runs (D85). Local channels on other qubits
             # commute with the projective measurement, so relaxing after the draw is exact.
             if measurement_duration > 0.0 and self._active_idle_model() is not None:

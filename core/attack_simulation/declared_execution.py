@@ -175,7 +175,8 @@ class DeclaredQpuExecutor:
                                      runtime.config.reset_model_id, *durations[region],
                                      handover_reset_count=runtime.config.reset_count,
                                      handover_measures_input=runtime.config.measure_input_state_before_transition,
-                                     handover_scope=runtime.config.handover_reset_scope)
+                                     handover_scope=runtime.config.handover_reset_scope,
+                                     readout_dephasing_per_us=runtime.config.readout_dephasing_per_us)
                           for region in regions)
             self._world = CoupledRegionWorld(
                 sides, concurrent_regions.residual_zz,

@@ -55,14 +55,15 @@ def registry(success=1.0):
 
 
 def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.0, region_access=None,
-          durations=(1.0, 1.0)):
+          durations=(1.0, 1.0), readout_dephasing=None):
     model, reg = registry(reset_success)
     idle = IndependentIdleModel((IdleQubitSpec(t1, tphi, 0.0),) * 2, 2)
     runtime = SharedQpuRuntime(
         state_store=regional_store(), reset_models=reg,
         config=SharedQpuRuntimeConfig(model.model_id, model.configuration_id,
                                       placement_policy=PlacementPolicy.TENANT_DEDICATED_REGION,
-                                      max_local_qubits=2, entry_reuse_tolerance=0.0),
+                                      max_local_qubits=2, entry_reuse_tolerance=0.0,
+                                      readout_dephasing_per_us=readout_dephasing),
         tenant_regions=REGIONS, regional_reset_models={(0, 1): reg, (2, 3): reg},
         regional_idle_models={(0, 1): idle, (2, 3): idle},
         regional_service_durations={(0, 1): durations, (2, 3): durations}, region_access=region_access)
@@ -385,6 +386,37 @@ class ResetFeedbackTests(unittest.TestCase):
                 self.assertEqual(self.attacker_reads(2.8, zz), "0")    # 3.0 us is in [2.8, 3.2): measurement
                 self.assertEqual(self.attacker_reads(2.5, zz), "1")    # 3.0 us is in [2.9, 3.5): feedback
                 self.assertEqual(self.attacker_reads(1.5, zz), "1")    # in the wait after the reset (2.5 us)
+
+
+class ReadoutLeakTests(unittest.TestCase):
+    """A leak during a qubit's readout: the thresholded result is the state at the middle of the window. In the
+    first half the leak evolves under the measurement-induced dephasing (quantum Zeno); in the second half it only
+    changes the state the measurement leaves behind."""
+
+    def run_case(self, attacker_start, zz, readout_dephasing=None):
+        runtime, executor = build(transfers=[DriveCrosstalkTransfer(0, 2, 1.0)], zz=zz, durations=(1.0, 1.0),
+                                  readout_dephasing=readout_dephasing)
+        victim = submit_on(runtime, "victim", REGIONS["victim"], [[{"type": "X", "targets": [0]}]], "v", qubits=1)
+        attacker = submit_on(runtime, "attacker", REGIONS["attacker"], [], "a", qubits=1)
+        register(executor, victim, 2.0, 0)              # the victim's pi pulse is at 3.0 us
+        register(executor, attacker, attacker_start, 4)  # reset 1 us, then the readout (1 us)
+        run_in_order(executor)
+        counts = runtime.scheduler.get(attacker.job_id).result["counts"]
+        left = np.asarray(executor._lanes[REGIONS["attacker"]].store.read().density_matrix)
+        excited = sum(left[i, i].real for i in range(4) if i & 2)
+        return max(counts, key=counts.get), excited
+
+    def test_a_leak_decides_the_result_only_in_the_first_half_and_only_without_zeno_freezing(self):
+        for zz in (None, ResidualZZSettings((ResidualZZCoupling(1, 2, 0.0),), model="exact")):
+            with self.subTest(world=zz is not None):
+                # readout [2.6, 3.6): the pi pulse at 3.0 us is in the first half
+                result, excited = self.run_case(1.6, zz)                         # strong-measurement limit
+                self.assertEqual((result, round(excited, 9)), ("0", 0.0))
+                result, excited = self.run_case(1.6, zz, readout_dephasing=0.0)  # no dephasing: a full flip
+                self.assertEqual((result, round(excited, 9)), ("1", 1.0))
+                # readout [2.2, 3.2): the pulse is in the second half; it only turns the state left behind
+                result, excited = self.run_case(1.2, zz)
+                self.assertEqual((result, round(excited, 9)), ("0", 1.0))
 
 
 class RegionAccessTests(unittest.TestCase):

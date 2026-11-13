@@ -6,6 +6,7 @@ not trace away unaddressed qubits or approximate their correlations.
 
 from __future__ import annotations
 
+import math
 import random
 import numpy as np
 
@@ -67,6 +68,52 @@ def apply_reset_with_feedback_kick(state: np.ndarray, qubit: int, success: float
         corrected = corrected + (apply_operand_operator(branch, _FLIP, operands) if outcome else branch)
     prepared = populations[0] * corrected + populations[1] * apply_operand_operator(corrected, _FLIP, operands)
     return (1.0 - success) * failed + success * prepared
+
+
+def apply_local_bloch_map(state: np.ndarray, qubit: int, bloch: np.ndarray) -> np.ndarray:
+    """A unital one-qubit channel given by its 3x3 Bloch matrix R (r -> R r), on ``qubit``.
+
+    The identity component is kept and sigma_j -> sum_i R[i, j] sigma_i. Linear in ``state``, so it applies to any
+    operator (e.g. a term of an operator-Schmidt sum).
+    """
+    n = state.shape[0].bit_length() - 1
+    tensor = np.asarray(state, dtype=complex).reshape((2,) * (2 * n))
+    axes = (qubit, n + qubit)
+    order = axes + tuple(i for i in range(2 * n) if i not in axes)
+    blocks = tensor.transpose(order).reshape(2, 2, -1)               # [row, column, rest]
+    paulis = (np.array([[0, 1], [1, 0]], dtype=complex), np.array([[0, -1j], [1j, 0]], dtype=complex),
+              np.array([[1, 0], [0, -1]], dtype=complex))
+    identity = np.eye(2, dtype=complex)
+    coefficient_i = 0.5 * np.einsum("ab,bar->r", identity, blocks)
+    coefficients = 0.5 * np.einsum("kab,bar->kr", np.array(paulis), blocks)
+    mapped = np.asarray(bloch, dtype=float) @ coefficients
+    rebuilt = (np.einsum("ab,r->abr", identity, coefficient_i)
+               + np.einsum("kab,kr->abr", np.array(paulis), mapped))
+    restored = rebuilt.reshape(tensor.transpose(order).shape).transpose(np.argsort(order))
+    return restored.reshape(state.shape)
+
+
+def driven_dephasing_bloch(rotation: tuple[float, float, float], duration_us: float,
+                           dephasing_per_us: float) -> np.ndarray:
+    """Bloch matrix of a constant drive (net rotation vector ``rotation`` over ``duration_us``) under dephasing.
+
+    dr/dt = Omega x r - gamma (r_x, r_y, 0), Omega = rotation / duration, solved exactly. A zero duration is the
+    plain rotation; without a drive it is the coherence decay exp(-gamma t).
+    """
+    from scipy.linalg import expm
+    omega = np.asarray(rotation, dtype=float)
+    if duration_us <= 0.0:
+        angle = float(np.linalg.norm(omega))
+        if angle == 0.0:
+            return np.eye(3)
+        axis = omega / angle
+        cross = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+        return np.eye(3) + math.sin(angle) * cross + (1 - math.cos(angle)) * cross @ cross
+    rate = omega / duration_us
+    generator = np.array([[-dephasing_per_us, -rate[2], rate[1]],
+                          [rate[2], -dephasing_per_us, -rate[0]],
+                          [-rate[1], rate[0], 0.0]])
+    return expm(generator * duration_us)
 
 
 def apply_local_depolarizing_replacement(

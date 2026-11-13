@@ -49,7 +49,7 @@ class ConcurrentProductSettingsTests(unittest.TestCase):
     def test_default_is_the_exclusive_fifo_with_a_declared_sample_strength(self):
         _, environment = resolve({})
         execution = environment.establish().qpu_service_config["runtime_execution"]
-        self.assertEqual(execution["schema_version"], "shared_qpu_runtime_v6")
+        self.assertEqual(execution["schema_version"], "shared_qpu_runtime_v7")
         self.assertEqual(execution["concurrency_policy"], "exclusive_fifo")
         self.assertEqual(execution["drive_crosstalk_strength"], 0.02)
         self.assertEqual(execution["drive_crosstalk_direction"], "both")

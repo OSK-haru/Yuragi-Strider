@@ -207,7 +207,9 @@ class EvaluatorTests(unittest.TestCase):
         evaluator = CrosstalkGroverEvaluator(manifest(small), LIMITS, lambda: ())
         successes, shots = evaluator._run_baseline()
         self.assertEqual(shots, 50)
-        self.assertTrue(0.35 <= successes / shots <= 0.95)                    # about 0.7 for a noisy two-iteration search
+        # About 0.37 since idle relaxation (D85) and the measure-and-feedback reset (D87); random is 1/16. One
+        # 50-shot run spreads by about 0.07, so the bounds only separate a working search from noise.
+        self.assertTrue(0.2 <= successes / shots <= 0.6)
 
 
 def paused_challenge(settings):

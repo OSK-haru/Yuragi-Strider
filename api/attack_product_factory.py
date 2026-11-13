@@ -330,6 +330,7 @@ class ProductEnvironmentFactory:
                 "qpu_service.device_snapshot",
                 "qpu_service.runtime_execution.measure_input_state_before_transition",
                 "qpu_service.runtime_execution.handover_reset_scope",
+                "qpu_service.runtime_execution.readout_dephasing_per_us",
                 "qpu_service.runtime_execution.placement_policy",
             })
         if isinstance(idle, Mapping):
@@ -399,7 +400,8 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "schema_version", "reset_model_id", "reset_model_configuration_id", "reset_model_mode",
         "reset_count", "reset_duration_us", "victim_operation_duration_us",
         "attacker_measurement_duration_us", "queue_policy_id", "cancellation_policy_id",
-        "measure_input_state_before_transition", "handover_reset_scope", "placement_policy",
+        "measure_input_state_before_transition", "handover_reset_scope", "readout_dephasing_per_us",
+        "placement_policy",
         "isolated_assignment_duration_us",
         "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
         "concurrency_policy", "drive_crosstalk_strength", "drive_crosstalk_direction", "drive_crosstalk_detuning_mhz",
@@ -407,7 +409,7 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "resource_binding",
         "max_local_qubits", "max_execution_work",
     })
-    if runtime_raw["schema_version"] != "shared_qpu_runtime_v6":
+    if runtime_raw["schema_version"] != "shared_qpu_runtime_v7":
         raise ValueError("unsupported frozen QPU runtime schema")
     _validate_runtime_profile(runtime_raw)
     runtime_fields = dict(runtime_raw)
@@ -1071,6 +1073,9 @@ def _validate_runtime_profile(raw: Mapping[str, Any]) -> None:
         raise ValueError("runtime_execution.measure_input_state_before_transition must be explicit boolean")
     if raw["handover_reset_scope"] not in HANDOVER_RESET_SCOPES:
         raise ValueError("runtime_execution.handover_reset_scope must be layout or region")
+    rate = raw["readout_dephasing_per_us"]
+    if rate is not None and (type(rate) not in (int, float) or not math.isfinite(float(rate)) or rate < 0):
+        raise ValueError("runtime_execution.readout_dephasing_per_us must be null or a nonnegative rate")
     for name in ("reset_duration_us", "victim_operation_duration_us",
                  "attacker_measurement_duration_us", "isolated_assignment_duration_us",
                  "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
