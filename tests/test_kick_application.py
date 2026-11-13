@@ -221,6 +221,18 @@ class PlacementTests(unittest.TestCase):
         self.assertEqual(len(plan.trailing), 1)
         self.assertEqual([len(s) for s in plan.per_shot], [0, 0, 0])
 
+    def test_handover_leaks_split_at_the_end_of_the_reset_measurement(self):
+        """Before the window and during the handover's measurement: plain, before the reset. In its feedback:
+        folded into the reset. Both lead shot 0 and are marked as before the handover."""
+        schedule = DriveSchedule(self.shot, 3, repetition_delay_us=5.0, offset_us=RESET_US, handover=True)
+        start = 10.0
+        plan = place_kicks((leak(3, start - 0.5, start + 0.3), leak(3, start + 0.6, start + 0.8)), self.operation,
+                           schedule, window_start_us=start, reset_duration_us=RESET_US, layout_qubit_ids=(),
+                           measurement_duration_us=0.4)
+        kicks = [k for k in plan.per_shot[0] if k.before_handover]
+        self.assertEqual([k.in_reset for k in kicks], [False, True])
+        self.assertTrue(all(k.position == 0 and k.wait_offset_us is None for k in kicks))
+
     def test_a_leak_across_shots_is_split_between_them(self):
         spanning = leak(3, self.shot_time(0, self.shot.duration_us - 1.0), self.shot_time(1, 1.0), angle=2.0,
                         drive=(self.shot_time(0, self.shot.duration_us - 1.0), self.shot_time(1, 1.0)))

@@ -247,6 +247,10 @@ class PhenomenologicalResetModel:
             observed_zero_given_true_one=self.observed_zero_given_one,
         )
 
+    def local_spec(self, target: int) -> ImperfectResetSpec:
+        """The one-qubit reset channel applied to register slot ``target``."""
+        return self.spec
+
     def run_register(self, request: ResetModelRequest) -> RegisterResetResult:
         if self.spec.local_dimension != 2:
             raise ValueError("this register adapter supports qubits, not qutrits")
@@ -342,6 +346,10 @@ class PerQubitPhenomenologicalResetModel:
         if subsystem_count != len(self.specs) or any(target >= len(self.specs) for target in targets):
             raise ValueError("readout register differs from frozen physical-qubit profile")
         return tuple(self.assignment_errors[target] for target in targets)
+
+    def local_spec(self, target: int) -> ImperfectResetSpec:
+        """The one-qubit reset channel applied to register slot ``target``."""
+        return self.specs[target]
 
     def run_register(self, request: ResetModelRequest) -> RegisterResetResult:
         if request.subsystem_count != len(self.specs):

@@ -19,12 +19,19 @@ How a leak becomes a kick, in the simulator's frame (virtual Z applied to the st
   target's rotation. The integral is taken in the gate's interaction picture, ``n(t)`` rotated back by
   everything the gate has done up to ``t``, and the kick goes *before* the gate. A single kick at the
   gate's start with the plain axis would get the effect of a concurrent pi pulse wrong by order one.
-* A leak while the target does something else (waits, a two-qubit gate, reset, measurement, or has no
-  program on that qubit) is placed before the first instruction that starts after the leak begins,
-  with the axis at the frame in force there.
-* A leak before the window starts (the gap since the previous job, the handover) or in the wait between
-  shots goes to the start of the next shot; one after the last shot has ended acts on the state that
-  shot leaves behind.
+* A reset (an initializing reset, a mid-circuit reset, the tenant handover) is, on IBM hardware, a
+  measurement followed by an X conditioned on the outcome. Its interval is the measurement (the first
+  ``measurement_duration_us``) and then the feedback. A leak during the measurement is placed *before*
+  the reset, which may erase it. A leak during the feedback acts on the collapsed branch and is flipped
+  with it: it is marked ``in_reset`` and the runtime folds it into that reset
+  (``apply_reset_with_feedback_kick``).
+* A leak while the target does something else (waits, a two-qubit gate, measurement, or has no program
+  on that qubit) is placed before the first instruction that starts after the leak begins, with the axis
+  at the frame in force there.
+* A leak before the window starts (the gap since the previous job) or in the wait between shots goes to
+  the start of the next shot. When the window begins with the handover reset, the gap and the handover
+  interval both precede that reset, and their kicks are marked ``before_handover``. A leak after the last
+  shot has ended acts on the state that shot leaves behind.
 """
 
 from __future__ import annotations
@@ -67,6 +74,8 @@ class PlacedKick:
     rotation: tuple[float, float, float]
     sources: tuple[str, ...] = ()
     wait_offset_us: float | None = None
+    before_handover: bool = False       # acts before the window's handover reset (shot 0, position 0)
+    in_reset: bool = False              # arrives in the feedback part of the reset it is placed before
 
     def __post_init__(self) -> None:
         if type(self.position) is not int or self.position < 0:
@@ -82,6 +91,10 @@ class PlacedKick:
             if not math.isfinite(offset) or offset < 0.0:
                 raise ValueError("kick wait offset must be finite and nonnegative")
             object.__setattr__(self, "wait_offset_us", offset)
+        if self.before_handover and (self.position != 0 or self.wait_offset_us is not None):
+            raise ValueError("a kick before the handover sits at the window start")
+        if self.in_reset and self.wait_offset_us is not None:
+            raise ValueError("a kick in a reset's feedback is not in a wait")
 
 
 @dataclass(frozen=True)
@@ -194,7 +207,7 @@ class _Timeline:
 
 def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation, schedule: DriveSchedule,
                 *, window_start_us: float, reset_duration_us: float,
-                layout_qubit_ids: Sequence[int]) -> KickPlan:
+                layout_qubit_ids: Sequence[int], measurement_duration_us: float = 0.0) -> KickPlan:
     """Turn window-absolute leaks into kicks at shot and instruction positions, in the simulator's frame.
 
     ``layout_qubit_ids[i]`` is the physical ID of program qubit ``i``; a leak on a qubit outside the
@@ -211,6 +224,13 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
     end_position = len(operation.instructions)
     shots, period, duration = schedule.shots, schedule.period_us, schedule.shot.duration_us
     first_shot = window_start_us + schedule.offset_us
+    # Shot-local intervals of the resets, cut where their measurement ends and the feedback begins.
+    measuring = min(max(measurement_duration_us, 0.0), reset_duration_us)
+    # Only the reset's own qubits are affected; a leak on another qubit commutes with the reset.
+    reset_spans = [(start, start + reset_duration_us, index, frozenset(instruction.qubits))
+                   for index, (instruction, start) in enumerate(zip(operation.instructions, starts))
+                   if instruction.kind in {"initialize", "reset"} and reset_duration_us > 0.0]
+    cuts = sorted({edge for begin, end, _, _ in reset_spans for edge in (begin, begin + measuring, end)})
     target_shape = schedule.shot.pulse_shape
     timelines: dict[int, _Timeline] = {}
 
@@ -224,8 +244,9 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
     accumulated: dict[tuple[int | None, int, int, float, float, float | None], list] = {}
 
     def add(shot: int | None, position: int, leak: DriveLeak, vector: np.ndarray,
-            begin: float, end: float, wait_offset: float | None = None) -> None:
-        entry = accumulated.setdefault((shot, position, leak.qubit, begin, end, wait_offset), [np.zeros(3), set()])
+            begin: float, end: float, wait_offset: float | None = None, in_reset: bool = False) -> None:
+        entry = accumulated.setdefault((shot, position, leak.qubit, begin, end, wait_offset, in_reset),
+                                       [np.zeros(3), set()])
         entry[0] += vector
         entry[1].add(leak.source_job_id)
 
@@ -258,12 +279,35 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
             rotation = _rotation_x(angle) @ rotation
         return _magnus(np.concatenate(pieces)) if pieces else np.zeros(3)
 
+    def between(shot: int, base: float, begin: float, end: float, leak: DriveLeak, frames) -> None:
+        """A leak over shot-local [begin, end) outside the target's own gates, cut at reset edges."""
+        program = program_qubit.get(leak.qubit)
+        # A cut within rounding of an end would only add an empty slice.
+        tolerance = 1e-12 * max(1.0, abs(begin), abs(end))
+        edges = [begin] + [cut for cut in cuts if begin + tolerance < cut < end - tolerance] + [end]
+        for low, high in zip(edges, edges[1:]):
+            span = next(((start, index) for start, stop, index, targets in reset_spans
+                         if start <= low < stop and program in targets), None)
+            position = bisect_right(keys, low) if span is None else span[1]
+            feedback = span is not None and low >= span[0] + measuring
+            frame = 0.0 if frames is None else frames[position]
+            add(shot, position, leak, plain(leak, base + low, base + high, frame), base + low, base + high,
+                in_reset=feedback)
+
     for leak in sorted(leaks, key=lambda k: (k.start_us, k.qubit, k.source_job_id, k.source_qubit)):
         program = program_qubit.get(leak.qubit)
         frames = timeline(program).frames if program is not None else None
         if leak.start_us < first_shot:                 # the gap before the window, or the handover
             end = min(leak.end_us, first_shot)
-            add(0, 0, leak, plain(leak, leak.start_us, end, 0.0), leak.start_us, end)
+            if not schedule.handover:
+                add(0, 0, leak, plain(leak, leak.start_us, end, 0.0), leak.start_us, end)
+            else:
+                # The handover reset's measurement ends ``measuring`` after the window start; after it, the
+                # leak is in the reset's feedback.
+                split = min(window_start_us + measuring, first_shot)
+                for low, high, feedback in ((leak.start_us, min(end, split), False), (max(leak.start_us, split), end, True)):
+                    if high > low:
+                        add(-1, 0, leak, plain(leak, low, high, 0.0), low, high, in_reset=feedback)
         relative, stop = max(leak.start_us - first_shot, 0.0), leak.end_us - first_shot
         guard = 0
         while relative < stop:
@@ -296,28 +340,24 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
                 if gate.end <= cursor or gate.start >= end_local:
                     continue
                 if gate.start > cursor:                # not in a gate of its own: placed between instructions
-                    position = bisect_right(keys, cursor)
-                    frame = 0.0 if frames is None else frames[position]
-                    begin_us, end_us = base + cursor, base + gate.start
-                    add(shot, position, leak, plain(leak, begin_us, end_us, frame), begin_us, end_us)
+                    between(shot, base, cursor, gate.start, leak, frames)
                     cursor = gate.start
                 inside_end = min(end_local, gate.end)
                 add(shot, gate.index, leak, toggled(leak, gate, base, cursor, inside_end),
                     base + cursor, base + inside_end)
                 cursor = inside_end
             if cursor < end_local:
-                position = bisect_right(keys, cursor)
-                frame = 0.0 if frames is None else frames[position]
-                begin_us, end_us = base + cursor, base + end_local
-                add(shot, position, leak, plain(leak, begin_us, end_us, frame), begin_us, end_us)
+                between(shot, base, cursor, end_local, leak, frames)
             advanced = shot * period + end_local
             relative = advanced if advanced > relative else math.nextafter(relative, math.inf)
 
     per_shot: list[list[PlacedKick]] = [[] for _ in range(shots)]
     trailing: list[PlacedKick] = []
-    for (shot, position, qubit, _begin, _end, wait_offset), (vector, sources) in sorted(
-            accumulated.items(), key=lambda item: (-1 if item[0][0] is None else item[0][0], item[0][1],
+    # shot -1 marks the kicks before the handover reset; they lead shot 0's list.
+    for (shot, position, qubit, _begin, _end, wait_offset, in_reset), (vector, sources) in sorted(
+            accumulated.items(), key=lambda item: (-2 if item[0][0] is None else item[0][0], item[0][1],
                                                    item[0][2], item[0][3])):
-        placed = PlacedKick(position, qubit, tuple(vector), tuple(sorted(sources)), wait_offset)
-        (trailing if shot is None else per_shot[shot]).append(placed)
+        placed = PlacedKick(position, qubit, tuple(vector), tuple(sorted(sources)), wait_offset, shot == -1,
+                            in_reset)
+        (trailing if shot is None else per_shot[max(shot, 0)]).append(placed)
     return KickPlan(tuple(tuple(shot) for shot in per_shot), tuple(trailing))

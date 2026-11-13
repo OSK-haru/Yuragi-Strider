@@ -43,6 +43,32 @@ def apply_local_replacement(state: np.ndarray, qubit: int, success: float, popul
     return (1.0 - success) * state + success * replaced.reshape(state.shape)
 
 
+_PROJECTORS = (np.array([[1, 0], [0, 0]], dtype=complex), np.array([[0, 0], [0, 1]], dtype=complex))
+_FLIP = np.array([[0, 1], [1, 0]], dtype=complex)
+
+
+def apply_reset_with_feedback_kick(state: np.ndarray, qubit: int, success: float,
+                                   populations: tuple[float, float], kick: Matrix) -> np.ndarray:
+    """One measurement-based reset attempt with a rotation ``kick`` between its measurement and its correction.
+
+    IBM's reset measures the qubit and then applies X on outcome 1. A rotation K that reaches the qubit
+    after the measurement acts on the collapsed branch and is then flipped with it:
+
+        E_K(rho) = (1 - s) K rho K^+ + s F(sum_b X^b K P_b rho P_b K^+ X^b),  F(x) = p0 x + p1 X x X.
+
+    The failed branch only feels the rotation. With K = I this is ``apply_local_replacement`` exactly.
+    Linear in ``state``, so it applies to any operator (e.g. a term of an operator-Schmidt sum).
+    """
+    operands = (qubit,)
+    failed = apply_operand_operator(state, kick, operands)
+    corrected = np.zeros_like(failed)
+    for outcome, projector in enumerate(_PROJECTORS):
+        branch = apply_operand_operator(apply_operand_operator(state, projector, operands), kick, operands)
+        corrected = corrected + (apply_operand_operator(branch, _FLIP, operands) if outcome else branch)
+    prepared = populations[0] * corrected + populations[1] * apply_operand_operator(corrected, _FLIP, operands)
+    return (1.0 - success) * failed + success * prepared
+
+
 def apply_local_depolarizing_replacement(
     state: np.ndarray, qubits: tuple[int, ...], probability: float,
 ) -> np.ndarray:

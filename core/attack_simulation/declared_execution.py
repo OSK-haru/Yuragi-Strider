@@ -174,7 +174,8 @@ class DeclaredQpuExecutor:
             sides = tuple(RegionSide(region, runtime.regional_idle_models[region], runtime.regional_reset_models[region],
                                      runtime.config.reset_model_id, *durations[region],
                                      handover_reset_count=runtime.config.reset_count,
-                                     handover_measures_input=runtime.config.measure_input_state_before_transition)
+                                     handover_measures_input=runtime.config.measure_input_state_before_transition,
+                                     handover_scope=runtime.config.handover_reset_scope)
                           for region in regions)
             self._world = CoupledRegionWorld(
                 sides, concurrent_regions.residual_zz,
@@ -424,32 +425,29 @@ class DeclaredQpuExecutor:
             self._releases[job_id] = release
 
     def _duration(self, job, snapshot):
+        return self.planned_duration(job, snapshot.owner_tenant_id, snapshot.physical_qubit_ids)
+
+    def planned_duration(self, job, previous_tenant_id, previous_region) -> float:
+        """The job's physical duration when the region it starts on holds ``previous_tenant_id`` and the
+        active region is ``previous_region``. The one rule shared by planning and execution."""
         op, config = job.command.operation, self.runtime.config
         dedicated = config.placement_policy.value == "tenant_dedicated_region"
         if op.interleave is not None:
             if config.placement_policy.value != "guaranteed_same_physical_qubit":
                 raise ValueError("interleaved runs require the shared same-region placement")
             return interleaved_work(
-                op, job.command.tenant_id, snapshot.owner_tenant_id,
+                op, job.command.tenant_id, previous_tenant_id,
                 config.reset_duration_us, config.program_measurement_duration_us,
             ).duration_us
-        target = (self.runtime.region_of(job.command) if dedicated else None)
-        reset_duration, measurement_duration = (
-            self.runtime.regional_service_durations[target]
-            if dedicated else
-            (config.reset_duration_us, config.program_measurement_duration_us)
-        )
-        duration = sum(i.duration_us if i.kind in {"unitary", "delay"} else reset_duration
-                       if i.kind in {"initialize", "reset"} else 0.0 for i in op.instructions)
-        duration += measurement_duration * len({
-            i.time_group for i in op.instructions if i.kind == "measure"})
-        duration *= op.shots
-        duration += config.repetition_delay_us * (op.shots - 1)
-        if _hands_over(snapshot.owner_tenant_id, job.command.tenant_id):
-            duration += reset_duration
         if config.placement_policy.value == "isolated_physical_resource":
             raise ValueError("declared adapter does not support resource reassignment")
-        if dedicated and snapshot.physical_qubit_ids != target:
+        # declared_service_timing imports this module for JobExecutionWindow, so import it here.
+        from core.attack_simulation.declared_service_timing import compiled_job_duration
+        target = self.runtime.region_of(job.command) if dedicated else None
+        duration = compiled_job_duration(
+            job, config, previous_tenant_id,
+            service_durations=self.runtime.regional_service_durations[target] if dedicated else None)
+        if dedicated and tuple(previous_region) != target:
             duration += config.isolated_assignment_duration_us
         return duration
 
@@ -467,6 +465,7 @@ class DeclaredQpuExecutor:
             regional_idle_models=self.runtime.regional_idle_models if self.runtime.tenant_regions else None,
             regional_service_durations=self.runtime.regional_service_durations if self.runtime.tenant_regions else None,
             idle_model=self.runtime.idle_model,
+            region_access=self.runtime.region_access if self.runtime.tenant_regions else None,
         )
         detached._job_authorization = self.runtime.job_authorization
         return detached
@@ -517,18 +516,21 @@ class DeclaredQpuExecutor:
         return self.runtime.region_of(self.runtime.scheduler.get(job_id).command)
 
     def plan_anchor(self, key):
-        """``(previous_finish, previous_tenant_id)`` for planning the next job of a lane."""
+        """``(previous_finish, previous_tenant_id, previous_region)`` for planning a lane's next job."""
         if key is None:
             previous = self.frontier.snapshot().confirmed
-            tenant = self.runtime.state_store.read().owner_tenant_id
+            snapshot = self.runtime.state_store.read()
+            tenant, region = snapshot.owner_tenant_id, snapshot.physical_qubit_ids
             if self._active is not None:
                 active, window, _, _ = self._active
                 previous, tenant = window.finish, active.command.tenant_id
-            return previous, tenant
+                if self.runtime.tenant_regions:
+                    region = self.runtime.region_of(active.command)
+            return previous, tenant, region
         lane = self._lanes[key]
         if lane.active is not None:
-            return lane.active[1].finish, lane.active[0].command.tenant_id
-        return lane.last_finish, lane.store.read().owner_tenant_id
+            return lane.active[1].finish, lane.active[0].command.tenant_id, lane.region
+        return lane.last_finish, lane.store.read().owner_tenant_id, lane.region
 
     def taken_keys(self, exclude_job_id: str | None = None) -> frozenset:
         """Event keys of every other registered window; a new window must not reuse one."""
@@ -601,16 +603,16 @@ class DeclaredQpuExecutor:
             measurement_duration_us=measurement_us,
             repetition_delay_us=self.runtime.config.repetition_delay_us,
             pulse_shape=self._concurrent.pulse_shape,
-            handover_us=reset_us if _hands_over(previous_tenant, job.command.tenant_id) else 0.0,
+            handover=_hands_over(previous_tenant, job.command.tenant_id),
             schedule=None if previous is None else previous.schedule)
 
     def _kick_inputs(self, lane, job, window):
         """Everything the kick assembly needs, read under the gate; the numerical work runs outside."""
         target = self._xwindows[job.job_id]
         others = tuple(item for item in self._xwindows.values() if item.physical_qubits[0] not in lane.region)
-        reset_us = self.runtime.regional_service_durations[lane.region][0]
+        reset_us, measurement_us = self.runtime.regional_service_durations[lane.region]
         return (target, lane.last_window, others, self._concurrent, job.command.operation,
-                job.command.layout.physical_qubit_ids, reset_us)
+                job.command.layout.physical_qubit_ids, reset_us, measurement_us)
 
     def _world_inputs(self):
         """Every started job of either region with what its leak plan needs; read under the gate."""

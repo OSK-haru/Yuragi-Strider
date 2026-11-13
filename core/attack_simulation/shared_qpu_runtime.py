@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from threading import Lock
 import math
 import random
@@ -50,8 +50,11 @@ from core.experimental_isolation_physics.reset_model import (
 from core.experimental_isolation_physics.idle_evolution import IndependentIdleModel, relax_axes_in_place
 from core.gates import Matrix, density_from_ket
 from core.register_operations import (
-    apply_local_depolarizing_replacement, apply_operand_operator, freeze_register, sample_measurement,
+    apply_local_depolarizing_replacement, apply_local_replacement, apply_operand_operator,
+    apply_reset_with_feedback_kick, freeze_register, nonselective_measurement, sample_measurement,
 )
+
+HANDOVER_RESET_SCOPES = ("layout", "region")
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,9 @@ class SharedQpuRuntimeConfig:
     queue_policy_id: str = "on_demand_fifo_v1"
     cancellation_policy_id: str = "queued_only"
     measure_input_state_before_transition: bool = True
+    # Which qubits the handover reset covers: the new tenant's layout, or the whole region. An operator
+    # policy, not physics; no public source states what a cloud provider resets between tenants.
+    handover_reset_scope: str = "layout"
     placement_policy: PlacementPolicy = (
         PlacementPolicy.GUARANTEED_SAME_PHYSICAL_QUBIT
     )
@@ -107,7 +113,7 @@ class SharedQpuRuntimeConfig:
         """Return every behavior-changing runtime value for pre-start freezing."""
         binding = self.resource_binding
         config = {
-            "schema_version": "shared_qpu_runtime_v5",
+            "schema_version": "shared_qpu_runtime_v6",
             "reset_model_id": self.reset_model_id,
             "reset_model_configuration_id": self.reset_model_configuration_id,
             "reset_model_mode": self.reset_model_mode.value,
@@ -118,6 +124,7 @@ class SharedQpuRuntimeConfig:
             "queue_policy_id": self.queue_policy_id,
             "cancellation_policy_id": self.cancellation_policy_id,
             "measure_input_state_before_transition": self.measure_input_state_before_transition,
+            "handover_reset_scope": self.handover_reset_scope,
             "placement_policy": self.placement_policy.value,
             "isolated_assignment_duration_us": self.isolated_assignment_duration_us,
             "program_measurement_duration_us": self.program_measurement_duration_us,
@@ -167,6 +174,8 @@ class SharedQpuRuntimeConfig:
         if count < 0:
             raise ValueError("reset_count must be non-negative")
         object.__setattr__(self, "reset_count", count)
+        if self.handover_reset_scope not in HANDOVER_RESET_SCOPES:
+            raise ValueError("handover_reset_scope must be layout or region")
         for name in (
             "reset_duration_us",
             "victim_operation_duration_us",
@@ -247,6 +256,7 @@ class SharedQpuRuntime:
         regional_idle_models: Mapping[tuple[int, ...], IndependentIdleModel] | None = None,
         regional_service_durations: Mapping[tuple[int, ...], tuple[float, float]] | None = None,
         idle_model: IndependentIdleModel | None = None,
+        region_access: Mapping[str, Sequence[tuple[int, ...]]] | None = None,
     ) -> None:
         snapshot = state_store.read()
         if snapshot.local_dimension != 2 or len(snapshot.physical_qubit_ids) > config.max_local_qubits:
@@ -302,6 +312,15 @@ class SharedQpuRuntime:
         self.regional_idle_models = dict(regional_idle_models or {})
         self.regional_service_durations = dict(regional_service_durations or {})
         self._dedicated_regions = tuple(dict.fromkeys(self.tenant_regions.values()))
+        # Which dedicated regions each tenant may run on. By default only its home region; a tenant that
+        # takes over another region (and so inherits what was left there) must be granted it explicitly.
+        access = {tenant: (home,) for tenant, home in self.tenant_regions.items()}
+        for tenant, regions in (region_access or {}).items():
+            granted = tuple(tuple(region) for region in regions)
+            if not dedicated or not granted or any(region not in self._dedicated_regions for region in granted):
+                raise ValueError("region access must name dedicated regions")
+            access[tenant] = granted
+        self.region_access = access
         self.idle_model = idle_model
         self.scheduler = scheduler or create_scheduler(
             config.queue_policy_id, config.cancellation_policy_id,
@@ -432,12 +451,17 @@ class SharedQpuRuntime:
         operation = job.command.operation
         if isinstance(operation, CircuitExecutionOperation) and operation.interleave is not None:
             return self._execute_interleaved(job, operation)
-        reset_outcome = self._prepare_job_context(job)
+        before = tuple(kick for kick in kicks.of_shot(0) if kick.before_handover)
+        reset_outcome = self._prepare_job_context(job, before)
         snapshot = self.state_store.read()
         return self._dispatch(job, operation, snapshot, reset_outcome, kicks)
 
-    def _prepare_job_context(self, job: JobRecord) -> ResetModelResult | RegisterResetResult | None:
-        """Region/resource assignment and the tenant-handover service reset."""
+    def _prepare_job_context(self, job: JobRecord, before_handover: tuple[PlacedKick, ...] = ()
+                             ) -> ResetModelResult | RegisterResetResult | None:
+        """Region/resource assignment and the tenant-handover service reset.
+
+        ``before_handover`` are leaks that reach the region before the handover reset takes effect.
+        """
         snapshot = self.state_store.read()
         if self.config.placement_policy is PlacementPolicy.TENANT_DEDICATED_REGION:
             target_region = self.region_of(job.command)
@@ -457,7 +481,9 @@ class SharedQpuRuntime:
             snapshot.owner_tenant_id is not None
             and snapshot.owner_tenant_id != job.command.tenant_id
         ):
-            reset_outcome = self._service_reset(job)
+            reset_outcome = self._service_reset(job, before_handover)
+        elif before_handover:
+            raise ValueError("leaks were placed before a handover that does not happen")
         return reset_outcome
 
     def _execute_interleaved(self, job: JobRecord, operation: CircuitExecutionOperation) -> dict[str, object]:
@@ -658,14 +684,21 @@ class SharedQpuRuntime:
                 free[s] = time_us
             return self._relax(state, due) if due else state
 
-        pending = [kick for kick in shot_kicks if kick.wait_offset_us is None]
+        # Kicks before the handover reset were applied by ``_service_reset``.
+        pending = [kick for kick in shot_kicks if kick.wait_offset_us is None and not kick.before_handover]
         for index, instruction in enumerate(operation.instructions):
+            operands = tuple(slots[q] for q in instruction.qubits)
+            resetting = instruction.kind in {"initialize", "reset"}
+            feedback: list[PlacedKick] = []
             while pending and pending[0].position <= index:
                 kick = pending.pop(0)
                 at = starts[kick.position] if kick.position < len(starts) else None
                 state = relax_to(state, (self._slot_of(kick.qubit),), measure_start if at is None else at)
-                state = self._apply_kick(state, kick)
-            operands = tuple(slots[q] for q in instruction.qubits)
+                if (kick.in_reset and kick.position == index and resetting
+                        and self._slot_of(kick.qubit) in operands):
+                    feedback.append(kick)        # arrives between this reset's measurement and its X
+                else:
+                    state = self._apply_kick(state, kick)
             if instruction.kind != "measure":
                 start = starts[index]
                 state = relax_to(state, operands, start)
@@ -679,7 +712,8 @@ class SharedQpuRuntime:
                     subsystem_count=len(snapshot.physical_qubit_ids), targets=operands,
                 ))
                 self.state_store.validate_state(readout.post_reset_state)
-                state = np.asarray(readout.post_reset_state, dtype=complex)
+                state = (np.asarray(readout.post_reset_state, dtype=complex) if not feedback
+                         else self._reset_with_feedback(state, operands, feedback, count=1, measure_input=False))
                 assignment.update(zip(instruction.qubits, readout.assignment_errors))
                 duration += self._active_service_durations()[0]
             elif instruction.kind == "unitary":
@@ -706,6 +740,39 @@ class SharedQpuRuntime:
         state = np.array(state, dtype=complex)
         state.flags.writeable = False
         return state, assignment, duration
+
+    def _reset_with_feedback(self, state: np.ndarray, targets: tuple[int, ...], feedback: list[PlacedKick], *,
+                             count: int, measure_input: bool) -> np.ndarray:
+        """``count`` reset attempts on ``targets``; ``feedback`` kicks act inside the first attempt.
+
+        Each attempt is IBM's measurement-based reset (measure, then X on outcome 1). A kick that arrives
+        after the first attempt's measurement is folded into it (``apply_reset_with_feedback_kick``); the
+        later attempts follow. Kicks on qubits that are not reset are plain rotations.
+        """
+        model = self._active_reset_models().get(self.config.reset_model_id)
+        if not callable(getattr(model, "local_spec", None)):
+            raise ValueError("leaks inside a reset need a reset model with one-qubit channels")
+        result = np.array(state, dtype=complex)
+        if measure_input:
+            result = nonselective_measurement(result, targets)
+        by_slot: dict[int, np.ndarray] = {}
+        for placed in feedback:
+            slot = self._slot_of(placed.qubit)
+            if slot not in targets or count == 0:
+                result = self._apply_kick(result, placed)
+                continue
+            by_slot[slot] = kick_unitary(placed) @ by_slot.get(slot, np.eye(2, dtype=complex))
+        for attempt in range(count):
+            for slot in targets:
+                spec = model.local_spec(slot)
+                if spec.local_dimension != 2:
+                    raise ValueError("leaks inside a reset need two-level reset channels")
+                if attempt == 0 and slot in by_slot:
+                    result = apply_reset_with_feedback_kick(result, slot, spec.success_probability,
+                                                            spec.target_populations, by_slot[slot])
+                else:
+                    result = apply_local_replacement(result, slot, spec.success_probability, spec.target_populations)
+        return result
 
     def _apply_kick(self, state: np.ndarray, placed: PlacedKick) -> np.ndarray:
         """A leaked rotation from another job's drive; it takes no time of its own."""
@@ -738,12 +805,17 @@ class SharedQpuRuntime:
         if layout is None:
             return self.tenant_regions[command.tenant_id]
         qubits = set(layout.physical_qubit_ids)
-        for region in self._dedicated_regions:
-            if qubits <= set(region):
-                return region
-        raise ValueError("program layout is outside every dedicated region")
+        region = next((item for item in self._dedicated_regions if qubits <= set(item)), None)
+        if region is None:
+            raise ValueError("program layout is outside every dedicated region")
+        if region not in self.region_access.get(command.tenant_id, ()):
+            raise PermissionError("this tenant may not run on that region")
+        return region
 
-    def _service_reset(self, job: JobRecord) -> ResetModelResult | RegisterResetResult:
+    def _service_reset(self, job: JobRecord, before: tuple[PlacedKick, ...] = ()
+                       ) -> ResetModelResult | RegisterResetResult:
+        """The handover reset. Like IBM's reset (a measurement, then an X on outcome 1), it takes effect at
+        the end of its interval, so the leaks ``before`` (the gap and the reset interval) act first."""
         snapshot = self.state_store.read()
         isolated = (
             self.config.placement_policy
@@ -753,9 +825,23 @@ class SharedQpuRuntime:
             density_from_ket((1.0 + 0.0j, 0.0j))
             if isolated else snapshot.density_matrix
         )
+        feedback: list[PlacedKick] = []
+        if before:
+            if isolated or not isinstance(job.command.operation, CircuitExecutionOperation):
+                raise ValueError("leaks before a handover need a retained circuit region")
+            state = np.asarray(input_state, dtype=complex)
+            for placed in before:
+                if placed.in_reset:
+                    feedback.append(placed)      # between the handover reset's measurement and its X
+                else:
+                    state = self._apply_kick(state, placed)
+            input_state = freeze_register(state)
         if isinstance(job.command.operation, CircuitExecutionOperation):
-            # The FIFO locks this whole local region; reset only the new layout.
-            targets = ((0,) if isolated else tuple(snapshot.physical_qubit_ids.index(q) for q in job.command.layout.physical_qubit_ids))
+            # The FIFO locks this whole local region; the scope decides what the reset covers.
+            targets = ((0,) if isolated
+                       else tuple(range(len(snapshot.physical_qubit_ids)))
+                       if self.config.handover_reset_scope == "region"
+                       else tuple(snapshot.physical_qubit_ids.index(q) for q in job.command.layout.physical_qubit_ids))
             outcome = self._active_reset_models().run_register(self.config.reset_model_id, ResetModelRequest(
                 input_state=input_state, reset_count=self.config.reset_count,
                 victim_measurement=self.config.measure_input_state_before_transition,
@@ -764,6 +850,10 @@ class SharedQpuRuntime:
             self.state_store.validate_state(outcome.post_reset_state)
             duration = self._active_service_durations()[0]
             next_state = outcome.post_reset_state
+            if feedback:
+                next_state = freeze_register(self._reset_with_feedback(
+                    np.asarray(input_state, dtype=complex), targets, feedback,
+                    count=self.config.reset_count, measure_input=self.config.measure_input_state_before_transition))
             idle = None if isolated else self._active_idle_model()
             if idle is not None and duration > 0.0:
                 # The region's other qubits are not reset; they keep relaxing while the layout resets.

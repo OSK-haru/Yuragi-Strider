@@ -87,11 +87,12 @@ def run(strength: float, attack: bool, *, victim_shots: int, pulses: int, attack
     for tenant, job_id, at in jobs:
         job = runtime.scheduler.get(job_id)
         key = executor.lane_key(job_id)
-        previous, owner = anchors.get(key) or executor.plan_anchor(key)
+        previous, owner, region = anchors.get(key) or executor.plan_anchor(key)
         window = timing.plan_job_window(job, runtime.config, previous_finish=previous, previous_tenant_id=owner,
-                                        arrival=arrival[job_id], taken=executor.taken_keys(job_id))
+                                        arrival=arrival[job_id], taken=executor.taken_keys(job_id),
+                                        duration_us=executor.planned_duration(job, owner, region))
         executor.register_job(job_id, window)
-        anchors[key] = window.finish, job.command.tenant_id
+        anchors[key] = window.finish, job.command.tenant_id, runtime.region_of(job.command)
     horizon = EventPosition(WORLD, 1e9, 99)
     executor.frontier.set_target(horizon)
     executor.frontier.seal_ingress(horizon)

@@ -32,13 +32,15 @@ class DriveSchedule:
     """Everything the compiled Program does in one window, as repeated shots.
 
     ``offset_us`` is the service work before the first shot (tenant handover); consecutive shots are
-    ``repetition_delay_us`` apart. Intervals are relative to the window start.
+    ``repetition_delay_us`` apart. Intervals are relative to the window start. ``handover`` says the window
+    begins with the handover reset (its length is ``offset_us``, which may be zero).
     """
 
     shot: ShotActivity
     shots: int
     repetition_delay_us: float = 0.0
     offset_us: float = 0.0
+    handover: bool = False
 
     def __post_init__(self) -> None:
         if type(self.shot) is not ShotActivity:

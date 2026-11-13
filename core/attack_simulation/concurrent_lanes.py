@@ -85,19 +85,19 @@ def build_lane_stores(base: QpuStateStore) -> dict[tuple[int, ...], QpuStateStor
 def execution_window(job_id: str, tenant_id: str, operation: CircuitExecutionOperation,
                      layout_qubit_ids: Sequence[int], region: Sequence[int], start: EventPosition,
                      finish: EventPosition, *, reset_duration_us: float, measurement_duration_us: float,
-                     repetition_delay_us: float, pulse_shape: PulseShape, handover_us: float = 0.0,
+                     repetition_delay_us: float, pulse_shape: PulseShape, handover: bool = False,
                      schedule: DriveSchedule | None = None) -> ExecutionWindow:
     """The job's window with the whole region as receivers (program qubits first, then the rest).
 
     The region's qubits outside the program receive leaks too; ``place_kicks`` treats them as qubits
-    without a program of their own. ``handover_us`` is the service reset before the first shot when the
-    region changes tenant; it drives nothing and only delays the shots.
+    without a program of their own. ``handover`` is the service reset before the first shot when the
+    region changes tenant (one reset duration); it drives nothing and delays the shots.
     """
-    if schedule is None or schedule.offset_us != handover_us:
+    if schedule is None or schedule.handover != handover:
         schedule = DriveSchedule(
             shot_activity(operation, reset_duration_us=reset_duration_us,
                           measurement_duration_us=measurement_duration_us, pulse_shape=pulse_shape),
-            operation.shots, repetition_delay_us, handover_us)
+            operation.shots, repetition_delay_us, reset_duration_us if handover else 0.0, handover)
     layout = tuple(layout_qubit_ids)
     qubits = layout + tuple(q for q in region if q not in layout)
     return ExecutionWindow(job_id, tenant_id, qubits, start, finish, schedule)
@@ -106,7 +106,7 @@ def execution_window(job_id: str, tenant_id: str, operation: CircuitExecutionOpe
 def kicks_for(target: ExecutionWindow, previous: ExecutionWindow | None,
               others: Sequence[ExecutionWindow], config: ConcurrentRegions,
               operation: CircuitExecutionOperation, layout_qubit_ids: Sequence[int],
-              reset_duration_us: float) -> KickPlan:
+              reset_duration_us: float, measurement_duration_us: float = 0.0) -> KickPlan:
     """Every leak onto ``target`` (its own window plus the gap since ``previous``) as placed kicks.
 
     ``others`` are the windows of the other regions; the caller must hold all of them that can touch
@@ -119,4 +119,5 @@ def kicks_for(target: ExecutionWindow, previous: ExecutionWindow | None,
     if not leaks:
         return EMPTY_PLAN
     return place_kicks(leaks, operation, target.schedule, window_start_us=target.start.time_us,
-                       reset_duration_us=reset_duration_us, layout_qubit_ids=layout_qubit_ids)
+                       reset_duration_us=reset_duration_us, layout_qubit_ids=layout_qubit_ids,
+                       measurement_duration_us=measurement_duration_us)

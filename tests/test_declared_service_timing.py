@@ -84,10 +84,10 @@ class DeclaredServiceTimingTests(unittest.TestCase):
                             expected += 3 if previous_tenant == "tenant-b" else 0
                             actual = compiled_job_duration(record, runtime_config, previous_tenant)
                             self.assertEqual(actual, expected)
-                            # Execute the existing pure duration method without constructing owners.
+                            # Execute the executor's pure duration rule without constructing owners.
                             adapter = SimpleNamespace(runtime=SimpleNamespace(config=runtime_config))
-                            snapshot = SimpleNamespace(owner_tenant_id=previous_tenant)
-                            self.assertEqual(actual, DeclaredQpuExecutor._duration(adapter, record, snapshot))
+                            self.assertEqual(actual, DeclaredQpuExecutor.planned_duration(
+                                adapter, record, previous_tenant, ()))
 
     def test_handover_is_not_multiplied_by_shots_or_reset_count(self):
         runtime_config = replace(config(), reset_count=0)

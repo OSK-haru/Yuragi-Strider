@@ -37,6 +37,9 @@ CROSSTALK = 0.05           # drive-crosstalk transfer 1 -> 2, real part (leaked 
 CROSSTALK_IMAG = 0.0       # imaginary part (leaked drive turned by 90 degrees); |real + i imag| <= 1
 CROSSTALK_DETUNING_MHZ = 0.0   # 0 = resonant leak; the product default is 100 MHz
 RESET_SUCCESS = 0.9        # success probability of one reset when the residue channel is on (off = 1.0)
+RESET_US = 1.0             # duration of one reset (initializing and handover)
+MEASUREMENT_US = 1.0       # a reset's measurement part (the rest is feedback before the conditional X), and
+                           # the final measurement's duration; a leak in the feedback part survives the reset
 T1_US = 100.0              # same T1 / T_phi on every qubit (math.inf = no relaxation)
 TPHI_US = 150.0
 PROBE_START_US = 1.0
@@ -62,7 +65,9 @@ def one_run(use_zz, use_xt, use_residue, secret, seed):
     transfers = ([DriveCrosstalkTransfer(1, 2, CROSSTALK, CROSSTALK_IMAG, 2 * math.pi * CROSSTALK_DETUNING_MHZ)]
                  if use_xt else [])
     runtime, executor = build(transfers=transfers, zz=zz, t1=T1_US, tphi=TPHI_US,
-                              reset_success=RESET_SUCCESS if use_residue else 1.0)
+                              reset_success=RESET_SUCCESS if use_residue else 1.0,
+                              region_access={"attacker": (A, V)},    # the attacker may take over V
+                              durations=(RESET_US, MEASUREMENT_US))
     probe = job(runtime, "attacker", A, [[{"type": "H", "targets": [0]}],
                                          [{"type": "I", "targets": [0], "params": {"duration_us": WAIT_US}}],
                                          [{"type": "H", "targets": [0]}]], f"p{seed}", seed)

@@ -38,8 +38,13 @@ def compiled_job_duration(
     job: JobRecord,
     runtime_config: SharedQpuRuntimeConfig,
     previous_tenant_id: str | None,
+    *,
+    service_durations: tuple[float, float] | None = None,
 ) -> float:
-    """Return physical microseconds, matching DeclaredQpuExecutor._duration.
+    """Return physical microseconds; DeclaredQpuExecutor.planned_duration builds on this.
+
+    ``service_durations`` is ``(reset, measurement)`` of the region the job runs on; without it the
+    runtime configuration's values are used (the shared region).
 
     Initialize/reset instructions use the supplied service reset duration;
     unitary durations are already compiled (including parallel-column timing).
@@ -69,20 +74,26 @@ def compiled_job_duration(
             operation, job.command.tenant_id, previous_tenant_id,
             runtime_config.reset_duration_us, runtime_config.program_measurement_duration_us,
         ).duration_us, "compiled job duration")
+    reset_us, measurement_us = (
+        (runtime_config.reset_duration_us, runtime_config.program_measurement_duration_us)
+        if service_durations is None else
+        (_duration(service_durations[0], "region reset duration"),
+         _duration(service_durations[1], "region measurement duration"))
+    )
     duration = sum(
         instruction.duration_us if instruction.kind in {"unitary", "delay"}
-        else runtime_config.reset_duration_us
+        else reset_us
         if instruction.kind in {"initialize", "reset"} else 0.0
         for instruction in operation.instructions
     )
-    duration += runtime_config.program_measurement_duration_us * len({
+    duration += measurement_us * len({
         instruction.time_group for instruction in operation.instructions
         if instruction.kind == "measure"
     })
     duration *= operation.shots
     duration += runtime_config.repetition_delay_us * (operation.shots - 1)
     if previous_tenant_id is not None and previous_tenant_id != job.command.tenant_id:
-        duration += runtime_config.reset_duration_us
+        duration += reset_us
     return _duration(duration, "compiled job duration")
 
 
@@ -133,8 +144,12 @@ class DeclaredServiceTiming:
         previous_tenant_id: str | None,
         arrival: EventPosition,
         taken: frozenset = frozenset(),
+        duration_us: float | None = None,
     ) -> JobExecutionWindow:
         """Plan one supplied FIFO successor without reading or mutating owners.
+
+        ``duration_us`` is the executor's own planned duration (``DeclaredQpuExecutor.planned_duration``);
+        without it the shared-region ``compiled_job_duration`` is used.
 
         START is after arrival + processing and strictly after previous FINISH's
         full key, including ties with arbitrary ingress orders. FINISH and
@@ -151,7 +166,8 @@ class DeclaredServiceTiming:
                 raise TypeError("explicit immutable EventPosition values are required")
             if position.clock_domain != self.clock_domain:
                 raise ValueError("service timing and event clock domains differ")
-        duration = compiled_job_duration(job, runtime_config, previous_tenant_id)
+        duration = (compiled_job_duration(job, runtime_config, previous_tenant_id) if duration_us is None
+                    else _duration(duration_us, "planned job duration"))
         start = _after(arrival, self.processing_delay_us)
         if previous_finish is not None and start.key <= previous_finish.key:
             start = _after(previous_finish, 0.0)

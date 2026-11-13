@@ -129,8 +129,10 @@ class ConcurrentRegionsTests(unittest.TestCase):
         runtime, executor = build([DriveCrosstalkTransfer(2, 0, 1.0), DriveCrosstalkTransfer(0, 2, 1.0)])
         victim = submit(runtime, "victim", PULSE, "v")
         attacker = submit(runtime, "attacker", DELAY, "a")
+        # The victim's pulse (3.0 us) lands in the attacker's wait, after the attacker's own reset
+        # (1.5-2.5 us); a pulse inside that reset would be erased by it.
         executor.register_job(victim.job_id, window_for(executor, victim, 2.0, 0))
-        executor.register_job(attacker.job_id, window_for(executor, attacker, 2.5, 4))
+        executor.register_job(attacker.job_id, window_for(executor, attacker, 1.5, 4))
         run_in_order(executor)
         self.assertEqual(runtime.scheduler.get(attacker.job_id).result["counts"], {"10": 1})
         self.assertEqual(runtime.scheduler.get(victim.job_id).result["counts"], {"10": 1})

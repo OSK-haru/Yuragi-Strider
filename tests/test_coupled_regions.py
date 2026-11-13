@@ -54,7 +54,8 @@ def registry(success=1.0):
     return model, reg
 
 
-def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.0):
+def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.0, region_access=None,
+          durations=(1.0, 1.0)):
     model, reg = registry(reset_success)
     idle = IndependentIdleModel((IdleQubitSpec(t1, tphi, 0.0),) * 2, 2)
     runtime = SharedQpuRuntime(
@@ -64,7 +65,7 @@ def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.
                                       max_local_qubits=2, entry_reuse_tolerance=0.0),
         tenant_regions=REGIONS, regional_reset_models={(0, 1): reg, (2, 3): reg},
         regional_idle_models={(0, 1): idle, (2, 3): idle},
-        regional_service_durations={(0, 1): (1.0, 1.0), (2, 3): (1.0, 1.0)})
+        regional_service_durations={(0, 1): durations, (2, 3): durations}, region_access=region_access)
     executor = DeclaredQpuExecutor(
         runtime=runtime, clock_domain="world", max_jobs=16, max_events_per_job=64, max_unresolved=16,
         idle_model=idle, concurrent_regions=ConcurrentRegions(tuple(transfers), residual_zz=zz))
@@ -211,8 +212,9 @@ def dense_reference(jobs, sides, couplings, until_us):
 def dense_reference_with_resets(jobs, sides, couplings, until_us, initial, success):
     """Union-register Lindblad evolution with timed resets, written apart from the world's machinery.
 
-    A reset is ``E(rho) = (1 - s) rho + s |0><0| Tr`` on one qubit at its start time; the qubit then stays
-    busy (no relaxation, ZZ still on) for the side's reset time. Unitaries have zero duration. A handover job
+    A reset is ``E(rho) = (1 - s) rho + s |0><0| Tr`` on one qubit. Like IBM's reset (measure, then X on
+    outcome 1) it acts at the *end* of its interval; the qubit is busy (no relaxation, ZZ still on) from
+    its start. Unitaries have zero duration. A handover job
     resets its layout first and starts its shots one reset time later.
     """
     sizes = [len(side.region) for side in sides]
@@ -292,8 +294,13 @@ def dense_reference_with_resets(jobs, sides, couplings, until_us, initial, succe
         if pending and pending[0][0] <= now:
             _, _, kind, g, payload = pending.pop(0)
             if kind == "reset":
-                rho = reset(rho, g)
                 busy_until[g] = max(busy_until.get(g, 0.0), now + payload)
+                if now + payload <= until_us:
+                    # the channel itself lands at the end; it goes ahead of anything else at that time
+                    pending.append((now + payload, -1, "reset_end", g, None))
+                    pending.sort(key=lambda e: (e[0], e[1]))
+            elif kind == "reset_end":
+                rho = reset(rho, g)
             else:
                 full = single(np.asarray(payload, dtype=complex), g)
                 rho = full @ rho @ full.conj().T
@@ -306,7 +313,8 @@ class HandoverTests(unittest.TestCase):
     """A region may change tenant: the next tenant's job first runs the service reset on its layout."""
 
     def run_handover(self, zz, *, reset_success=0.6, t1=40.0, tphi=60.0, transfers=()):
-        runtime, executor = build(zz=zz, t1=t1, tphi=tphi, reset_success=reset_success, transfers=transfers)
+        runtime, executor = build(zz=zz, t1=t1, tphi=tphi, reset_success=reset_success, transfers=transfers,
+                                  region_access={"attacker": (REGIONS["attacker"], REGIONS["victim"])})
         victim = submit_on(runtime, "victim", REGIONS["victim"], [[{"type": "X", "targets": [0]},
                                                                   {"type": "X", "targets": [1]}]], "v")
         neighbor = submit_on(runtime, "attacker", REGIONS["attacker"],
@@ -353,6 +361,43 @@ class HandoverTests(unittest.TestCase):
         self.assertEqual(executor.runtime.scheduler.get(jobs[2].job_id).result["counts"]["1"], 1)
         _, executor, jobs = self.run_handover(zz, reset_success=1.0, t1=math.inf, tphi=math.inf)
         self.assertEqual(executor.runtime.scheduler.get(jobs[2].job_id).result["counts"]["0"], 1)
+
+
+class ResetFeedbackTests(unittest.TestCase):
+    """IBM's reset is a measurement, then X on outcome 1: a leak during the measurement is erased, one
+    during the feedback that follows survives (it hits the collapsed branch and is not corrected)."""
+
+    def attacker_reads(self, attacker_start, zz):
+        # reset 1.0 us of which the measurement is the first 0.4 us; the victim's pi pulse is at 3.0 us
+        runtime, executor = build(transfers=[DriveCrosstalkTransfer(0, 2, 1.0)], zz=zz, durations=(1.0, 0.4))
+        victim = submit_on(runtime, "victim", REGIONS["victim"], [[{"type": "X", "targets": [0]}]], "v", qubits=1)
+        attacker = submit_on(runtime, "attacker", REGIONS["attacker"],
+                             [[{"type": "I", "targets": [0], "params": {"duration_us": 2.0}}]], "a", qubits=1)
+        register(executor, victim, 2.0, 0)
+        register(executor, attacker, attacker_start, 4)
+        run_in_order(executor)
+        counts = runtime.scheduler.get(attacker.job_id).result["counts"]
+        return max(counts, key=counts.get)
+
+    def test_a_leak_in_the_measurement_is_erased_and_one_in_the_feedback_survives(self):
+        for zz in (None, ResidualZZSettings((ResidualZZCoupling(1, 2, 0.0),), model="exact")):
+            with self.subTest(world=zz is not None):
+                self.assertEqual(self.attacker_reads(2.8, zz), "0")    # 3.0 us is in [2.8, 3.2): measurement
+                self.assertEqual(self.attacker_reads(2.5, zz), "1")    # 3.0 us is in [2.9, 3.5): feedback
+                self.assertEqual(self.attacker_reads(1.5, zz), "1")    # in the wait after the reset (2.5 us)
+
+
+class RegionAccessTests(unittest.TestCase):
+    def test_a_tenant_runs_only_on_its_home_region_unless_granted(self):
+        runtime, _ = build()
+        with self.assertRaises(PermissionError):
+            submit_on(runtime, "attacker", REGIONS["victim"], [], "x", qubits=1)
+        runtime, _ = build(region_access={"attacker": (REGIONS["attacker"], REGIONS["victim"])})
+        submit_on(runtime, "attacker", REGIONS["victim"], [], "x", qubits=1)
+        with self.assertRaises(PermissionError):
+            submit_on(runtime, "victim", REGIONS["attacker"], [], "y", qubits=1)
+        with self.assertRaises(ValueError):
+            build(region_access={"attacker": ((4, 5),)})
 
 
 class WorldTests(unittest.TestCase):

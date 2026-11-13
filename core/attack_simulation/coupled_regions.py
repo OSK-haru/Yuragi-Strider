@@ -42,7 +42,9 @@ from core.cptp_liouvillian import dense_matrix_exponential, gksl_liouvillian_sup
 from core.experimental_isolation_physics.coherent_crosstalk import ResidualZZCoupling
 from core.experimental_isolation_physics.idle_evolution import IndependentIdleModel, relax_axes_in_place
 from core.experimental_isolation_physics.reset_model import ResetModelRegistry, ResetModelRequest
-from core.register_operations import freeze_register
+from core.register_operations import (
+    apply_local_replacement, apply_reset_with_feedback_kick, freeze_register, nonselective_measurement,
+)
 
 ZZ_MODELS = ("low_rank", "exact")
 EXACT_MAX_UNION_QUBITS = 8          # the dense-computation limit; ``exact`` is only offered up to it (D79)
@@ -91,6 +93,7 @@ class RegionSide:
     measurement_us: float
     handover_reset_count: int = 1           # the runtime's service reset when the region changes tenant
     handover_measures_input: bool = False
+    handover_scope: str = "layout"          # "layout": the new tenant's qubits; "region": every qubit
 
 
 @dataclass(frozen=True)
@@ -277,12 +280,19 @@ class CoupledRegionWorld:
         shot_length = measure_start + side.measurement_us * groups
         count = len(operation.instructions)
         first = job.start_us + (side.reset_us if job.handover else 0.0)
-        actions = [(job.start_us, (-1, 0, 0, 0), "handover", None)] if job.handover else []
+        # A reset (IBM: a measurement, then an X on outcome 1) occupies its qubits from its start and takes
+        # effect at its end; the ZZ coupling keeps acting on the pre-reset populations meanwhile.
+        actions = ([(job.start_us, (-1, 0, 1, 0), "handover", "begin"),
+                    (first, (-1, 1, 0, 0), "handover", "end")] if job.handover else [])
         for shot in range(operation.shots):
             begin = first + shot * (shot_length + self.repetition_delay_us)
             actions.append((begin, (shot, -2, 0, 0), "shot", shot))
             for index, (instruction, start) in enumerate(zip(operation.instructions, starts)):
-                if instruction.kind != "measure":
+                if instruction.kind in {"initialize", "reset"}:
+                    actions.append((begin + start, (shot, index, 1, 0), "reset", (shot, index, "begin")))
+                    actions.append((begin + start + side.reset_us, (shot, index, 1, 1), "reset",
+                                    (shot, index, "end")))
+                elif instruction.kind != "measure":
                     actions.append((begin + start, (shot, index, 1, 0), "instruction", (shot, index)))
             actions.append((begin + measure_start, (shot, count, 2, 0), "measure", shot))
             actions.append((begin + shot_length, (shot, count + 1, 1, 0), "commit", shot))
@@ -299,7 +309,19 @@ class CoupledRegionWorld:
         for shot in range(job.operation.shots):
             begin = progress.first_shot_us + shot * (shot_length + self.repetition_delay_us)
             for order, kick in enumerate(plan.of_shot(shot)):
-                if kick.wait_offset_us is not None:
+                if kick.before_handover and not job.handover:
+                    raise ValueError("leaks were placed before a handover that does not happen")
+                if kick.in_reset:
+                    # Folded into its reset's end (``_feedback``). Once that end is simulated, a kick
+                    # learned only now is late: it then acts as a plain rotation (counted below).
+                    end = (-1, 1, 0, 0) if kick.before_handover else (shot, kick.position, 1, 1)
+                    if end > progress.last_seq:
+                        continue
+                    at = job.start_us if kick.before_handover else begin + starts[kick.position]
+                    kicks.append((at, end, (shot, kick)))
+                elif kick.before_handover:
+                    kicks.append((job.start_us, (-1, 0, 0, order), (shot, kick)))
+                elif kick.wait_offset_us is not None:
                     kicks.append((begin - self.repetition_delay_us + kick.wait_offset_us, (shot, -3, 0, order),
                                   (shot, kick)))
                 else:
@@ -331,14 +353,28 @@ class CoupledRegionWorld:
         operation = job.operation
         starts, measure_start, shot_length = progress.layout
         if kind == "handover":
-            # As the runtime's service reset: only the new layout is reset; the rest of the region keeps
+            # As the runtime's service reset: the scope's qubits are reset; the rest of the region keeps
             # what the previous tenant left (and keeps relaxing / coupling meanwhile).
-            self._touch(side_index, job.slots, when)
-            self._relax_to(side_index, job.slots, actual)
-            self._reset(side_index, job.slots, count=side.handover_reset_count,
-                        measures_input=side.handover_measures_input)
-            for slot in job.slots:
-                self.free[side_index][slot] = max(self.free[side_index][slot], actual + side.reset_us)
+            targets = (tuple(range(len(side.region))) if side.handover_scope == "region" else job.slots)
+            if payload == "begin":
+                self._occupy(side_index, targets, when, actual, side.reset_us)
+            else:
+                self._touch(side_index, targets, when)
+                feedback = self._feedback(job, progress, 0, None)
+                self._reset(side_index, targets, count=side.handover_reset_count,
+                            measures_input=side.handover_measures_input, feedback=feedback)
+            return
+        if kind == "reset":
+            shot, index, phase = payload
+            instruction = operation.instructions[index]
+            operands = tuple(job.slots[q] for q in instruction.qubits)
+            if phase == "begin":
+                self._occupy(side_index, operands, when, actual, side.reset_us)
+                progress.duration += side.reset_us
+            else:
+                self._touch(side_index, operands, when)
+                errors = self._reset(side_index, operands, feedback=self._feedback(job, progress, shot, index))
+                progress.assignment.update(zip(instruction.qubits, errors))
             return
         if kind == "shot":
             if job.handover and progress.handover is None:
@@ -365,12 +401,7 @@ class CoupledRegionWorld:
             operands = tuple(job.slots[q] for q in instruction.qubits)
             self._touch(side_index, operands, when)
             self._relax_to(side_index, operands, actual)
-            if instruction.kind in {"initialize", "reset"}:
-                errors = self._reset(side_index, operands)
-                progress.assignment.update(zip(instruction.qubits, errors))
-                busy = side.reset_us
-                progress.duration += side.reset_us
-            elif instruction.kind == "unitary":
+            if instruction.kind == "unitary":
                 self._unitary(side_index, np.asarray(instruction.unitary, dtype=complex), operands)
                 if instruction.depolarizing_probability:
                     self._depolarize(side_index, operands, instruction.depolarizing_probability)
@@ -411,6 +442,13 @@ class CoupledRegionWorld:
         raise ValueError("unknown world action")
 
     # ----- coupling ---------------------------------------------------------------------------------------
+
+    def _occupy(self, side: int, slots: Sequence[int], when: float, actual: float, busy_us: float) -> None:
+        """Bring ``slots`` up to ``actual`` and mark them busy (no idle relaxation) for ``busy_us``."""
+        self._touch(side, slots, when)
+        self._relax_to(side, slots, actual)
+        for slot in slots:
+            self.free[side][slot] = max(self.free[side][slot], actual + busy_us)
 
     def _touch(self, side: int, slots: Sequence[int], time_us: float) -> None:
         if any(slot in self.exposed[side] for slot in slots):
@@ -499,8 +537,31 @@ class CoupledRegionWorld:
             mixed = _replace_with_mixed(mixed, slot)
         self._set(side, (1.0 - probability) * stack + probability * mixed)
 
-    def _reset(self, side: int, slots: tuple[int, ...], *, count: int = 1, measures_input: bool = False):
-        """The region's reset model on every factor, by linearity over valid density matrices."""
+    def _feedback(self, job: WorldJob, progress: _Progress, shot: int, position: int | None) -> list:
+        """The kicks known now that arrive in the feedback of this reset (``position`` None: the handover)."""
+        found = []
+        seen = Counter(progress.applied)
+        for kick in job.kicks().of_shot(shot):
+            if not kick.in_reset or kick.before_handover != (position is None):
+                continue
+            if position is not None and kick.position != position:
+                continue
+            if seen[(shot, kick)] > 0:
+                seen[(shot, kick)] -= 1
+                continue
+            progress.applied[(shot, kick)] += 1
+            found.append(kick)
+        return found
+
+    def _reset(self, side: int, slots: tuple[int, ...], *, count: int = 1, measures_input: bool = False,
+               feedback: Sequence[PlacedKick] = ()):
+        """The region's reset model on every factor, by linearity over valid density matrices.
+
+        ``feedback`` kicks arrive between the first attempt's measurement and its X (IBM's reset); they are
+        folded into that attempt by ``apply_reset_with_feedback_kick``, which is linear, term by term.
+        """
+        if feedback:
+            return self._reset_with_feedback(side, slots, count, measures_input, feedback)
         spec = self.sides[side]
         size = len(spec.region)
         errors = None
@@ -525,6 +586,40 @@ class CoupledRegionWorld:
             raise ValueError("the joint state vanished")
         self._set(side, np.array(results))
         return errors
+
+    def _reset_with_feedback(self, side: int, slots: tuple[int, ...], count: int, measures_input: bool,
+                             feedback: Sequence[PlacedKick]):
+        spec = self.sides[side]
+        model = spec.reset_models.get(spec.reset_model_id)
+        if not callable(getattr(model, "local_spec", None)):
+            raise ValueError("leaks inside a reset need a reset model with one-qubit channels")
+        by_slot: dict[int, np.ndarray] = {}
+        plain = []
+        for kick in feedback:
+            slot = spec.region.index(kick.qubit)
+            if slot not in slots or count == 0:
+                plain.append((slot, kick_unitary(kick)))
+            else:
+                by_slot[slot] = kick_unitary(kick) @ by_slot.get(slot, np.eye(2, dtype=complex))
+        stack = np.array(self.factors[side], dtype=complex)
+        for slot, unitary in plain:
+            stack = _apply_stack(stack, unitary, (slot,))
+        results = []
+        for term in stack:
+            if measures_input:
+                term = nonselective_measurement(term, slots)
+            for attempt in range(count):
+                for slot in slots:
+                    params = model.local_spec(slot)
+                    if params.local_dimension != 2:
+                        raise ValueError("leaks inside a reset need two-level reset channels")
+                    term = (apply_reset_with_feedback_kick(term, slot, params.success_probability,
+                                                           params.target_populations, by_slot[slot])
+                            if attempt == 0 and slot in by_slot else
+                            apply_local_replacement(term, slot, params.success_probability, params.target_populations))
+            results.append(term)
+        self._set(side, np.array(results))
+        return register_assignment_errors(model, subsystem_count=len(spec.region), targets=slots)
 
     def _reduced(self, side: int) -> np.ndarray:
         other = self.factors[1 - side]

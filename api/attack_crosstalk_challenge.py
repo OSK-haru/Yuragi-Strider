@@ -45,8 +45,10 @@ class CrosstalkGroverSettings:
 
     ``drive_crosstalk_strength`` is the challenge's difficulty value, a sample (the calibration data has no such
     number). With the product's detuned leak, a continuous drive over the whole victim run lowered the success of
-    the two-iteration search from about 0.68 to about 0.28 at 0.25, while 0.15 left it within two standard
-    deviations of the baseline (scripts/experiment_crosstalk_grover.py, 200 victim shots).
+    the two-iteration search from about 0.37 to about 0.20 at 0.25, while 0.15 left it at the baseline
+    (scripts/experiment_crosstalk_grover.py, 200 victim shots, 2026-11-13, after idle relaxation (D85) and the
+    measurement-and-feedback reset (D87); it was 0.68 to 0.28 before). ``minimum_drop`` 0.10 keeps a correct
+    attack's drop of about 0.17 passing with about 98% probability over 400 victim shots (sigma about 0.034).
     """
 
     victim_shots: int = 50
@@ -57,7 +59,7 @@ class CrosstalkGroverSettings:
     max_submissions: int = 3
     baseline_shots: int = 400
     significance_z: float = 3.0
-    minimum_drop: float = 0.15
+    minimum_drop: float = 0.10
 
 
 def crosstalk_grover_challenge(snapshot: DeviceSnapshot | None = None,

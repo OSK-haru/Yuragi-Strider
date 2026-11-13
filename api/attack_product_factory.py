@@ -42,7 +42,7 @@ from core.attack_simulation.resource_binding import PhysicalQubitLayout, Physica
 from core.attack_simulation.scenario_compiler import ResolvedScenarioManifest
 from core.attack_simulation.scenario_environment import ScenarioEnvironment
 from core.attack_simulation.scenario_policy import ScenarioMode
-from core.attack_simulation.shared_qpu_runtime import SharedQpuRuntime, SharedQpuRuntimeConfig
+from core.attack_simulation.shared_qpu_runtime import HANDOVER_RESET_SCOPES, SharedQpuRuntime, SharedQpuRuntimeConfig
 from core.attack_simulation.virtual_credentials import VirtualCredentialAuthority
 from core.attack_simulation.declared_world_clock import WorldClockSettings
 from core.attack_simulation.declared_world_clock import CatchUpMonotonicSource
@@ -329,6 +329,7 @@ class ProductEnvironmentFactory:
             required.update({
                 "qpu_service.device_snapshot",
                 "qpu_service.runtime_execution.measure_input_state_before_transition",
+                "qpu_service.runtime_execution.handover_reset_scope",
                 "qpu_service.runtime_execution.placement_policy",
             })
         if isinstance(idle, Mapping):
@@ -398,14 +399,15 @@ def _parse_frozen_inputs(manifest: ResolvedScenarioManifest, limits: ProductAsse
         "schema_version", "reset_model_id", "reset_model_configuration_id", "reset_model_mode",
         "reset_count", "reset_duration_us", "victim_operation_duration_us",
         "attacker_measurement_duration_us", "queue_policy_id", "cancellation_policy_id",
-        "measure_input_state_before_transition", "placement_policy", "isolated_assignment_duration_us",
+        "measure_input_state_before_transition", "handover_reset_scope", "placement_policy",
+        "isolated_assignment_duration_us",
         "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
         "concurrency_policy", "drive_crosstalk_strength", "drive_crosstalk_direction", "drive_crosstalk_detuning_mhz",
         "residual_zz_strength_khz", "residual_zz_model", "residual_zz_max_rank", "residual_zz_truncation",
         "resource_binding",
         "max_local_qubits", "max_execution_work",
     })
-    if runtime_raw["schema_version"] != "shared_qpu_runtime_v5":
+    if runtime_raw["schema_version"] != "shared_qpu_runtime_v6":
         raise ValueError("unsupported frozen QPU runtime schema")
     _validate_runtime_profile(runtime_raw)
     runtime_fields = dict(runtime_raw)
@@ -1067,6 +1069,8 @@ def _validate_runtime_profile(raw: Mapping[str, Any]) -> None:
             raise ValueError(f"runtime_execution.{name} must be an explicit positive integer")
     if type(raw["measure_input_state_before_transition"]) is not bool:
         raise ValueError("runtime_execution.measure_input_state_before_transition must be explicit boolean")
+    if raw["handover_reset_scope"] not in HANDOVER_RESET_SCOPES:
+        raise ValueError("runtime_execution.handover_reset_scope must be layout or region")
     for name in ("reset_duration_us", "victim_operation_duration_us",
                  "attacker_measurement_duration_us", "isolated_assignment_duration_us",
                  "program_measurement_duration_us", "repetition_delay_us", "entry_reuse_tolerance",
