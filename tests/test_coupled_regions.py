@@ -13,7 +13,7 @@ from core.attack_simulation.coupled_regions import (
     CoupledRegionWorld, RegionSide, ResidualZZSettings, WorldJob,
 )
 from core.attack_simulation.declared_execution import DeclaredQpuExecutor, JobExecutionWindow
-from core.attack_simulation.jobs import JobCommand
+from core.attack_simulation.jobs import JobCommand, JobStatus
 from core.attack_simulation.placement import PlacementPolicy
 from core.attack_simulation.program_request import CircuitProgram, ProgramSubmitRequest
 from core.attack_simulation.resource_binding import PhysicalQubitLayout
@@ -419,6 +419,102 @@ class ReadoutLeakTests(unittest.TestCase):
                 self.assertEqual((result, round(excited, 9)), ("0", 1.0))
 
 
+class HandoverFeedbackTests(unittest.TestCase):
+    """A pi leak reaches |0> during the handover reset (success 0.5). In its measurement part it is applied
+    first and the reset may undo it (P1 = 0.5); in its feedback part it hits the measured branch b = 0, which
+    is not corrected (P1 = 1). A second attempt then resets with 0.5 again."""
+
+    PI = (math.pi, 0.0, 0.0)
+
+    def runtime_p1(self, in_reset, count=1):
+        from core.attack_simulation.kick_application import PlacedKick
+        from core.attack_simulation.qpu_state import QpuStateTransition
+        from tests.test_program_initialization import build as build_shared, request
+        model = PhenomenologicalResetModel(ImperfectResetSpec(0.5, (1.0, 0.0)))
+        store, runtime, service = build_shared(model=model)
+        runtime.config = replace(runtime.config, reset_count=count)
+        zero = np.zeros((8, 8), dtype=complex)
+        zero[0, 0] = 1.0
+        store.commit(store.read().revision, QpuStateTransition("held", "program_shot", "earlier", zero, 0.0,
+                                                               "tenant-v"))
+        status = service.submit_program("a", request(text=program_json(1), mode="prepare", key="takeover"))
+        job = runtime.scheduler.get(status.job_id)
+        kick = PlacedKick(0, job.command.layout.physical_qubit_ids[0], self.PI, before_handover=True,
+                          in_reset=in_reset)
+        runtime._prepare_job_context(job, (kick,))
+        state = np.asarray(store.read().density_matrix)
+        self.assertEqual(store.events()[-1].event_kind, "service_reset")
+        return sum(state[i, i].real for i in range(8) if i & 4)
+
+    def world_p1(self, in_reset, count=1):
+        from core.attack_simulation.kick_application import KickPlan, PlacedKick
+        model, reg = registry(0.5)
+        idle = IndependentIdleModel((IdleQubitSpec(math.inf, math.inf, 0.0),) * 2, 2)
+        sides = (RegionSide((0, 1), idle, reg, model.model_id, 1.0, 0.4, handover_reset_count=count),
+                 RegionSide((2, 3), idle, reg, model.model_id, 1.0, 0.4, handover_reset_count=count))
+        zero = np.zeros((4, 4), dtype=complex)
+        zero[0, 0] = 1.0
+        op = operation([], (2,), gate_us=0.0, qubits=1)
+        kick = PlacedKick(0, 2, self.PI, before_handover=True, in_reset=in_reset)
+        job = WorldJob("b", 1, op, (0,), 0.5, 99.0, lambda: KickPlan(((kick,),)), handover=True)
+        world = CoupledRegionWorld(sides, ResidualZZSettings((ResidualZZCoupling(1, 2, 0.0),), model="exact"),
+                                   (zero, zero), repetition_delay_us=0.0)
+        world.advance_to(1.6, (job,))           # handover [0.5, 1.5); its record is taken when the shot begins
+        state, duration = world.progress["b"].handover
+        self.assertAlmostEqual(duration, 1.0)
+        return sum(state[i, i].real for i in range(4) if i & 2)
+
+    def test_a_leak_in_the_handover_feedback_survives_its_reset(self):
+        for name, p1 in (("runtime", self.runtime_p1), ("world", self.world_p1)):
+            with self.subTest(path=name):
+                self.assertAlmostEqual(p1(in_reset=False), 0.5, places=12)
+                self.assertAlmostEqual(p1(in_reset=True), 1.0, places=12)
+                self.assertAlmostEqual(p1(in_reset=True, count=2), 0.5, places=12)
+                self.assertAlmostEqual(p1(in_reset=False, count=2), 0.25, places=12)
+
+
+class ExclusiveHandoverTests(unittest.TestCase):
+    """Dedicated regions run one job at a time (no overlap): a takeover still runs the handover reset, and the
+    declared duration (region switch + handover) matches the executed events."""
+
+    def test_a_takeover_in_the_one_queue_runs_the_handover_reset(self):
+        model, reg = registry(0.0)                              # a reset that never succeeds keeps the |1>
+        idle = IndependentIdleModel((IdleQubitSpec(math.inf, math.inf, 0.0),) * 2, 2)
+        runtime = SharedQpuRuntime(
+            state_store=regional_store(), reset_models=reg,
+            config=SharedQpuRuntimeConfig(model.model_id, model.configuration_id,
+                                          placement_policy=PlacementPolicy.TENANT_DEDICATED_REGION,
+                                          max_local_qubits=2, entry_reuse_tolerance=0.0,
+                                          isolated_assignment_duration_us=0.25),
+            tenant_regions=REGIONS, regional_reset_models={(0, 1): reg, (2, 3): reg},
+            regional_idle_models={(0, 1): idle, (2, 3): idle},
+            regional_service_durations={(0, 1): (1.0, 1.0), (2, 3): (0.5, 0.75)},
+            region_access={"attacker": (REGIONS["attacker"], REGIONS["victim"])})
+        executor = DeclaredQpuExecutor(runtime=runtime, clock_domain="world", max_jobs=16, max_events_per_job=64,
+                                       max_unresolved=16, idle_model=idle)
+        executor.frontier.set_target(pos(1000, 99))
+        executor.frontier.seal_ingress(pos(1000, 99))
+        own = submit_on(runtime, "attacker", REGIONS["attacker"], [], "a0", qubits=1)
+        victim = submit_on(runtime, "victim", REGIONS["victim"], [[{"type": "X", "targets": [0]}]], "v", qubits=1)
+        takeover = submit_on(runtime, "attacker", REGIONS["victim"], [], "a1", qubits=1)
+        start, order = 1.0, 0
+        _, holders, active = executor.plan_anchor(None)
+        for job in (own, victim, takeover):
+            target = executor.target_region(job)
+            duration = executor.planned_duration(job, holders.get(target), active)
+            executor.register_job(job.job_id, JobExecutionWindow(pos(start - 0.5, order), pos(start, order + 1),
+                                                                 pos(start + duration, order + 2),
+                                                                 pos(start + duration + 1.0, order + 3)))
+            start, order = start + duration + 2.0, order + 4
+            holders, active = {**holders, target: job.command.tenant_id}, target
+        run_in_order(executor)
+        for job in (own, victim, takeover):
+            self.assertIs(runtime.scheduler.get(job.job_id).status, JobStatus.SUCCEEDED)
+        self.assertEqual(runtime.scheduler.get(takeover.job_id).result["counts"]["1"], 1)
+        kinds = [event.event_kind for event in runtime.state_store.events()]
+        self.assertIn("service_reset", kinds)
+
+
 class RegionAccessTests(unittest.TestCase):
     def test_a_tenant_runs_only_on_its_home_region_unless_granted(self):
         runtime, _ = build()
@@ -507,6 +603,34 @@ class WorldTests(unittest.TestCase):
         reference = dense_reference_with_resets((a, b), sides, [((0, 1), (1, 0), 1.3)], until,
                                                 np.kron(zero, plus_one), success)
         np.testing.assert_allclose(self.joint(world), reference, atol=1e-10)
+
+    def test_low_rank_without_truncation_matches_exact_through_handover_feedback_and_readout(self):
+        """The resets, the handover, a feedback leak and a readout leak act term by term in the low-rank state."""
+        from core.attack_simulation.kick_application import KickPlan, PlacedKick
+        size, until, reset_us = 2, 3.4, 0.4
+        model, reg = registry(0.7)
+        idle = IndependentIdleModel((IdleQubitSpec(30.0, 50.0, 0.0),) * size, size)
+        sides = tuple(RegionSide(region, idle, reg, model.model_id, reset_us, 0.3, readout_dephasing_per_us=20.0)
+                      for region in ((0, 1), (2, 3)))
+        a, b = self.scenario(size)
+        kicks = (PlacedKick(0, 2, (0.9, 0.2, 0.0), before_handover=True, in_reset=True),
+                 PlacedKick(len(b.operation.instructions), 2, (0.4, -0.3, 0.0), readout="decision",
+                            readout_span=(0.05, 0.1)))
+        b = replace(b, handover=True, kicks=lambda: KickPlan((kicks,)))
+        plus_one = np.kron(np.array([[0.5, 0.5], [0.5, 0.5]]), np.array([[0, 0], [0, 1]])).astype(complex)
+        zero = np.zeros((4, 4), dtype=complex)
+        zero[0, 0] = 1.0
+        joints = []
+        for settings in (ResidualZZSettings((ResidualZZCoupling(1, 2, 1.3),), model="exact"),
+                         ResidualZZSettings((ResidualZZCoupling(1, 2, 1.3),), model="low_rank", max_rank=256,
+                                            truncation=0.0)):
+            world = CoupledRegionWorld(sides, settings, (zero, plus_one), repetition_delay_us=0.0)
+            world.advance_to(until, (a, b))
+            world.settle(0, until)
+            world.settle(1, until)
+            joints.append(self.joint(world))
+            self.assertEqual(world.stats.late_kicks, 0)
+        np.testing.assert_allclose(joints[1], joints[0], atol=1e-10)
 
     def test_low_rank_stays_within_its_dropped_norm(self):
         size, until = 3, 2.35

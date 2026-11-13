@@ -116,9 +116,11 @@ class ClosedWorkloadWorld:
         event = next((e for _, _, e in self._waiting() if e.job_id == job.job_id), None)
         if event is None:
             raise WorkloadInfrastructureError("unregistered source reached the closed-world queue")
+        snapshot = executor.runtime.state_store.read()
         window = self._timing.plan_job_window(job, executor.runtime.config,
             previous_finish=executor.frontier.snapshot().confirmed,
-            previous_tenant_id=executor.runtime.state_store.read().owner_tenant_id, arrival=event.arrival)
+            previous_tenant_id=snapshot.owner_tenant_id, arrival=event.arrival,
+            duration_us=executor._duration(job, snapshot))     # only the head is planned: the store is current
         executor.register_job(job.job_id, window)
         self._windows[job.job_id] = window
         return job, window

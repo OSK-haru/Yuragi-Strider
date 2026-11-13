@@ -425,19 +425,32 @@ class DeclaredQpuExecutor:
                 raise DeclaredExecutionCapacityError("declared job history is full")
             self._releases[job_id] = release
 
-    def _duration(self, job, snapshot):
-        return self.planned_duration(job, snapshot.owner_tenant_id, snapshot.physical_qubit_ids)
+    def target_region(self, job) -> tuple[int, ...]:
+        """The region the job runs on: its dedicated region, or the one shared region."""
+        if self.runtime.tenant_regions:
+            return self.runtime.region_of(job.command)
+        return self.runtime.state_store.read().physical_qubit_ids
 
-    def planned_duration(self, job, previous_tenant_id, previous_region) -> float:
-        """The job's physical duration when the region it starts on holds ``previous_tenant_id`` and the
-        active region is ``previous_region``. The one rule shared by planning and execution."""
+    def _duration(self, job, snapshot):
+        """At START: ``snapshot`` is the active region; the job's own region may be the parked one."""
+        target = self.target_region(job)
+        holder = snapshot.owner_tenant_id
+        if tuple(snapshot.physical_qubit_ids) != target:
+            parked = self.runtime.state_store.inactive_region()
+            holder = parked.owner_tenant_id if parked is not None and parked.physical_qubit_ids == target else None
+        return self.planned_duration(job, holder, snapshot.physical_qubit_ids)
+
+    def planned_duration(self, job, holder_tenant_id, active_region) -> float:
+        """The job's physical duration when its own region is held by ``holder_tenant_id`` (a different tenant
+        means a handover reset) and ``active_region`` is the active one (a switch costs the assignment time).
+        The one rule shared by planning and execution."""
         op, config = job.command.operation, self.runtime.config
         dedicated = config.placement_policy.value == "tenant_dedicated_region"
         if op.interleave is not None:
             if config.placement_policy.value != "guaranteed_same_physical_qubit":
                 raise ValueError("interleaved runs require the shared same-region placement")
             return interleaved_work(
-                op, job.command.tenant_id, previous_tenant_id,
+                op, job.command.tenant_id, holder_tenant_id,
                 config.reset_duration_us, config.program_measurement_duration_us,
             ).duration_us
         if config.placement_policy.value == "isolated_physical_resource":
@@ -446,9 +459,9 @@ class DeclaredQpuExecutor:
         from core.attack_simulation.declared_service_timing import compiled_job_duration
         target = self.runtime.region_of(job.command) if dedicated else None
         duration = compiled_job_duration(
-            job, config, previous_tenant_id,
+            job, config, holder_tenant_id,
             service_durations=self.runtime.regional_service_durations[target] if dedicated else None)
-        if dedicated and tuple(previous_region) != target:
+        if dedicated and tuple(active_region) != target:
             duration += config.isolated_assignment_duration_us
         return duration
 
@@ -517,21 +530,28 @@ class DeclaredQpuExecutor:
         return self.runtime.region_of(self.runtime.scheduler.get(job_id).command)
 
     def plan_anchor(self, key):
-        """``(previous_finish, previous_tenant_id, previous_region)`` for planning a lane's next job."""
+        """``(previous_finish, holders, active_region)`` for planning a lane's next job.
+
+        ``holders`` maps each region the lane can run on to the tenant holding it; a planner updates it as it
+        chains jobs (``holders[target_region(job)] = job's tenant``).
+        """
         if key is None:
             previous = self.frontier.snapshot().confirmed
             snapshot = self.runtime.state_store.read()
-            tenant, region = snapshot.owner_tenant_id, snapshot.physical_qubit_ids
+            holders = {tuple(snapshot.physical_qubit_ids): snapshot.owner_tenant_id}
+            parked = self.runtime.state_store.inactive_region()
+            if parked is not None:
+                holders[tuple(parked.physical_qubit_ids)] = parked.owner_tenant_id
+            region = tuple(snapshot.physical_qubit_ids)
             if self._active is not None:
                 active, window, _, _ = self._active
-                previous, tenant = window.finish, active.command.tenant_id
-                if self.runtime.tenant_regions:
-                    region = self.runtime.region_of(active.command)
-            return previous, tenant, region
+                previous, region = window.finish, self.target_region(active)
+                holders[region] = active.command.tenant_id
+            return previous, holders, region
         lane = self._lanes[key]
         if lane.active is not None:
-            return lane.active[1].finish, lane.active[0].command.tenant_id, lane.region
-        return lane.last_finish, lane.store.read().owner_tenant_id, lane.region
+            return lane.active[1].finish, {lane.region: lane.active[0].command.tenant_id}, lane.region
+        return lane.last_finish, {lane.region: lane.store.read().owner_tenant_id}, lane.region
 
     def taken_keys(self, exclude_job_id: str | None = None) -> frozenset:
         """Event keys of every other registered window; a new window must not reuse one."""
@@ -582,7 +602,7 @@ class DeclaredQpuExecutor:
             command = self.runtime.scheduler.get(queued).command
             if self.runtime.region_of(command) == region:
                 previous = command.tenant_id
-        return self.plan_anchor(region)[1] if previous is _NO_TENANT else previous
+        return self.plan_anchor(region)[1].get(region) if previous is _NO_TENANT else previous
 
     def _register_lane_window(self, job_id: str, window: JobExecutionWindow, previous_tenant=_NO_TENANT) -> None:
         """Keep the job's drive schedule as an execution window for the other regions' leaks.

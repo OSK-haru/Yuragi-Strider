@@ -438,18 +438,17 @@ class LiveWorkloadWorld:
                 key = executor.lane_key(job_id)
                 if key not in anchors:
                     anchors[key] = executor.plan_anchor(key)
-                previous, tenant, region = anchors[key]
+                previous, holders, region = anchors[key]
+                target = executor.target_region(job)
                 window = self._timing.plan_job_window(job, executor.runtime.config,
-                    previous_finish=previous, previous_tenant_id=tenant, arrival=self._arrivals[job_id],
+                    previous_finish=previous, previous_tenant_id=holders.get(target), arrival=self._arrivals[job_id],
                     taken=executor.taken_keys(job_id),
-                    duration_us=executor.planned_duration(job, tenant, region))
+                    duration_us=executor.planned_duration(job, holders.get(target), region))
                 if job_id not in executor._windows:
                     executor.register_job(job_id, window)
                 elif executor._windows[job_id] != window:
                     executor.replan_queued_job(job_id, window, owner=self._controls._owner)
-                anchors[key] = (window.finish, job.command.tenant_id,
-                                executor.runtime.region_of(job.command) if executor.runtime.tenant_regions
-                                else region)
+                anchors[key] = (window.finish, {**holders, target: job.command.tenant_id}, target)
 
     def _refine_dependencies(self, target):
         """Min(success, known cancellation, earliest FUTURE live cancellation).
