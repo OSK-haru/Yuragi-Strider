@@ -58,7 +58,11 @@ class ResultExportTest(unittest.TestCase):
 def _result():
     return run_simulation(SimulationConfig(
         circuit=CircuitConfig.one_qubit_h(),
-        environment=EnvironmentConfig(noise_level=0.01),
+        environment=EnvironmentConfig(
+            t1_zero_temperature_us=95.49925860214358,
+            tphi_us=64.63587019060685,
+            temperature_mk=11.8,
+        ),
         duration_us=20.0,
         time_steps=11,
         fidelity_threshold=0.9,

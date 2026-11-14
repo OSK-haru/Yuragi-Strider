@@ -9,42 +9,28 @@ from api.main import SimulateRequest, build_config_from_simulate_request, simula
 
 
 class ApiSimulateInputModesTest(unittest.TestCase):
-    def test_existing_normalized_payload_defaults_to_normalized_mode(self) -> None:
-        request = SimulateRequest(
-            circuit_preset="bell",
-            simulation_backend="python_dense",
-            parameters={
-                "normalized_temperature": 0.2,
-                "normalized_magnetic_field": 0.3,
-                "noise_level": 0.4,
-                "duration_us": 2.0,
-                "time_steps": 11,
-                "fidelity_threshold": 0.9,
-            },
-        )
-
-        config = build_config_from_simulate_request(request)
-
-        self.assertEqual(config.environment.input_mode, "normalized")
-        self.assertAlmostEqual(config.environment.temperature, 0.2)
-        self.assertAlmostEqual(config.environment.magnetic_field, 0.3)
-        self.assertAlmostEqual(config.environment.noise_level, 0.4)
-        self.assertAlmostEqual(config.duration_us, 2.0)
-        self.assertEqual(config.time_steps, 11)
-        self.assertAlmostEqual(config.fidelity_threshold, 0.9)
+    def test_removed_inputs_are_rejected(self) -> None:
+        for parameters in ({"normalized_temperature": 0.2, "noise_level": 0.4},
+                           {"device_quality": 0.8}, {"flux_noise_phi0": 1e-6}, {"t1_max_us": 100.0}):
+            with self.subTest(parameters=parameters), self.assertRaises(ValidationError):
+                SimulateRequest(
+                    circuit_preset="bell",
+                    simulation_backend="python_dense",
+                    parameters={"temperature_mk": 15.0, "qubit_frequency_ghz": 5.0,
+                                "t1_zero_temperature_us": 40.0, "tphi_us": 33.0,
+                                "duration_us": 2.0, "time_steps": 11, "fidelity_threshold": 0.9,
+                                **parameters},
+                )
 
     def test_physical_payload_builds_physical_environment(self) -> None:
         request = SimulateRequest(
             circuit_preset="bell",
             simulation_backend="python_dense",
-            input_mode="physical",
             parameters={
-                "device_quality": 0.8,
+                "t1_zero_temperature_us": 39.810717055349734,
+                "tphi_us": 33.20178309308936,
                 "temperature_mk": 15.0,
-                "flux_noise_phi0": 0.000001,
                 "qubit_frequency_ghz": 5.0,
-                "t1_max_us": 100.0,
-                "tphi_max_us": 100.0,
                 "duration_us": 2.0,
                 "time_steps": 11,
                 "fidelity_threshold": 0.9,
@@ -53,19 +39,15 @@ class ApiSimulateInputModesTest(unittest.TestCase):
 
         config = build_config_from_simulate_request(request)
 
-        self.assertEqual(config.environment.input_mode, "physical")
-        self.assertAlmostEqual(config.environment.device_quality, 0.8)
         self.assertAlmostEqual(config.environment.temperature_mk, 15.0)
-        self.assertAlmostEqual(config.environment.flux_noise_phi0, 0.000001)
         self.assertAlmostEqual(config.environment.qubit_frequency_ghz, 5.0)
-        self.assertAlmostEqual(config.environment.t1_max_us, 100.0)
-        self.assertAlmostEqual(config.environment.tphi_max_us, 100.0)
+        self.assertAlmostEqual(config.environment.t1_zero_temperature_us, 39.810717055349734)
+        self.assertAlmostEqual(config.environment.tphi_us, 33.20178309308936)
 
     def test_gate_duration_defaults_override_bell_preset_gate_durations(self) -> None:
         request = SimulateRequest(
             circuit_preset="bell",
             simulation_backend="python_dense",
-            input_mode="physical",
             gate_duration_defaults={
                 "H": 0.05,
                 "X": 0.02,
@@ -74,12 +56,10 @@ class ApiSimulateInputModesTest(unittest.TestCase):
                 "MEASURE": 0.0,
             },
             parameters={
-                "device_quality": 0.8,
+                "t1_zero_temperature_us": 39.810717055349734,
+                "tphi_us": 33.20178309308936,
                 "temperature_mk": 15.0,
-                "flux_noise_phi0": 0.000001,
                 "qubit_frequency_ghz": 5.0,
-                "t1_max_us": 100.0,
-                "tphi_max_us": 100.0,
                 "duration_us": 2.0,
                 "time_steps": 11,
                 "fidelity_threshold": 0.9,
@@ -98,7 +78,6 @@ class ApiSimulateInputModesTest(unittest.TestCase):
             SimulateRequest(
                 circuit_preset="bell",
                 simulation_backend="python_dense",
-                input_mode="physical",
                 gate_duration_defaults={
                     "H": 0.0,
                     "X": 0.02,
@@ -107,12 +86,10 @@ class ApiSimulateInputModesTest(unittest.TestCase):
                     "MEASURE": 0.0,
                 },
                 parameters={
-                    "device_quality": 0.8,
+                    "t1_zero_temperature_us": 39.810717055349734,
+                    "tphi_us": 33.20178309308936,
                     "temperature_mk": 15.0,
-                    "flux_noise_phi0": 0.000001,
                     "qubit_frequency_ghz": 5.0,
-                    "t1_max_us": 100.0,
-                    "tphi_max_us": 100.0,
                     "duration_us": 2.0,
                     "time_steps": 11,
                     "fidelity_threshold": 0.9,
@@ -123,14 +100,11 @@ class ApiSimulateInputModesTest(unittest.TestCase):
         request = SimulateRequest(
             circuit_preset="bell",
             simulation_backend="python_dense",
-            input_mode="physical",
             parameters={
-                "device_quality": 0.8,
+                "t1_zero_temperature_us": 39.810717055349734,
+                "tphi_us": 33.20178309308936,
                 "temperature_mk": 15.0,
-                "flux_noise_phi0": 0.000001,
                 "qubit_frequency_ghz": 5.0,
-                "t1_max_us": 100.0,
-                "tphi_max_us": 100.0,
                 "duration_us": 2.0,
                 "time_steps": 11,
                 "fidelity_threshold": 0.9,
@@ -149,14 +123,11 @@ class ApiSimulateInputModesTest(unittest.TestCase):
         self.assertIn("run", response)
         self.assertIn("warnings", response)
         self.assertIn("issues", response)
-        self.assertEqual(response["parameters"]["input_mode"], "physical")
+        self.assertAlmostEqual(response["parameters"]["tphi_us"], 33.20178309308936)
         self.assertIn("gamma_down_per_us", response["rates"])
         self.assertIn("gamma_up_per_us", response["rates"])
         self.assertIn("gamma_population_relaxation_per_us", response["rates"])
-        self.assertEqual(
-            response["rates"]["gamma_down_per_us"],
-            response["rates"]["gamma1_per_us"],
-        )
+        self.assertNotIn("gamma1_per_us", response["rates"])
         self.assertIn("api_total_request_ms", response["diagnostics"])
         self.assertIn("api_build_config_ms", response["diagnostics"])
         self.assertIn("api_run_simulation_ms", response["diagnostics"])
@@ -190,14 +161,11 @@ class ApiSimulateInputModesTest(unittest.TestCase):
         request = SimulateRequest(
             circuit_preset="bell",
             simulation_backend="python_dense",
-            input_mode="physical",
             parameters={
-                "device_quality": 0.8,
+                "t1_zero_temperature_us": 39.810717055349734,
+                "tphi_us": 33.20178309308936,
                 "temperature_mk": 15.0,
-                "flux_noise_phi0": 0.000001,
                 "qubit_frequency_ghz": 5.0,
-                "t1_max_us": 100.0,
-                "tphi_max_us": 100.0,
                 "duration_us": 2.0,
                 "time_steps": 11,
                 "fidelity_threshold": 0.9,
@@ -217,18 +185,15 @@ class ApiSimulateInputModesTest(unittest.TestCase):
 
         return context.exception.detail
 
-    def test_physical_payload_requires_physical_environment_fields(self) -> None:
+    def test_payload_requires_every_environment_field(self) -> None:
         with self.assertRaises(ValidationError):
             SimulateRequest(
                 circuit_preset="bell",
                 simulation_backend="python_dense",
-                input_mode="physical",
                 parameters={
-                    "device_quality": 0.8,
+                    "t1_zero_temperature_us": 39.810717055349734,
                     "temperature_mk": 15.0,
-                    "flux_noise_phi0": 0.000001,
                     "qubit_frequency_ghz": 5.0,
-                    "t1_max_us": 100.0,
                     "duration_us": 2.0,
                     "time_steps": 11,
                     "fidelity_threshold": 0.9,

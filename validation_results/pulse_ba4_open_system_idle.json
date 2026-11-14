@@ -1,6 +1,6 @@
 {
   "validation": "PULSE-BA4",
-  "base_git_commit": "7ba959a050423d64805e6b64dcbcbf805df068a1",
+  "base_git_commit": "7b34544901a91e1ae8fa043a883583d2ae13224c",
   "python_version": "3.14.4",
   "numpy_version": "2.4.4",
   "model_id": "driven_two_level_rwa_experimental_v1",
@@ -42,7 +42,7 @@
       "pulse_duration_us": 1.0,
       "idle_duration_us": 3.0,
       "total_duration_us": 4.0,
-      "runtime_ms": 345.0330999912694,
+      "runtime_ms": 316.3559999957215,
       "pulse_internal_step_count": 240,
       "idle_internal_step_count": 600,
       "pulse_end": {
@@ -3523,7 +3523,7 @@
       "pulse_duration_us": 1.6,
       "idle_duration_us": 2.0,
       "total_duration_us": 3.6,
-      "runtime_ms": 334.2324999975972,
+      "runtime_ms": 280.4832000110764,
       "pulse_internal_step_count": 320,
       "idle_internal_step_count": 400,
       "pulse_end": {
@@ -7004,7 +7004,7 @@
       "pulse_duration_us": 0.5,
       "idle_duration_us": 2.5,
       "total_duration_us": 3.0,
-      "runtime_ms": 379.42979999934323,
+      "runtime_ms": 308.8078000000678,
       "pulse_internal_step_count": 160,
       "idle_internal_step_count": 500,
       "pulse_end": {
@@ -10485,7 +10485,7 @@
       "pulse_duration_us": 0.2,
       "idle_duration_us": 20.0,
       "total_duration_us": 20.2,
-      "runtime_ms": 733.8843999896199,
+      "runtime_ms": 664.8631999996724,
       "pulse_internal_step_count": 80,
       "idle_internal_step_count": 2070,
       "pulse_end": {
@@ -13980,12 +13980,10 @@
       "gamma_phi_per_us": 0.035118864315095796,
       "gamma_population_relaxation_per_us": 0.030133107457544536,
       "n_th": 0.09981030749537737,
-      "device_quality": 0.8,
       "temperature_mk": 100.0,
-      "flux_noise_phi0": 2e-06,
       "qubit_frequency_ghz": 5.0,
-      "t1_max_us": 100.0,
-      "tphi_max_us": 100.0
+      "t1_zero_temperature_us": 39.810717055349734,
+      "tphi_us": 28.474724895080143
     },
     "direct_rates": {
       "input_mode": "direct_rates",

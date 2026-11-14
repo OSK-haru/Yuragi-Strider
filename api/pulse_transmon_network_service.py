@@ -691,18 +691,15 @@ def _build_rates(
     return tuple(
         qutrit_dissipation_rates(
             EnvironmentConfig(
-                input_mode="physical",
-                device_quality=environment.device_quality,
                 temperature_mk=environment.temperature_mk,
-                flux_noise_phi0=environment.flux_noise_phi0,
                 qubit_frequency_ghz=frequency,
-                t1_max_us=(
-                    local_calibrations[index].t1_max_us
-                    if local_calibrations else environment.t1_max_us
+                t1_zero_temperature_us=(
+                    local_calibrations[index].t1_zero_temperature_us
+                    if local_calibrations else environment.t1_zero_temperature_us
                 ),
-                tphi_max_us=(
-                    local_calibrations[index].tphi_max_us
-                    if local_calibrations else environment.tphi_max_us
+                tphi_us=(
+                    local_calibrations[index].tphi_us
+                    if local_calibrations else environment.tphi_us
                 ),
                 ideal_reference=environment.ideal_reference,
             ),

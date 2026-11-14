@@ -124,7 +124,12 @@ class QuTiPComparisonTest(unittest.TestCase):
         self._piecewise_case(_gate_columns(True), 2, 0.02, 0.003, 0.015, tolerance=2e-7)
 
     def test_v7_6_physical_input_path(self) -> None:
-        environment = EnvironmentConfig(input_mode="physical", device_quality=1.0, temperature_mk=100.0, flux_noise_phi0=0.0, qubit_frequency_ghz=5.0, t1_max_us=100.0, tphi_max_us=100.0)
+        environment = EnvironmentConfig(
+            t1_zero_temperature_us=100.0,
+            tphi_us=100.0,
+            temperature_mk=100.0,
+            qubit_frequency_ghz=5.0,
+        )
         rates = compute_environment_rates(environment)
         self.assertGreater(rates.gamma_down_per_us, 0.0)
         self._constant_case("+", rates.gamma_down_per_us, rates.gamma_up_per_us, rates.gamma_phi_per_us, zero_hamiltonian(2), tolerance=1e-7)

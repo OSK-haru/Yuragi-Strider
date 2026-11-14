@@ -157,7 +157,7 @@ class PulseRequestContractTests(unittest.TestCase):
 
     def test_environment_mode_requires_its_fields(self) -> None:
         payload = _physical_gaussian_payload()
-        del payload["environment"]["tphi_max_us"]
+        del payload["environment"]["tphi_us"]
 
         with self.assertRaises(ValidationError):
             PulseSimulateRequest.model_validate(payload)
@@ -265,12 +265,10 @@ def _physical_gaussian_payload() -> dict[str, object]:
         "total_simulation_time_us": 20.0,
         "environment": {
             "input_mode": "physical",
-            "device_quality": 1.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 100.0,
             "temperature_mk": 20.0,
-            "flux_noise_phi0": 0.0,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 100.0,
-            "tphi_max_us": 100.0,
         },
         "snapshot_options": {
             "uniform_count": 101,

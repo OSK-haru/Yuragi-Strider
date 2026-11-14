@@ -503,7 +503,8 @@ export function PulseCircuitStudioPage({
         <dl>
           <div><dt>デバイス</dt><dd>{deviceProfile?.name ?? 'カスタム'}</dd></div>
           <div><dt>温度</dt><dd>{currentForm.temperatureMk} mK</dd></div>
-          <div><dt>デバイス品質</dt><dd>{currentForm.deviceQuality.toFixed(2)}</dd></div>
+          <div><dt>T1（0 K）</dt><dd>{currentForm.t1ZeroTemperatureUs} us</dd></div>
+          <div><dt>Tφ</dt><dd>{currentForm.tphiUs} us</dd></div>
           <div><dt>発展方式</dt><dd>{currentForm.evolutionMethod === 'explicit_cptp' ? 'Explicit CPTP' : 'RK4'}</dd></div>
           <div><dt>最大駆動</dt><dd>{circuit.executionConstraints.maximumDriveAmplitudeRadPerUs} rad/us</dd></div>
           <div><dt>AWG刻み</dt><dd>{circuit.executionConstraints.awgSamplePeriodUs} us</dd></div>

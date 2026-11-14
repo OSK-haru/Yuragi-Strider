@@ -99,13 +99,10 @@ def main() -> int:
         if item["gate"] == "sx"
     )
     environment = EnvironmentConfig(
-        input_mode="physical",
-        device_quality=1.0,
         temperature_mk=15.0,
-        flux_noise_phi0=0.0,
         qubit_frequency_ghz=5.0,
-        t1_max_us=t1_us,
-        tphi_max_us=tphi_us,
+        t1_zero_temperature_us=t1_us,
+        tphi_us=tphi_us,
     )
     rates = compute_environment_rates(environment)
     collapse_ops = prepare_collapse_operators(

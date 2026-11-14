@@ -55,13 +55,7 @@ class GeneralUnitaryGateAwareExecutionTests(unittest.TestCase):
                     ]),
                 ],
             ),
-            environment=EnvironmentConfig(
-                input_mode="physical",
-                ideal_reference=True,
-                device_quality=1.0,
-                temperature_mk=0.0,
-                flux_noise_phi0=0.0,
-            ),
+            environment=EnvironmentConfig(temperature_mk=0.0, ideal_reference=True),
             duration_us=0.04,
             time_steps=21,
             fidelity_threshold=0.9,
@@ -85,7 +79,6 @@ class GeneralUnitaryGateAwareExecutionTests(unittest.TestCase):
     def test_api_accepts_universal_single_qubit_gate_set(self) -> None:
         payload = {
             "simulation_backend": "python_dense",
-            "input_mode": "normalized",
             "circuit_config": {
                 "logical_qubits": 1,
                 "initial_states": [0],
@@ -96,9 +89,10 @@ class GeneralUnitaryGateAwareExecutionTests(unittest.TestCase):
                 ],
             },
             "parameters": {
-                "normalized_temperature": 0.0,
-                "normalized_magnetic_field": 0.0,
-                "noise_level": 0.0,
+                "temperature_mk": 10.0,
+                "qubit_frequency_ghz": 5.0,
+                "t1_zero_temperature_us": 100.0,
+                "tphi_us": 66.66666666666667,
                 "duration_us": 0.02,
                 "time_steps": 11,
                 "fidelity_threshold": 0.9,

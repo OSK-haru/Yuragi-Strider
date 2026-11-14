@@ -135,8 +135,8 @@ export type ReadoutErrorSettings = {
 }
 
 export type QubitCalibration = {
-  t1_max_us: number
-  tphi_max_us: number
+  t1_zero_temperature_us: number
+  tphi_us: number
   p10: number
   p01: number
 }
@@ -206,13 +206,13 @@ export type SimulationDiagnostics = {
 
 export type SimulationParameters = {
   environment_model: string
-  input_mode: string
   temperature_k: number | null
   temperature_mk: number | null
-  normalized_temperature: number | null
   qubit_frequency_ghz: number | null
-  device_quality: number | null
-  flux_noise_phi0: number | null
+  /** null means an infinite time (no dissipation). */
+  t1_zero_temperature_us: number | null
+  tphi_us: number | null
+  ideal_reference: boolean
   duration_us: number
   time_steps: number
   fidelity_threshold: number
@@ -225,23 +225,21 @@ export type SimulationRates = {
   gamma_up_per_us: number | null
   gamma_population_relaxation_per_us: number | null
   gamma_phi_per_us: number | null
-  t1_base_us: number | null
+  t1_zero_temperature_us: number | null
   t1_effective_us: number | null
-  tphi_base_us: number | null
+  tphi_us: number | null
   t2_effective_us: number | null
-  gamma1_per_us: number | null
-  gamma1_per_us_deprecation: string
   per_qubit?: Array<Record<string, string | number | boolean | null>>
   per_qubit_environment_enabled?: boolean
 }
 
 export type PhysicalSimulationParameters = {
-  device_quality: number
   temperature_mk: number
-  flux_noise_phi0: number
   qubit_frequency_ghz: number
-  t1_max_us: number
-  tphi_max_us: number
+  /** T1 the qubit would have at 0 K (1/gamma_0); temperature then shortens the effective T1. */
+  t1_zero_temperature_us: number
+  /** Pure-dephasing time (1/gamma_phi). */
+  tphi_us: number
   duration_us: number
   time_steps: number
   fidelity_threshold: number

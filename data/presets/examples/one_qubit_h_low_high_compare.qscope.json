@@ -1,19 +1,23 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "kind": "yuragi_strider.comparison_config",
   "metadata": {
     "name": "One-qubit H low/high comparison"
   },
   "circuit": {
     "logical_qubits": 1,
-    "initial_states": ["0"],
+    "initial_states": [
+      "0"
+    ],
     "columns": [
       {
         "step": 0,
         "gates": [
           {
             "type": "H",
-            "targets": [0],
+            "targets": [
+              0
+            ],
             "controls": [],
             "params": {}
           }
@@ -22,20 +26,16 @@
     ]
   },
   "environment_a": {
-    "mode": "normalized",
-    "temperature": 0.1,
-    "magnetic_field": 0.1,
-    "noise_level": 0.1,
-    "observation_strength": null,
-    "observation_frequency": null
+    "t1_zero_temperature_us": 60.0,
+    "tphi_us": 45.0,
+    "temperature_mk": 20.0,
+    "qubit_frequency_ghz": 5.0
   },
   "environment_b": {
-    "mode": "normalized",
-    "temperature": 0.8,
-    "magnetic_field": 0.1,
-    "noise_level": 0.8,
-    "observation_strength": null,
-    "observation_frequency": null
+    "t1_zero_temperature_us": 2.5,
+    "tphi_us": 2.5,
+    "temperature_mk": 80.0,
+    "qubit_frequency_ghz": 5.0
   },
   "simulation": {
     "duration_us": 20.0,

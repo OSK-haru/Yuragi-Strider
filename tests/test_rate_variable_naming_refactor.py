@@ -24,7 +24,7 @@ class RateVariableNamingRefactorTest(unittest.TestCase):
             rates.t1_effective_us,
             1.0 / rates.gamma_population_relaxation_per_us,
         )
-        self.assertEqual(rates.t1_zero_temperature_us, rates.t1_base_us)
+        self.assertAlmostEqual(rates.t1_effective_us, rates.t1_zero_temperature_us)
 
     def test_finite_temperature_population_rate_is_not_downward_rate(self) -> None:
         rates = compute_environment_rates(_environment(temperature_mk=200.0))
@@ -53,31 +53,23 @@ class RateVariableNamingRefactorTest(unittest.TestCase):
         self.assertEqual(rates.gamma_down_per_us, 0.0)
         self.assertEqual(rates.gamma_up_per_us, 0.0)
         self.assertTrue(math.isinf(rates.t1_effective_us))
-        self.assertTrue(math.isinf(rates.tphi_effective_us))
+        self.assertTrue(math.isinf(rates.tphi_us))
 
-    def test_legacy_aliases_remain_downward_and_dephasing_aliases(self) -> None:
+    def test_legacy_aliases_are_gone(self) -> None:
         rates = compute_environment_rates(_environment(temperature_mk=200.0))
         derived = environment_rates_to_derived_parameters(rates)
 
-        self.assertEqual(rates.gamma1_per_us, rates.gamma_down_per_us)
-        self.assertEqual(rates.gammaphi_per_us, rates.gamma_phi_per_us)
-        self.assertEqual(derived["gamma1_per_us"], rates.gamma_down_per_us)
-        self.assertEqual(derived["gammaphi_per_us"], rates.gamma_phi_per_us)
-        self.assertNotEqual(
-            derived["gamma1_per_us"],
-            derived["gamma_population_relaxation_per_us"],
-        )
+        for name in ("gamma1_per_us", "gammaphi_per_us", "t1_us", "t2_us", "t1_base_us", "tphi_base_us"):
+            self.assertNotIn(name, derived)
+        self.assertFalse(hasattr(rates, "gamma1_per_us"))
 
 
 def _environment(*, temperature_mk: float, ideal_reference: bool = False) -> EnvironmentConfig:
     return EnvironmentConfig(
-        input_mode="physical",
-        device_quality=1.0,
+        t1_zero_temperature_us=100.0,
+        tphi_us=100.0,
         temperature_mk=temperature_mk,
-        flux_noise_phi0=0.0,
         qubit_frequency_ghz=5.0,
-        t1_max_us=100.0,
-        tphi_max_us=100.0,
         ideal_reference=ideal_reference,
     )
 

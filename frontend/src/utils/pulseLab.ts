@@ -55,12 +55,10 @@ export const initialPulseLabForm: PulseLabForm = {
   networkExchangeCouplingRadPerUs: 5,
   dragBetaUs: 0.001,
   environmentMode: 'physical',
-  deviceQuality: 0.8,
   temperatureMk: 15,
-  fluxNoisePhi0: 0.000001,
   qubitFrequencyGhz: 5,
-  t1MaxUs: 100,
-  tphiMaxUs: 100,
+  t1ZeroTemperatureUs: 40,
+  tphiUs: 33,
   gammaDownPerUs: 0.1,
   gammaUpPerUs: 0.02,
   gammaPhiPerUs: 0.05,
@@ -76,8 +74,8 @@ export const initialPulseLabForm: PulseLabForm = {
   networkQuasiStaticAdjacentCorrelation: 0,
   networkQuasiStaticQuadratureOrder: 3,
   networkPerQubitCalibrationEnabled: false,
-  networkT1MaxUs: [100, 100, 100, 100],
-  networkTphiMaxUs: [100, 100, 100, 100],
+  networkT1Us: [100, 100, 100, 100],
+  networkTphiUs: [100, 100, 100, 100],
   networkReadoutP10: [0.005, 0.005, 0.005, 0.005],
   networkReadoutP01: [0.013, 0.013, 0.013, 0.013],
   readoutErrorEnabled: false,
@@ -196,15 +194,15 @@ export function validatePulseLabForm(form: PulseLabForm, transmonCount = 4): Pul
   if (form.modelId === COUPLED_TRANSMON_NETWORK_PULSE_MODEL) {
     if (form.networkPerQubitCalibrationEnabled) {
       for (let index = 0; index < transmonCount; index += 1) {
-        const t1 = form.networkT1MaxUs[index]
-        const tphi = form.networkTphiMaxUs[index]
+        const t1 = form.networkT1Us[index]
+        const tphi = form.networkTphiUs[index]
         const p10 = form.networkReadoutP10[index]
         const p01 = form.networkReadoutP01[index]
         if (!Number.isFinite(t1) || t1 <= 0) {
-          errors.networkT1MaxUs = `q${index}の最大T1は0より大きい値にしてください。`
+          errors.networkT1Us = `q${index}のT1（0 K）は0より大きい値にしてください。`
         }
         if (!Number.isFinite(tphi) || tphi <= 0) {
-          errors.networkTphiMaxUs = `q${index}の最大Tφは0より大きい値にしてください。`
+          errors.networkTphiUs = `q${index}の最大Tφは0より大きい値にしてください。`
         }
         if (form.readoutErrorEnabled && (
           !Number.isFinite(p10) || !Number.isFinite(p01)
@@ -243,18 +241,10 @@ export function validatePulseLabForm(form: PulseLabForm, transmonCount = 4): Pul
   }
 
   if (form.environmentMode === 'physical') {
-    if (
-      !Number.isFinite(form.deviceQuality) ||
-      form.deviceQuality < 0 ||
-      form.deviceQuality > 1
-    ) {
-      errors.deviceQuality = 'デバイス品質は0から1の間である必要があります。'
-    }
     nonnegative('temperatureMk', form.temperatureMk, '温度')
-    nonnegative('fluxNoisePhi0', form.fluxNoisePhi0, '磁束ノイズ')
     positive('qubitFrequencyGhz', form.qubitFrequencyGhz, '量子ビット周波数')
-    positive('t1MaxUs', form.t1MaxUs, '最大T1')
-    positive('tphiMaxUs', form.tphiMaxUs, '最大Tφ')
+    positive('t1ZeroTemperatureUs', form.t1ZeroTemperatureUs, 'T1（0 K）')
+    positive('tphiUs', form.tphiUs, 'Tφ')
   } else if (form.modelId === TWO_LEVEL_PULSE_MODEL) {
     nonnegative('gammaDownPerUs', form.gammaDownPerUs, 'γ↓ (下降)')
     nonnegative('gammaUpPerUs', form.gammaUpPerUs, 'γ↑ (上昇)')
@@ -307,12 +297,10 @@ export function buildPulsePayload(
     form.environmentMode === 'physical'
       ? {
           input_mode: 'physical',
-          device_quality: form.deviceQuality,
           temperature_mk: form.temperatureMk,
-          flux_noise_phi0: form.fluxNoisePhi0,
           qubit_frequency_ghz: form.qubitFrequencyGhz,
-          t1_max_us: form.t1MaxUs,
-          tphi_max_us: form.tphiMaxUs,
+          t1_zero_temperature_us: form.t1ZeroTemperatureUs,
+          tphi_us: form.tphiUs,
         }
       : form.modelId === TWO_LEVEL_PULSE_MODEL
         ? {
@@ -408,16 +396,14 @@ export function buildTransmonNetworkPayload(
   const environment = form.environmentMode === 'physical'
     ? {
         input_mode: 'physical',
-        device_quality: form.deviceQuality,
         temperature_mk: form.temperatureMk,
-        flux_noise_phi0: form.fluxNoisePhi0,
         qubit_frequency_ghz: form.qubitFrequencyGhz,
-        t1_max_us: form.t1MaxUs,
-        tphi_max_us: form.tphiMaxUs,
+        t1_zero_temperature_us: form.t1ZeroTemperatureUs,
+        tphi_us: form.tphiUs,
         ...(form.networkPerQubitCalibrationEnabled ? {
           per_qubit: Array.from({ length: transmonCount }, (_, index) => ({
-            t1_max_us: form.networkT1MaxUs[index] ?? form.t1MaxUs,
-            tphi_max_us: form.networkTphiMaxUs[index] ?? form.tphiMaxUs,
+            t1_zero_temperature_us: form.networkT1Us[index] ?? form.t1ZeroTemperatureUs,
+            tphi_us: form.networkTphiUs[index] ?? form.tphiUs,
           })),
         } : {}),
       }

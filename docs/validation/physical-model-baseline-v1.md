@@ -24,7 +24,7 @@ The existing model identities remain unchanged:
 
 | Input | Rule |
 | --- | --- |
-| Per-qubit coherence | `per_qubit` supplies one positive `t1_max_us` / `tphi_max_us` pair per logical qubit or transmon. |
+| Per-qubit coherence | `per_qubit` supplies one positive `t1_zero_temperature_us` / `tphi_us` pair per logical qubit or transmon (since D89, 2026-11-14; earlier the pair was `t1_max_us` / `tphi_max_us` scaled by a device quality). |
 | Input mode | Per-qubit coherence is accepted only in `physical` mode. |
 | Shared fallback | Omitting `per_qubit` applies the historical shared T1/Tphi values to every subsystem. |
 | Local dissipation | Each local coherence pair creates local relaxation, thermal-excitation, and dephasing collapse operators. |

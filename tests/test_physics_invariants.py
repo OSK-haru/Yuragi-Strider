@@ -10,7 +10,6 @@ from tests.physics_test_helpers import (
     finite_numeric_derived_values,
     hermitian_eigenvalues,
     make_bell_config,
-    make_normalized_environment,
     make_one_qubit_h_config,
     make_physical_environment,
     matrix_trace,
@@ -22,18 +21,12 @@ from tests.physics_test_helpers import (
 class PhysicsInvariantsTest(unittest.TestCase):
     def test_representative_simulations_preserve_quantum_state_invariants(self) -> None:
         configs = [
-            make_one_qubit_h_config(make_physical_environment(
-                device_quality=1.0,
-                temperature_mk=0.0,
-                flux_noise_phi0=0.0,
-                t1_max_us=1e6,
-                tphi_max_us=1e6,
-            )),
-            make_one_qubit_h_config(make_normalized_environment(0.3, 0.4, 0.5)),
+            make_one_qubit_h_config(make_physical_environment(t1_zero_temperature_us=1000000.0, tphi_us=1000000.0, temperature_mk=0.0)),
+            make_one_qubit_h_config(make_physical_environment(t1_zero_temperature_us=10.0, tphi_us=8.88419549416626, temperature_mk=37.0)),
             make_bell_config(make_physical_environment(
-                device_quality=0.8,
+                t1_zero_temperature_us=39.810717055349734,
+                tphi_us=19.952567035697975,
                 temperature_mk=80.0,
-                flux_noise_phi0=5e-6,
             )),
         ]
 

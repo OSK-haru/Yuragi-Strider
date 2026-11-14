@@ -11,10 +11,9 @@ class RunSimulationApiTest(unittest.TestCase):
         config = SimulationConfig(
             circuit=CircuitConfig.one_qubit_h(),
             environment=EnvironmentConfig(
-                mode="normalized",
-                temperature=0.02,
-                magnetic_field=0.0,
-                noise_level=0.01,
+                t1_zero_temperature_us=95.49925860214358,
+                tphi_us=64.63587019060685,
+                temperature_mk=11.8,
             ),
             duration_us=20.0,
             time_steps=101,
@@ -28,11 +27,10 @@ class RunSimulationApiTest(unittest.TestCase):
         self.assertEqual(len(result.fidelity), config.time_steps)
         self.assertEqual(len(result.purity), config.time_steps)
         self.assertIsInstance(result.effective_operation_time_us, float)
-        self.assertIn("t1_us", result.derived_parameters)
-        self.assertIn("t2_us", result.derived_parameters)
-        self.assertIn("gamma1_per_us", result.derived_parameters)
+        self.assertIn("t1_effective_us", result.derived_parameters)
+        self.assertIn("t2_effective_us", result.derived_parameters)
+        self.assertIn("gamma_down_per_us", result.derived_parameters)
         self.assertIn("gamma_phi_per_us", result.derived_parameters)
-        self.assertIn("gammaphi_per_us", result.derived_parameters)
         self.assertIn("final_fidelity", result.diagnostics)
         self.assertIn("final_purity", result.diagnostics)
         self.assertIsInstance(result.warnings, list)
@@ -40,10 +38,9 @@ class RunSimulationApiTest(unittest.TestCase):
 
     def test_run_simulation_uses_circuit_gate_sequence(self) -> None:
         environment = EnvironmentConfig(
-            mode="normalized",
-            temperature=0.02,
-            magnetic_field=0.0,
-            noise_level=0.01,
+            t1_zero_temperature_us=95.49925860214358,
+            tphi_us=64.63587019060685,
+            temperature_mk=11.8,
         )
         config = SimulationConfig(
             circuit=CircuitConfig.one_qubit_h(),

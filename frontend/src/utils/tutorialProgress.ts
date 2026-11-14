@@ -19,7 +19,7 @@ export const TUTORIAL_SHORT_T1_US = 20
 export const TUTORIAL_LONG_DURATION_US = 5
 
 export function hasShortT1(parameters: SimulateRequestParameters): boolean {
-  return parameters.t1_max_us <= TUTORIAL_SHORT_T1_US
+  return parameters.t1_zero_temperature_us <= TUTORIAL_SHORT_T1_US
 }
 
 export function hasExtendedDuration(parameters: SimulateRequestParameters): boolean {

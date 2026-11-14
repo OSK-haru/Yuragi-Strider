@@ -391,13 +391,10 @@ def _build_rates(request: PulseSimulateRequest) -> PulseDissipationRates:
             environment.gamma_phi_per_us,
         )
     return pulse_dissipation_rates(EnvironmentConfig(
-        input_mode="physical",
-        device_quality=environment.device_quality,
         temperature_mk=environment.temperature_mk,
-        flux_noise_phi0=environment.flux_noise_phi0,
         qubit_frequency_ghz=environment.qubit_frequency_ghz,
-        t1_max_us=environment.t1_max_us,
-        tphi_max_us=environment.tphi_max_us,
+        t1_zero_temperature_us=environment.t1_zero_temperature_us,
+        tphi_us=environment.tphi_us,
         ideal_reference=environment.ideal_reference,
     ))
 

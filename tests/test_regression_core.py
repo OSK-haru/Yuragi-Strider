@@ -27,8 +27,8 @@ class RegressionCoreTest(unittest.TestCase):
     def test_low_vs_high_comparison_regression_runs(self) -> None:
         comparison = run_comparison(ComparisonConfig(
             circuit=one_qubit_gate_config("H").circuit,
-            environment_a=EnvironmentConfig(noise_level=0.0),
-            environment_b=EnvironmentConfig(noise_level=0.8),
+            environment_a=EnvironmentConfig(t1_zero_temperature_us=100.0, tphi_us=100.0),
+            environment_b=EnvironmentConfig(t1_zero_temperature_us=2.5, tphi_us=2.5),
             duration_us=0.001,
             time_steps=3,
             fidelity_threshold=0.9,

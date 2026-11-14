@@ -8,7 +8,6 @@ import numpy as np
 from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.expert_data import reconstruct_final_density_matrix
 from core.gates import Matrix, column_unitary, identity_matrix, matmul
-from core.physical_environment import INPUT_MODE_NORMALIZED, INPUT_MODE_PHYSICAL
 from core.results import EnvironmentConfig, SimulationConfig, SimulationResult
 from core.simulator import run_simulation
 
@@ -21,13 +20,7 @@ FIDELITY_PURITY_TOL = 1e-10
 
 
 def make_ideal_environment() -> EnvironmentConfig:
-    return EnvironmentConfig(
-        input_mode=INPUT_MODE_PHYSICAL,
-        ideal_reference=True,
-        device_quality=1.0,
-        temperature_mk=0.0,
-        flux_noise_phi0=0.0,
-    )
+    return EnvironmentConfig(ideal_reference=True, temperature_mk=0.0)
 
 
 def circuit_unitary(circuit: CircuitConfig) -> Matrix:
@@ -53,35 +46,17 @@ def assert_matrix_close(actual, expected, tolerance: float = 1e-12) -> None:
     )
 
 
-def make_normalized_environment(
-    temperature: float = 0.0,
-    flux_noise: float = 0.0,
-    noise_level: float = 0.0,
-) -> EnvironmentConfig:
-    return EnvironmentConfig(
-        input_mode=INPUT_MODE_NORMALIZED,
-        temperature=temperature,
-        magnetic_field=flux_noise,
-        noise_level=noise_level,
-    )
-
-
 def make_physical_environment(
-    device_quality: float = 1.0,
+    t1_zero_temperature_us: float = 100.0,
+    tphi_us: float = 100.0,
     temperature_mk: float = 0.0,
-    flux_noise_phi0: float = 0.0,
-    t1_max_us: float = 100.0,
-    tphi_max_us: float = 100.0,
     ideal_reference: bool = False,
 ) -> EnvironmentConfig:
     return EnvironmentConfig(
-        input_mode=INPUT_MODE_PHYSICAL,
-        device_quality=device_quality,
+        t1_zero_temperature_us=t1_zero_temperature_us,
+        tphi_us=tphi_us,
         temperature_mk=temperature_mk,
-        flux_noise_phi0=flux_noise_phi0,
         qubit_frequency_ghz=5.0,
-        t1_max_us=t1_max_us,
-        tphi_max_us=tphi_max_us,
         ideal_reference=ideal_reference,
     )
 

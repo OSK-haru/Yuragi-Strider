@@ -143,20 +143,18 @@ def check_parameters(parameters: Any, errors: list[str]) -> None:
 
     for key in (
         "environment_model",
-        "input_mode",
         "temperature_k",
         "temperature_mk",
-        "normalized_temperature",
         "qubit_frequency_ghz",
-        "device_quality",
-        "flux_noise_phi0",
+        "t1_zero_temperature_us",
+        "tphi_us",
         "duration_us",
         "time_steps",
         "fidelity_threshold",
         "simulation_backend",
     ):
         value = require_key(params_obj, key, "parameters", errors)
-        if key in {"environment_model", "input_mode", "simulation_backend"}:
+        if key in {"environment_model", "simulation_backend"}:
             check_string(value, f"parameters.{key}", errors)
         elif key in {"duration_us", "time_steps"}:
             check_number(value, f"parameters.{key}", errors)

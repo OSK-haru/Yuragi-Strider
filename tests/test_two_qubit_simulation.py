@@ -69,10 +69,9 @@ def _config(circuit: CircuitConfig) -> SimulationConfig:
     return SimulationConfig(
         circuit=circuit,
         environment=EnvironmentConfig(
-            mode="normalized",
-            temperature=0.0,
-            magnetic_field=0.0,
-            noise_level=0.0,
+            t1_zero_temperature_us=100.0,
+            tphi_us=66.66666666666667,
+            temperature_mk=10.0,
         ),
         duration_us=0.001,
         time_steps=3,

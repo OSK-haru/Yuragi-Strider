@@ -184,14 +184,13 @@ def network_qutip_cases() -> tuple[NetworkQutipCase, ...]:
         "drives": [
             _drive(1, 0.0, _gaussian_pulse(0.75 * math.pi, 0.002, drag_beta=0.001)),
         ],
+        # Coherence times equal to the rates of the removed quality/flux inputs (D89), so frozen results still apply.
         "environment": {
             "input_mode": "physical",
-            "device_quality": 0.55,
             "temperature_mk": 40.0,
-            "flux_noise_phi0": 3e-06,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 60.0,
-            "tphi_max_us": 40.0,
+            "t1_zero_temperature_us": 9.50567994816233,
+            "tphi_us": 6.8267674301233905,
         },
         "total_simulation_time_us": 0.02,
     })

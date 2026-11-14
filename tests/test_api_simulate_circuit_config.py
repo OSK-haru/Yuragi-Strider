@@ -14,14 +14,11 @@ class ApiSimulateCircuitConfigTest(unittest.TestCase):
     def _base_request(self) -> dict[str, object]:
         return {
             "simulation_backend": "python_dense",
-            "input_mode": "physical",
             "parameters": {
-                "device_quality": 0.8,
+                "t1_zero_temperature_us": 39.810717055349734,
+                "tphi_us": 33.20178309308936,
                 "temperature_mk": 15.0,
-                "flux_noise_phi0": 0.000001,
                 "qubit_frequency_ghz": 5.0,
-                "t1_max_us": 100.0,
-                "tphi_max_us": 100.0,
                 "duration_us": 2.0,
                 "time_steps": 11,
                 "fidelity_threshold": 0.9,
@@ -63,7 +60,8 @@ class ApiSimulateCircuitConfigTest(unittest.TestCase):
         self.assertEqual(config.circuit.logical_qubits, 2)
         response = simulate(request)
         self._response_keys(response)
-        self.assertEqual(response["parameters"]["input_mode"], "physical")
+        self.assertEqual(response["parameters"]["t1_zero_temperature_us"],
+                         payload["parameters"]["t1_zero_temperature_us"])
 
     def test_circuit_config_only_post_works(self) -> None:
         payload = self._base_request()

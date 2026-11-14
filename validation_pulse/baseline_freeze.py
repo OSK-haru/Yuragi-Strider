@@ -272,14 +272,13 @@ def _physical_payload() -> dict[str, Any]:
             "detuning_rad_per_us": 0.2,
         },
         "total_simulation_time_us": 0.8,
+        # Coherence times equal to the rates of the removed quality/flux inputs (D89), so frozen results still apply.
         "environment": {
             "input_mode": "physical",
-            "device_quality": 0.9,
             "temperature_mk": 20.0,
-            "flux_noise_phi0": 1e-6,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 100.0,
-            "tphi_max_us": 120.0,
+            "t1_zero_temperature_us": 63.09573444801933,
+            "tphi_us": 54.19921423576098,
         },
         "snapshot_options": {
             "uniform_count": 11,

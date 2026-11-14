@@ -831,7 +831,7 @@ function ToolboxMetricBody({
  * そのとき2本の差はそのまま環境の寄与になる。回路や観測窓まで変わると、
  * 差がどこから来たのか分けられず、重ねた図は誤読を生む。
  *
- * なので温度・デバイス品質・磁束ノイズ・T1/Tphi といった環境側は入れない。
+ * なので温度・T1/Tphi といった環境側は入れない。
  * 回路の構造（circuitConfigSignature）と、観測窓・ゲート長だけを見る。
  */
 function comparabilitySignature(
@@ -843,8 +843,6 @@ function comparabilitySignature(
     /* 観測窓。時間軸が違うと同じ物理時刻で並べられない。 */
     duration_us: parameters.duration_us,
     time_steps: parameters.time_steps,
-    /* 入力の与え方が変わると、そもそも同じ実験ではない。 */
-    input_mode: parameters.input_mode,
   })
 }
 

@@ -56,11 +56,10 @@ class UiResponseAdapterTests(unittest.TestCase):
     def test_physical_parameters_include_temperature_k_and_mk(self):
         config = SimulationConfig(
             environment=EnvironmentConfig(
-                input_mode="physical",
+                t1_zero_temperature_us=50.11872336272722,
+                tphi_us=0.00999800513571278,
                 temperature_mk=15.0,
                 qubit_frequency_ghz=5.0,
-                device_quality=0.85,
-                flux_noise_phi0=0.02,
             )
         )
         result = run_simulation(config)
@@ -69,16 +68,16 @@ class UiResponseAdapterTests(unittest.TestCase):
 
         self.assertAlmostEqual(0.015, parameters["temperature_k"])
         self.assertAlmostEqual(15.0, parameters["temperature_mk"])
-        self.assertIsNone(parameters["normalized_temperature"])
+        self.assertAlmostEqual(50.11872336272722, parameters["t1_zero_temperature_us"])
+        self.assertNotIn("normalized_temperature", parameters)
 
-    def test_physical_rates_expose_canonical_fields_and_legacy_alias(self):
+    def test_physical_rates_expose_canonical_fields_without_legacy_alias(self):
         config = SimulationConfig(
             environment=EnvironmentConfig(
-                input_mode="physical",
+                t1_zero_temperature_us=50.11872336272722,
+                tphi_us=0.00999800513571278,
                 temperature_mk=15.0,
                 qubit_frequency_ghz=5.0,
-                device_quality=0.85,
-                flux_noise_phi0=0.02,
             )
         )
 
@@ -91,17 +90,16 @@ class UiResponseAdapterTests(unittest.TestCase):
             rates["gamma_down_per_us"] + rates["gamma_up_per_us"],
             rates["gamma_population_relaxation_per_us"],
         )
-        self.assertEqual(rates["gamma_down_per_us"], rates["gamma1_per_us"])
-        self.assertIn("Legacy alias", rates["gamma1_per_us_deprecation"])
+        self.assertNotIn("gamma1_per_us", rates)
+        self.assertAlmostEqual(rates["tphi_us"], 0.00999800513571278)
 
-    def test_normalized_parameters_do_not_invent_temperature_k(self):
-        result = run_simulation(SimulationConfig())
+    def test_infinite_times_are_reported_as_null(self):
+        result = run_simulation(SimulationConfig(environment=EnvironmentConfig(tphi_us=float("inf"))))
 
         parameters = simulation_result_to_ui_response(result)["parameters"]
 
-        self.assertIsNone(parameters["temperature_k"])
-        self.assertIsNone(parameters["temperature_mk"])
-        self.assertIsNotNone(parameters["normalized_temperature"])
+        self.assertIsNone(parameters["tphi_us"])
+        self.assertIsNotNone(parameters["t1_zero_temperature_us"])
 
     def test_cnot_maps_to_control_and_target_entries(self):
         circuit = CircuitConfig(

@@ -191,13 +191,10 @@ def _environment(
     ideal_reference: bool = False,
 ) -> EnvironmentConfig:
     return EnvironmentConfig(
-        input_mode="physical",
-        device_quality=1.0,
+        t1_zero_temperature_us=100.0,
+        tphi_us=100.0,
         temperature_mk=temperature_mk,
-        flux_noise_phi0=0.0,
         qubit_frequency_ghz=frequency_ghz,
-        t1_max_us=100.0,
-        tphi_max_us=100.0,
         ideal_reference=ideal_reference,
     )
 
@@ -209,7 +206,7 @@ def _assert_finite_nonnegative(test: unittest.TestCase, rates) -> None:
         rates.gamma_up_per_us,
         rates.gamma_phi_per_us,
         rates.t1_zero_temperature_us,
-        rates.tphi_base_us,
+        rates.tphi_us,
         rates.t1_effective_us,
         rates.t2_effective_us,
     ]

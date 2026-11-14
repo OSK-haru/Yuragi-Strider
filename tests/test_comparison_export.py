@@ -60,8 +60,16 @@ class ComparisonExportTest(unittest.TestCase):
 def _comparison():
     return run_comparison(ComparisonConfig(
         circuit=CircuitConfig.one_qubit_h(),
-        environment_a=EnvironmentConfig(noise_level=0.01),
-        environment_b=EnvironmentConfig(noise_level=0.8),
+        environment_a=EnvironmentConfig(
+            t1_zero_temperature_us=95.49925860214358,
+            tphi_us=64.63587019060685,
+            temperature_mk=11.8,
+        ),
+        environment_b=EnvironmentConfig(
+            t1_zero_temperature_us=2.5118864315095797,
+            tphi_us=2.4807298729688254,
+            temperature_mk=11.8,
+        ),
         duration_us=20.0,
         time_steps=11,
         fidelity_threshold=0.9,

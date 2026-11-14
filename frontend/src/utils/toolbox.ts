@@ -94,7 +94,7 @@ export type ToolboxSettings = {
   /* カンマ区切りのパウリ文字列。先頭の文字が q0 に作用する。 */
   observablesInput: string
   monteCarloSamples: number
-  /* null は T1 max の3倍を使う。 */
+  /* null は T1（0 K）の3倍を使う。 */
   t1MaximumDelayUs: number | null
   t1PointCount: number
   /* null は Tφ max の3倍を使う。 */
@@ -182,13 +182,13 @@ export function processSimulationCount(settings: ToolboxSettings, qubitCount: nu
 
 export function resolvedSweepDelays(
   settings: ToolboxSettings,
-  t1MaxUs: number,
-  tphiMaxUs: number,
+  t1ZeroTemperatureUs: number,
+  tphiUs: number,
 ): { t1: number; ramsey: number } {
   const auto = (base: number) => Math.min(10_000, Math.max(10, base * 3))
   return {
-    t1: settings.t1MaximumDelayUs ?? auto(t1MaxUs),
-    ramsey: settings.ramseyMaximumDelayUs ?? auto(tphiMaxUs),
+    t1: settings.t1MaximumDelayUs ?? auto(t1ZeroTemperatureUs),
+    ramsey: settings.ramseyMaximumDelayUs ?? auto(tphiUs),
   }
 }
 

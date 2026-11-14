@@ -14,10 +14,7 @@ from core.gates import (
     zero_hamiltonian,
 )
 from core.cptp_evolution import CPTPSegmentAudit, evolve_cptp_segment
-from core.physical_environment import (
-    INPUT_MODE_PHYSICAL,
-    compute_environment_rates,
-)
+from core.physical_environment import compute_environment_rates
 from core.pulse_envelopes import PulseEnvelope, TwoLevelPulseHamiltonian
 from core.pulse_evolution import (
     ConstantHamiltonian,
@@ -27,6 +24,7 @@ from core.pulse_evolution import (
 )
 
 
+INPUT_MODE_PHYSICAL = "physical"
 DIRECT_RATES_INPUT_MODE = "direct_rates"
 
 
@@ -117,7 +115,8 @@ class OpenPulseSequenceResult:
 def pulse_dissipation_rates(environment: Any) -> PulseDissipationRates:
     """Normalize physical or direct-rate pulse inputs to canonical rates."""
 
-    input_mode = str(getattr(environment, "input_mode", ""))
+    # An EnvironmentConfig has no input_mode: it always carries physical times.
+    input_mode = str(getattr(environment, "input_mode", INPUT_MODE_PHYSICAL))
     if input_mode == INPUT_MODE_PHYSICAL:
         rates = compute_environment_rates(environment)
         return PulseDissipationRates(

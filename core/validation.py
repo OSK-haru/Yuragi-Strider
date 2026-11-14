@@ -16,10 +16,6 @@ from core.capabilities import (
 )
 from core.errors import ValidationIssue
 from core.physical_environment import (
-    INPUT_MODE_NORMALIZED,
-    INPUT_MODE_PHYSICAL,
-    SUPPORTED_ENVIRONMENT_MODELS,
-    SUPPORTED_INPUT_MODES,
     UNIFIED_ENVIRONMENT_MODEL,
 )
 from core.results import SimulationConfig, SimulationResult
@@ -335,102 +331,50 @@ def validate_simulation_config(config: SimulationConfig) -> list[ValidationIssue
                 "Use one of '0', '1', '+', '-', '+i', or '-i'.",
             ))
 
-    if environment.model not in SUPPORTED_ENVIRONMENT_MODELS:
+    if environment.model != UNIFIED_ENVIRONMENT_MODEL:
         issues.append(_error(
             "UNSUPPORTED_ENVIRONMENT_MODEL",
             "Environment model is not supported.",
             f"Received model={environment.model!r}",
             f"Use {UNIFIED_ENVIRONMENT_MODEL!r}.",
         ))
-    if environment.input_mode not in SUPPORTED_INPUT_MODES:
+    if not _is_non_negative_finite(environment.temperature_mk):
         issues.append(_error(
-            "UNSUPPORTED_ENVIRONMENT_INPUT_MODE",
-            "Environment input_mode is not supported.",
-            f"Received input_mode={environment.input_mode!r}",
-            "Use 'normalized' or 'physical'.",
+            "INVALID_TEMPERATURE_MK",
+            "temperature_mk must be non-negative.",
+            f"Received temperature_mk={environment.temperature_mk!r}",
+            "Set temperature_mk to zero or a positive physical temperature.",
         ))
-    elif environment.input_mode == INPUT_MODE_NORMALIZED:
-        if environment.per_qubit:
-            issues.append(_error(
-                "PER_QUBIT_ENVIRONMENT_REQUIRES_PHYSICAL_MODE",
-                "Per-qubit T1/Tphi settings require physical input mode.",
-                "Normalized mode does not expose calibrated coherence times.",
-                "Use physical input mode or remove environment.per_qubit.",
-            ))
-        issues.extend(_range_issue(
-            environment.temperature,
-            "temperature",
-            "INVALID_TEMPERATURE",
-            0.0,
-            1.0,
+    if not _is_positive_finite(environment.qubit_frequency_ghz):
+        issues.append(_error(
+            "INVALID_QUBIT_FREQUENCY_GHZ",
+            "qubit_frequency_ghz must be greater than 0.",
+            f"Received qubit_frequency_ghz={environment.qubit_frequency_ghz!r}",
+            "Set qubit_frequency_ghz to a positive frequency.",
         ))
-        issues.extend(_range_issue(
-            environment.magnetic_field,
-            "magnetic_field",
-            "INVALID_MAGNETIC_FIELD",
-            0.0,
-            1.0,
+    times = [("t1_zero_temperature_us", environment.t1_zero_temperature_us),
+             ("tphi_us", environment.tphi_us)]
+    for index, entry in enumerate(environment.per_qubit):
+        times.extend((f"per_qubit[{index}].{name}", entry[name])
+                     for name in ("t1_zero_temperature_us", "tphi_us"))
+    for name, value in times:
+        if not _is_positive_time(value):
+            issues.append(_error(
+                "INVALID_COHERENCE_TIME",
+                f"{name} must be greater than 0.",
+                f"Received {name}={value!r}",
+                "Set a positive time in microseconds, or infinity for no dissipation.",
+            ))
+    if environment.per_qubit and len(environment.per_qubit) != circuit.logical_qubits:
+        issues.append(_error(
+            "PER_QUBIT_ENVIRONMENT_COUNT_MISMATCH",
+            "Per-qubit coherence settings must match logical_qubits.",
+            (
+                f"Received {len(environment.per_qubit)} entries for "
+                f"{circuit.logical_qubits} logical qubits."
+            ),
+            "Provide one T1/Tphi pair per logical qubit or use the shared values.",
         ))
-        issues.extend(_range_issue(
-            environment.noise_level,
-            "noise_level",
-            "INVALID_NOISE_LEVEL",
-            0.0,
-            1.0,
-        ))
-    elif environment.input_mode == INPUT_MODE_PHYSICAL:
-        issues.extend(_range_issue(
-            environment.device_quality,
-            "device_quality",
-            "INVALID_DEVICE_QUALITY",
-            0.0,
-            1.0,
-        ))
-        if not _is_non_negative_finite(environment.temperature_mk):
-            issues.append(_error(
-                "INVALID_TEMPERATURE_MK",
-                "temperature_mk must be non-negative.",
-                f"Received temperature_mk={environment.temperature_mk!r}",
-                "Set temperature_mk to zero or a positive physical temperature.",
-            ))
-        if not _is_non_negative_finite(environment.flux_noise_phi0):
-            issues.append(_error(
-                "INVALID_FLUX_NOISE_PHI0",
-                "flux_noise_phi0 must be non-negative.",
-                f"Received flux_noise_phi0={environment.flux_noise_phi0!r}",
-                "Set flux_noise_phi0 to zero or a positive amplitude.",
-            ))
-        if not _is_positive_finite(environment.qubit_frequency_ghz):
-            issues.append(_error(
-                "INVALID_QUBIT_FREQUENCY_GHZ",
-                "qubit_frequency_ghz must be greater than 0.",
-                f"Received qubit_frequency_ghz={environment.qubit_frequency_ghz!r}",
-                "Set qubit_frequency_ghz to a positive frequency.",
-            ))
-        if not _is_positive_finite(environment.t1_max_us):
-            issues.append(_error(
-                "INVALID_T1_MAX_US",
-                "t1_max_us must be greater than 0.",
-                f"Received t1_max_us={environment.t1_max_us!r}",
-                "Set t1_max_us to a positive coherence-time maximum.",
-            ))
-        if not _is_positive_finite(environment.tphi_max_us):
-            issues.append(_error(
-                "INVALID_TPHI_MAX_US",
-                "tphi_max_us must be greater than 0.",
-                f"Received tphi_max_us={environment.tphi_max_us!r}",
-                "Set tphi_max_us to a positive dephasing-time maximum.",
-            ))
-        if environment.per_qubit and len(environment.per_qubit) != circuit.logical_qubits:
-            issues.append(_error(
-                "PER_QUBIT_ENVIRONMENT_COUNT_MISMATCH",
-                "Per-qubit coherence settings must match logical_qubits.",
-                (
-                    f"Received {len(environment.per_qubit)} entries for "
-                    f"{circuit.logical_qubits} logical qubits."
-                ),
-                "Provide one T1/Tphi pair per logical qubit or use the shared values.",
-            ))
     if environment.observation_strength is not None:
         issues.extend(_range_issue(
             environment.observation_strength,
@@ -689,6 +633,11 @@ def _as_number(value: Any) -> float:
 
 def _is_finite_number(value: float) -> bool:
     return math.isfinite(value)
+
+
+def _is_positive_time(value: Any) -> bool:
+    number = _as_number(value)
+    return isinstance(number, (int, float)) and not math.isnan(number) and number > 0.0
 
 
 def _is_positive_finite(value: Any) -> bool:

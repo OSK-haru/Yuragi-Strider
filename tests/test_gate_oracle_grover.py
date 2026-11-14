@@ -168,10 +168,7 @@ class GroverSearchTests(unittest.TestCase):
     def test_grover_runs_through_the_gate_aware_cptp_path(self):
         config = SimulationConfig(
             circuit=_grover_circuit(3, 5, 2),
-            environment=EnvironmentConfig(
-                input_mode="physical", ideal_reference=True, device_quality=1.0,
-                temperature_mk=0.0, flux_noise_phi0=0.0,
-            ),
+            environment=EnvironmentConfig(temperature_mk=0.0, ideal_reference=True),
             duration_us=2.0,
             time_steps=11,
             fidelity_threshold=0.9,
@@ -204,7 +201,11 @@ class PhaseOracleValidationTests(unittest.TestCase):
     def test_out_of_range_marked_index_is_reported(self):
         config = SimulationConfig(
             circuit=_oracle_circuit(3, [0, 1], 7),
-            environment=EnvironmentConfig(input_mode="physical"),
+            environment=EnvironmentConfig(
+                t1_zero_temperature_us=10.0,
+                tphi_us=9.523809523809524,
+                temperature_mk=15.0,
+            ),
             duration_us=1.0, time_steps=11, fidelity_threshold=0.9,
         )
         codes = {issue.code for issue in validate_simulation_config(config)}
@@ -219,7 +220,11 @@ class PhaseOracleValidationTests(unittest.TestCase):
                     "ORACLE", [0, 1], controls=[2], params={"marked_index": 1.0},
                 )])],
             ),
-            environment=EnvironmentConfig(input_mode="physical"),
+            environment=EnvironmentConfig(
+                t1_zero_temperature_us=10.0,
+                tphi_us=9.523809523809524,
+                temperature_mk=15.0,
+            ),
             duration_us=1.0, time_steps=11, fidelity_threshold=0.9,
         )
         codes = {issue.code for issue in validate_simulation_config(config)}
@@ -285,7 +290,6 @@ def _api_payload(targets, marked):
     return {
         "simulation_backend": "python_dense",
         "compilation_mode": "auto_decompose",
-        "input_mode": "normalized",
         "circuit_config": {
             "logical_qubits": 4,
             "initial_states": [0, 0, 0, 0],
@@ -300,9 +304,10 @@ def _api_payload(targets, marked):
             }],
         },
         "parameters": {
-            "normalized_temperature": 0.0,
-            "normalized_magnetic_field": 0.0,
-            "noise_level": 0.0,
+            "temperature_mk": 10.0,
+            "qubit_frequency_ghz": 5.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 66.66666666666667,
             "duration_us": 1.0,
             "time_steps": 11,
             "fidelity_threshold": 0.9,

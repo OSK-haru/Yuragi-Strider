@@ -345,7 +345,7 @@ export function pulseSetupSignature(
  * そのとき2本の差はそのまま環境の寄与になる。パルスの形や観測時間まで
  * 変わってしまうと、差がどこから来たのか分けられず、重ねた図は誤読を生む。
  *
- * なのでここには環境・散逸まわり（environmentMode, deviceQuality, 温度,
+ * なのでここには環境・散逸まわり（environmentMode, T1・Tφ, 温度,
  * T1/Tphi, 各 gamma, 準静的ノイズ）を入れない。それ以外は全部入れる。
  */
 export function pulseComparabilitySignature(

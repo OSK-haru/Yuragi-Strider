@@ -87,13 +87,10 @@ class CcxGateCompilerTests(unittest.TestCase):
 
     def test_finite_noise_exposes_ccx_decomposition_cost(self):
         environment = EnvironmentConfig(
-            input_mode="physical",
-            device_quality=1.0,
+            t1_zero_temperature_us=1.0,
+            tphi_us=1.0,
             temperature_mk=15.0,
-            flux_noise_phi0=0.0,
             qubit_frequency_ghz=5.0,
-            t1_max_us=1.0,
-            tphi_max_us=1.0,
         )
         direct = run_simulation(_simulation_config(LOGICAL_DIRECT, environment))
         compiled = run_simulation(_simulation_config(AUTO_DECOMPOSE, environment))
@@ -176,7 +173,6 @@ def _api_payload(controls: list[int], targets: list[int]):
     return {
         "simulation_backend": "python_dense",
         "compilation_mode": "auto_decompose",
-        "input_mode": "normalized",
         "circuit_config": {
             "logical_qubits": 3,
             "initial_states": [0, 0, 0],
@@ -186,9 +182,10 @@ def _api_payload(controls: list[int], targets: list[int]):
             }],
         },
         "parameters": {
-            "normalized_temperature": 0.0,
-            "normalized_magnetic_field": 0.0,
-            "noise_level": 0.0,
+            "temperature_mk": 10.0,
+            "qubit_frequency_ghz": 5.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 66.66666666666667,
             "duration_us": 1.34,
             "time_steps": 21,
             "fidelity_threshold": 0.9,

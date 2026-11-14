@@ -391,9 +391,9 @@ const noiseParameterBeats: TutorialBeat[] = [
     route: 'gate-aware-ide',
     ideView: 'circuit',
     mood: 'wonder',
-    anchors: ['param-t1_max_us'],
+    anchors: ['param-t1_zero_temperature_us'],
     anchorLabel: 'T1',
-    text: '今日いじるのは「最大 T1」。T1 は、1 になっている量子ビットが、力尽きて 0 に落ちてしまうまでのだいたいの時間なんだ。長いほど丈夫な量子ビット、短いほどすぐ壊れる。',
+    text: '今日いじるのは「T1（0 K）」。T1 は、1 になっている量子ビットが、力尽きて 0 に落ちてしまうまでのだいたいの時間なんだ。長いほど丈夫な量子ビット、短いほどすぐ壊れる。',
   },
 
   /* --- 4. 基準をとる ---------------------------------------------------- */
@@ -433,11 +433,11 @@ const noiseParameterBeats: TutorialBeat[] = [
     route: 'gate-aware-ide',
     ideView: 'circuit',
     mood: 'point',
-    anchors: ['param-t1_max_us'],
+    anchors: ['param-t1_zero_temperature_us'],
     anchorLabel: `${TUTORIAL_SHORT_T1_US} 以下まで下げる`,
-    text: `では条件をひとつだけ変えよう。「最大 T1」のつまみを ${TUTORIAL_SHORT_T1_US} μs 以下まで回してみて。数字を直接クリックしても打ち込めるよ。すぐ力尽きる、弱い量子ビットにするということ。`,
+    text: `では条件をひとつだけ変えよう。「T1（0 K）」のつまみを ${TUTORIAL_SHORT_T1_US} μs 以下まで回してみて。数字を直接クリックしても打ち込めるよ。すぐ力尽きる、弱い量子ビットにするということ。`,
     waitFor: 't1-lowered',
-    waitingHint: `最大 T1 を ${TUTORIAL_SHORT_T1_US} μs 以下にするのを待っているよ。`,
+    waitingHint: `T1（0 K）を ${TUTORIAL_SHORT_T1_US} μs 以下にするのを待っているよ。`,
     autoAdvance: true,
   },
   {
@@ -555,7 +555,7 @@ const noiseParameterBeats: TutorialBeat[] = [
     mood: 'nod',
     anchors: ['parameter-panel'],
     anchorLabel: 'ほかのつまみ',
-    text: 'ほかのつまみも同じように試せるよ。「最大 Tφ」は位相のずれやすさ、「温度」を上げると熱で勝手に励起され、「デバイス品質」を下げると全体がまとめて悪くなる。どれも独立に効くよ。',
+    text: 'ほかのつまみも同じように試せるよ。「Tφ」は位相のずれにくさ、「温度」を上げると熱で勝手に励起されて実効の T1 も短くなる。どれも独立に効くよ。',
   },
 
   /* --- 8. さようなら ---------------------------------------------------- */

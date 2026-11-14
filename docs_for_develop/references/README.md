@@ -56,7 +56,7 @@
 現時点で支えないものは次である。
 
 - 特定メーカー・特定chipに対する予測精度
-- `device_quality`やflux-noise profileの普遍的な実機対応
+- 利用者が与えるT1・Tφの値そのもの（入力であり、モデルの予測ではない）
 - Born-Markov、RWA、三準位打ち切りが全条件で妥当であること
 - formal hardware holdout監査の合格
 

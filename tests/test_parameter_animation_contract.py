@@ -8,7 +8,6 @@ class ParameterAnimationContractTest(unittest.TestCase):
         def request(theta: float) -> SimulateRequest:
             return SimulateRequest(
                 simulation_backend="python_dense",
-                input_mode="normalized",
                 circuit_config={
                     "logical_qubits": 1,
                     "initial_states": [0],
@@ -28,9 +27,10 @@ class ParameterAnimationContractTest(unittest.TestCase):
                     "gate_index": 0,
                 },
                 parameters={
-                    "normalized_temperature": 0.0,
-                    "normalized_magnetic_field": 0.0,
-                    "noise_level": 0.0,
+                    "temperature_mk": 10.0,
+                    "qubit_frequency_ghz": 5.0,
+                    "t1_zero_temperature_us": 100.0,
+                    "tphi_us": 66.66666666666667,
                     "duration_us": 0.1,
                     "time_steps": 3,
                     "fidelity_threshold": 0.9,

@@ -200,13 +200,10 @@ class PulseOpenSystemTests(unittest.TestCase):
 
     def test_physical_and_equivalent_direct_rates_match(self) -> None:
         environment = EnvironmentConfig(
-            input_mode="physical",
-            device_quality=0.8,
+            t1_zero_temperature_us=39.810717055349734,
+            tphi_us=28.474724895080143,
             temperature_mk=100.0,
-            flux_noise_phi0=2e-6,
             qubit_frequency_ghz=5.0,
-            t1_max_us=100.0,
-            tphi_max_us=100.0,
         )
         physical_rates = pulse_dissipation_rates(environment)
         direct_rates = pulse_dissipation_rates(SimpleNamespace(

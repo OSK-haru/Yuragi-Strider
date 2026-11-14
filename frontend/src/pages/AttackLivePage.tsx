@@ -874,7 +874,7 @@ export function AttackLivePage({ gateDurationDefaults, client, active = true }: 
                     </option>)}
                   </select><p className="attack-live__muted">選んだ方式の項目だけを使用します。</p>
                   {selection.noiseMode === 'physical_parameters' && <>
-                    <p className="attack-live__muted">磁束ノイズはtransmonの現象論です。固定周波数の実機へそのまま当てはまるとは限りません。</p>
+                    <p className="attack-live__muted">T1（0 K）と Tφ を直接与えます。温度は熱励起と実効 T1 にだけ効きます。</p>
                     {renderFields(noiseFields.filter((field) => field.path.includes('.physical_inputs.')))}
                   </>}
                   {standardSnapshot && <AttackQubitNoiseEditor standard={standardSnapshot} regions={regions} placement={placement}

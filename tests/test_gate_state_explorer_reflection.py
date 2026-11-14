@@ -163,13 +163,7 @@ class GateStateExplorerReflectionTests(unittest.TestCase):
 def _ideal_config(circuit: CircuitConfig) -> SimulationConfig:
     return SimulationConfig(
         circuit=circuit,
-        environment=EnvironmentConfig(
-            input_mode="physical",
-            ideal_reference=True,
-            device_quality=1.0,
-            temperature_mk=0.0,
-            flux_noise_phi0=0.0,
-        ),
+        environment=EnvironmentConfig(temperature_mk=0.0, ideal_reference=True),
         duration_us=1.0,
         time_steps=21,
         fidelity_threshold=0.9,
@@ -187,14 +181,7 @@ def _ideal_config(circuit: CircuitConfig) -> SimulationConfig:
 def _finite_ui_config(circuit: CircuitConfig) -> SimulationConfig:
     return SimulationConfig(
         circuit=circuit,
-        environment=EnvironmentConfig(
-            input_mode="physical",
-            device_quality=1.0,
-            temperature_mk=0.0,
-            flux_noise_phi0=0.0,
-            t1_max_us=1e9,
-            tphi_max_us=1e9,
-        ),
+        environment=EnvironmentConfig(t1_zero_temperature_us=1e9, tphi_us=999999999.9999999, temperature_mk=0.0),
         duration_us=1.0,
         time_steps=21,
         fidelity_threshold=0.9,

@@ -123,8 +123,7 @@ $$
 
 ### この文献だけでは支えないもの
 
-- `device_quality`から`T1_max`等への教育用profile
-- flux-noise入力から`gamma_phi`への現行線形写像
+- 利用者が与えるT1・Tφの値（2026-11-14に、品質と磁束ノイズからの写像は削除した。D89）
 - 実機の非平衡bathや周波数依存spectral density
 
 ## 4. Ithier et al.

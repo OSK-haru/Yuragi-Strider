@@ -64,27 +64,32 @@ MEASURE: 0.0 us
 これらは教育用presetのdefaultであり、特定hardwareの校正値ではない。
 ユーザー編集値またはgate固有`duration_us`が優先される。
 
-## 3. Device qualityとphysical profile
+## 3. 環境の入力（2026-11-14に変更、D89）
 
 ### 区分
 
-`PROJECT DECISION`
+`MODEL BASIS`（弱結合のGKSL）。入力の値そのものは利用者が与える。
 
-`device_quality`は0-1の抽象profile parameterである。温度、qubit frequency、
-`T1_max`、`Tphi_max`等からrateを構成するUIは、特定実機のdatasheet modelでは
-ない。
+入力は、実機で測れる量だけにした: 0 KでのT1（`t1_zero_temperature_us`、$1/\gamma_0$）、
+純粋位相緩和の時間（`tphi_us`、$1/\gamma_\phi$）、温度、量子ビット周波数。
+$\gamma_\downarrow=\gamma_0(n_\mathrm{th}+1)$、$\gamma_\uparrow=\gamma_0 n_\mathrm{th}$、
+$1/T_1=\gamma_\downarrow+\gamma_\uparrow$。
+
+### 削除したもの
+
+- `device_quality`（0-1）からT1・Tφへの幾何補間（1〜100 µs）
+- 磁束ノイズの振幅から$\gamma_\phi$への線形写像（係数0.05 µs⁻¹）
+- 0-1の「正規化」入力（温度10〜100 mKへの線形写像など）
+
+どれも文献から導いたものではなく、物理量の単位を持つ入力のように見えて根拠がなかったため、
+注意書きを付けて残すのではなく削除した。磁束ノイズを入れ直すなら、周波数可変transmonの
+磁束感度と1/fノイズのスペクトルから導く別の機能として作る。
 
 ### 使用箇所
 
-- `core/device_profiles.py`
 - `core/physical_environment.py`
+- `core/results.py`（`EnvironmentConfig`）
 - `frontend/src/components/ParameterPanel.tsx`
-
-### 必須表示
-
-```text
-This is a generic educational profile, not a calibrated hardware model.
-```
 
 ## 4. Pure-dephasing規約
 

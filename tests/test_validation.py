@@ -8,14 +8,14 @@ from core.validation import has_blocking_issues, validate_simulation_config
 
 
 class ValidationTest(unittest.TestCase):
-    def test_invalid_noise_level_is_detected(self) -> None:
+    def test_invalid_coherence_time_is_detected(self) -> None:
         issues = validate_simulation_config(
             SimulationConfig(
-                environment=EnvironmentConfig(noise_level=1.42),
+                environment=EnvironmentConfig(t1_zero_temperature_us=-1.0),
             )
         )
 
-        self.assertIssueCode(issues, "INVALID_NOISE_LEVEL")
+        self.assertIssueCode(issues, "INVALID_COHERENCE_TIME")
         self.assertTrue(has_blocking_issues(issues))
 
     def test_invalid_duration_us_is_detected(self) -> None:
@@ -138,7 +138,7 @@ class ValidationTest(unittest.TestCase):
 
     def test_run_simulation_does_not_execute_physics_for_blocking_config(self) -> None:
         config = SimulationConfig(
-            environment=EnvironmentConfig(noise_level=1.42),
+            environment=EnvironmentConfig(t1_zero_temperature_us=-1.0),
         )
 
         with patch("core.simulator.compute_environment_rates") as mapper:
@@ -149,7 +149,7 @@ class ValidationTest(unittest.TestCase):
         self.assertEqual(result.fidelity, [])
         self.assertEqual(result.purity, [])
         self.assertIsNone(result.effective_operation_time_us)
-        self.assertIssueCode(result.issues, "INVALID_NOISE_LEVEL")
+        self.assertIssueCode(result.issues, "INVALID_COHERENCE_TIME")
         self.assertTrue(result.warnings)
 
     def assertIssueCode(self, issues, code: str) -> None:

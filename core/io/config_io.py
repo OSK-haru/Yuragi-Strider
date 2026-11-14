@@ -11,7 +11,8 @@ from core.results import EnvironmentConfig, SimulationConfig
 from core.validation import has_blocking_issues, validate_simulation_config
 
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "2.0"  # 2.0: environment = measurable coherence times (D89)
+REMOVED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1"})
 CONFIG_KIND = "yuragi_strider.config"
 
 
@@ -69,6 +70,12 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         raise TypeError("config data must be a dictionary")
 
     if data.get("kind") == CONFIG_KIND:
+        if str(data.get("schema_version")) in REMOVED_SCHEMA_VERSIONS:
+            raise ValueError(
+                f"config schema {data.get('schema_version')} used the removed device-quality / flux-noise / "
+                "normalized environment inputs; set environment.t1_zero_temperature_us and environment.tphi_us "
+                "and save it again as schema 2.0"
+            )
         simulation = dict(data.get("simulation") or {})
         config = SimulationConfig(
             circuit=data["circuit"],

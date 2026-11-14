@@ -118,10 +118,9 @@ class GateExecutionTest(unittest.TestCase):
                 circuit=_circuit_for_gate("X"),
                 environment_a=_environment(),
                 environment_b=EnvironmentConfig(
-                    mode="normalized",
-                    temperature=0.8,
-                    magnetic_field=0.1,
-                    noise_level=0.8,
+                    t1_zero_temperature_us=2.5118864315095797,
+                    tphi_us=2.4727882168275728,
+                    temperature_mk=82.0,
                 ),
                 duration_us=0.001,
                 time_steps=3,
@@ -168,10 +167,9 @@ def _circuit_for_gate(gate_type: str) -> CircuitConfig:
 
 def _environment() -> EnvironmentConfig:
     return EnvironmentConfig(
-        mode="normalized",
-        temperature=0.0,
-        magnetic_field=0.0,
-        noise_level=0.0,
+        t1_zero_temperature_us=100.0,
+        tphi_us=66.66666666666667,
+        temperature_mk=10.0,
     )
 
 

@@ -141,79 +141,34 @@ def _noise_data(result: SimulationResult) -> dict[str, Any]:
         "gamma_population_relaxation_per_us",
         _sum_rates(gamma_down, gamma_up),
     )
-    gamma_phi = derived.get("gamma_phi_per_us", derived.get("gammaphi_per_us"))
-    legacy_down_alias = derived.get("gamma1_per_us", gamma_down)
-    data = {
+    gamma_phi = derived.get("gamma_phi_per_us")
+    return {
         "Environment model": environment.model,
-        "Input mode": environment.input_mode,
-        "Temperature parameter": environment.temperature,
-        "Flux noise parameter": environment.magnetic_field,
-        "Noise level": environment.noise_level,
-        "T1 relaxation time": derived.get("t1_us"),
-        "T2 dephasing time": derived.get("t2_us"),
-        # Compatibility labels retained for existing inspector consumers.
-        "gamma1": legacy_down_alias,
-        "gammaphi": gamma_phi,
-        "gamma ratio": _gamma_ratio(legacy_down_alias, gamma_phi),
-        "Dominant decoherence source": _dominant_source(legacy_down_alias, gamma_phi),
-    }
-    data.update({
-        "Device Quality": derived.get("device_quality", environment.device_quality),
+        "T1 at zero temperature [us]": derived.get(
+            "t1_zero_temperature_us", environment.t1_zero_temperature_us),
+        "Tphi [us]": derived.get("tphi_us", environment.tphi_us),
         "Temperature [mK]": derived.get("temperature_mk", environment.temperature_mk),
-        "Flux Noise Amplitude [Phi0]": derived.get(
-            "flux_noise_phi0",
-            environment.flux_noise_phi0,
-        ),
-        "Qubit Frequency [GHz]": derived.get(
-            "qubit_frequency_ghz",
-            environment.qubit_frequency_ghz,
-        ),
-        "T1 max [us]": derived.get("t1_max_us", environment.t1_max_us),
-        "Tphi max [us]": derived.get("tphi_max_us", environment.tphi_max_us),
-        "Ideal reference": derived.get(
-            "ideal_reference",
-            environment.ideal_reference,
-        ),
+        "Qubit Frequency [GHz]": derived.get("qubit_frequency_ghz", environment.qubit_frequency_ghz),
+        "Ideal reference": derived.get("ideal_reference", environment.ideal_reference),
         "n_th": derived.get("n_th"),
         "gamma0_per_us": derived.get("gamma0_per_us"),
-        "gamma_population_relaxation_per_us": gamma_population,
-        "t1_zero_temperature_us": derived.get(
-            "t1_zero_temperature_us",
-            derived.get("t1_base_us"),
-        ),
-        "tphi_effective_us": derived.get("tphi_effective_us"),
-        "T1_base": derived.get("t1_base_us"),
-        "Tphi_base": derived.get("tphi_base_us"),
         "Downward transition rate gamma_down [1/us]": gamma_down,
         "Upward transition rate gamma_up [1/us]": gamma_up,
         "Population relaxation rate gamma_population [1/us]": gamma_population,
-        # Read-only inspector compatibility label for consumers of older result data.
-        "Population relaxation rate gamma_1,total [1/us]": gamma_population,
-        "Effective T1 [us]": derived.get("t1_effective_us"),
         "Pure dephasing rate gamma_phi [1/us]": gamma_phi,
-        "gamma_down": gamma_down,
-        "gamma_up": gamma_up,
-        "gamma_phi_base": derived.get("gamma_phi_base_per_us"),
-        "gamma_phi_flux": derived.get("gamma_phi_flux_per_us"),
-        "gamma_phi": gamma_phi,
-        "T1_effective": derived.get("t1_effective_us"),
-        "T2_effective": derived.get("t2_effective_us"),
-    })
-    return data
+        "Effective T1 [us]": derived.get("t1_effective_us"),
+        "Effective T2 [us]": derived.get("t2_effective_us"),
+        "gamma ratio": _gamma_ratio(gamma_down, gamma_phi),
+        "Dominant decoherence source": _dominant_source(gamma_down, gamma_phi),
+    }
 
 
 def _operator_data(result: SimulationResult) -> dict[str, Any]:
     n_qubits = result.config.circuit.logical_qubits
     derived = result.derived_parameters
     environment = result.config.environment
-    legacy_downward_rate = derived.get(
-        "gamma_down_per_us",
-        derived.get("gamma1_per_us", 0.0),
-    )
-    legacy_dephasing_rate = derived.get(
-        "gamma_phi_per_us",
-        derived.get("gammaphi_per_us", 0.0),
-    )
+    legacy_downward_rate = derived.get("gamma_down_per_us", 0.0)
+    legacy_dephasing_rate = derived.get("gamma_phi_per_us", 0.0)
 
     if not result.times:
         return {
@@ -320,14 +275,8 @@ def _reconstruct_final_density_matrix(result: SimulationResult) -> Matrix | None
     config = result.config
     n_qubits = config.circuit.logical_qubits
     dimension = 2 ** n_qubits
-    legacy_downward_rate = result.derived_parameters.get(
-        "gamma_down_per_us",
-        result.derived_parameters.get("gamma1_per_us"),
-    )
-    legacy_dephasing_rate = result.derived_parameters.get(
-        "gamma_phi_per_us",
-        result.derived_parameters.get("gammaphi_per_us"),
-    )
+    legacy_downward_rate = result.derived_parameters.get("gamma_down_per_us")
+    legacy_dephasing_rate = result.derived_parameters.get("gamma_phi_per_us")
     if legacy_downward_rate is None or legacy_dephasing_rate is None:
         return None
 

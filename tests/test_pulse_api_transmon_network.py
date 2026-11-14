@@ -42,16 +42,14 @@ class CoupledTransmonNetworkApiTests(unittest.TestCase):
         payload = _network_payload()
         payload["environment"] = {
             "input_mode": "physical",
-            "device_quality": 1.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 100.0,
             "temperature_mk": 0.0,
-            "flux_noise_phi0": 0.0,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 100.0,
-            "tphi_max_us": 100.0,
             "per_qubit": [
-                {"t1_max_us": 10.0, "tphi_max_us": 20.0},
-                {"t1_max_us": 100.0, "tphi_max_us": 200.0},
-                {"t1_max_us": 1000.0, "tphi_max_us": 2000.0},
+                {"t1_zero_temperature_us": 10.0, "tphi_us": 20.0, },
+                {"t1_zero_temperature_us": 100.0, "tphi_us": 200.0, },
+                {"t1_zero_temperature_us": 1000.0, "tphi_us": 2000.0, },
             ],
         }
         request = CoupledTransmonNetworkPulseSimulateRequest.model_validate(payload)
@@ -69,13 +67,11 @@ class CoupledTransmonNetworkApiTests(unittest.TestCase):
         payload = _network_payload()
         payload["environment"] = {
             "input_mode": "physical",
-            "device_quality": 1.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 100.0,
             "temperature_mk": 0.0,
-            "flux_noise_phi0": 0.0,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 100.0,
-            "tphi_max_us": 100.0,
-            "per_qubit": [{"t1_max_us": 10.0, "tphi_max_us": 20.0}],
+            "per_qubit": [{"t1_zero_temperature_us": 10.0, "tphi_us": 20.0, }],
         }
 
         with self.assertRaises(ValidationError):

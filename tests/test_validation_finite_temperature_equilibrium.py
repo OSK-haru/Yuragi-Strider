@@ -159,13 +159,10 @@ def validate_case(rows: list[dict[str, float | str]], summary: dict[str, float])
 
 def physical_environment(temperature_mk: float) -> EnvironmentConfig:
     return EnvironmentConfig(
-        input_mode="physical",
-        device_quality=1.0,
+        t1_zero_temperature_us=100.0,
+        tphi_us=100.0,
         temperature_mk=temperature_mk,
-        flux_noise_phi0=0.0,
         qubit_frequency_ghz=5.0,
-        t1_max_us=100.0,
-        tphi_max_us=100.0,
         ideal_reference=False,
     )
 

@@ -34,14 +34,14 @@ class PresetsTest(unittest.TestCase):
                 environment = EnvironmentConfig.from_dict(
                     json.loads(path.read_text(encoding="utf-8"))
                 )
-                self.assertGreaterEqual(environment.noise_level, 0.0)
-                self.assertLessEqual(environment.noise_level, 1.0)
+                self.assertGreater(environment.t1_zero_temperature_us, 0.0)
+                self.assertGreater(environment.tphi_us, 0.0)
 
     def test_example_presets_are_json_files(self) -> None:
         for path in (PRESETS / "examples").glob("*.qscope.json"):
             with self.subTest(path=path.name):
                 data = json.loads(path.read_text(encoding="utf-8"))
-                self.assertEqual(data["schema_version"], "1.0")
+                self.assertEqual(data["schema_version"], "2.0")
                 self.assertEqual(data["kind"], "yuragi_strider.comparison_config")
 
 

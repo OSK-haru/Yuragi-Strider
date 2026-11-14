@@ -122,7 +122,7 @@ export function ToolboxPanel({ settings, check, qubitCount, sweepDelays, onChang
     </label>
   )
 
-  /* 最大遅延は空欄で自動（T1 max / Tφ max の3倍）。 */
+  /* 最大遅延は空欄で自動（T1（0 K）/ Tφ の3倍）。 */
   const delayField = (
     label: string,
     value: number | null,

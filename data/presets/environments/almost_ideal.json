@@ -1,8 +1,6 @@
 {
-  "mode": "normalized",
-  "temperature": 0.0,
-  "magnetic_field": 0.0,
-  "noise_level": 0.0,
-  "observation_strength": null,
-  "observation_frequency": null
+  "t1_zero_temperature_us": 1000.0,
+  "tphi_us": 1000.0,
+  "temperature_mk": 10.0,
+  "qubit_frequency_ghz": 5.0
 }

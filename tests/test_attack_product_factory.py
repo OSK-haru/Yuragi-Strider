@@ -26,7 +26,7 @@ from core.attack_simulation.scenario_policy import (
 from core.circuit_model import CircuitConfig
 from core.attack_simulation.shared_qpu_runtime import SharedQpuRuntimeConfig
 from core.physical_environment import (
-    INPUT_MODE_PHYSICAL, UNIFIED_ENVIRONMENT_MODEL,
+    UNIFIED_ENVIRONMENT_MODEL,
     compute_environment_rates_per_qubit,
 )
 from core.results import EnvironmentConfig
@@ -96,10 +96,9 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
             "input_mode": IDLE_INPUT_PHYSICAL,
             "physical_inputs": {
                 "environment_model": UNIFIED_ENVIRONMENT_MODEL,
-                "device_quality": 0.8, "temperature_mk": 15.0,
-                "flux_noise_phi0": 1.0e-6, "qubit_frequency_ghz": 5.0,
-                "t1_max_us": 100.0, "tphi_max_us": 100.0,
-                "per_qubit": {"151": {"t1_max_us": 45.0, "tphi_max_us": 250.0}},
+                "temperature_mk": 15.0, "qubit_frequency_ghz": 5.0,
+                "t1_zero_temperature_us": 40.0, "tphi_us": 33.0,
+                "per_qubit": {"151": {"t1_zero_temperature_us": 45.0, "tphi_us": 250.0}},
             },
         }
     qpu = {
@@ -154,8 +153,7 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
     if idle_input_mode == IDLE_INPUT_PHYSICAL:
         editable += (
             "qpu_service.idle_dynamics.physical_inputs.temperature_mk",
-            "qpu_service.idle_dynamics.physical_inputs.device_quality",
-            "qpu_service.idle_dynamics.physical_inputs.flux_noise_phi0",
+            "qpu_service.idle_dynamics.physical_inputs.tphi_us",
             "qpu_service.idle_dynamics.physical_inputs.qubit_frequency_ghz",
         )
     template = ScenarioTemplate(
@@ -217,16 +215,16 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
         ])
     else:
         physical_paths = (
-            "environment_model", "device_quality", "temperature_mk", "flux_noise_phi0",
-            "qubit_frequency_ghz", "t1_max_us", "tphi_max_us",
+            "environment_model", "temperature_mk", "qubit_frequency_ghz",
+            "t1_zero_temperature_us", "tphi_us",
         )
         assumptions.extend(_assumption(
             f"qpu_service.idle_dynamics.physical_inputs.{field}",
             rationale="Explicit physical-mode fixture input.",
         ) for field in physical_paths)
         assumptions.extend([
-            _assumption("qpu_service.idle_dynamics.physical_inputs.per_qubit.151.t1_max_us"),
-            _assumption("qpu_service.idle_dynamics.physical_inputs.per_qubit.151.tphi_max_us"),
+            _assumption("qpu_service.idle_dynamics.physical_inputs.per_qubit.151.t1_zero_temperature_us"),
+            _assumption("qpu_service.idle_dynamics.physical_inputs.per_qubit.151.tphi_us"),
         ])
     session = ScenarioPreset(template, policy, tuple(assumptions)).materialize(mode)
     return ScenarioEnvironment(session)
@@ -401,13 +399,10 @@ class ProductFactoryTests(unittest.TestCase):
         physical_inputs = raw["physical_inputs"]
         idle_model = _build_idle_model(raw, (150, 151), 2)
         expected_environment = EnvironmentConfig(
-            input_mode=INPUT_MODE_PHYSICAL,
-            device_quality=physical_inputs["device_quality"],
             temperature_mk=physical_inputs["temperature_mk"],
-            flux_noise_phi0=physical_inputs["flux_noise_phi0"],
             qubit_frequency_ghz=physical_inputs["qubit_frequency_ghz"],
-            t1_max_us=physical_inputs["t1_max_us"],
-            tphi_max_us=physical_inputs["tphi_max_us"],
+            t1_zero_temperature_us=physical_inputs["t1_zero_temperature_us"],
+            tphi_us=physical_inputs["tphi_us"],
             per_qubit=[physical_inputs["per_qubit"].get(str(q), {}) for q in (150, 151)],
             ideal_reference=False,
         )
@@ -439,9 +434,9 @@ class ProductFactoryTests(unittest.TestCase):
         hotter = build_with(temperature_mk=30.0)
         self.assertGreater(hotter.qubits[0].equilibrium_excited_population,
                            colder.qubits[0].equilibrium_excited_population)
-        low_flux = build_with(flux_noise_phi0=1.0e-6)
-        high_flux = build_with(flux_noise_phi0=1.0e-5)
-        self.assertLess(high_flux.qubits[0].tphi_us, low_flux.qubits[0].tphi_us)
+        self.assertEqual(build_with(tphi_us=12.0).qubits[0].tphi_us, 12.0)    # Tphi is taken as given
+        with self.assertRaisesRegex(ValueError, "explicit environment parameters"):
+            build_with(device_quality=0.8)
 
     def test_wait_noise_modes_are_exclusive_and_only_selected_values_are_frozen(self):
         calibration = prepared_environment().establish().qpu_service_config["idle_dynamics"]

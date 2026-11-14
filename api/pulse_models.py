@@ -28,22 +28,20 @@ class StrictPulseModel(BaseModel):
 
 
 class PulsePhysicalEnvironmentRequest(StrictPulseModel):
+    """Measurable inputs: T1 at zero temperature, Tphi, temperature and frequency (decision D89)."""
+
     input_mode: Literal["physical"]
-    device_quality: float = Field(ge=0.0, le=1.0)
     temperature_mk: float = Field(ge=0.0)
-    flux_noise_phi0: float = Field(ge=0.0)
     qubit_frequency_ghz: float = Field(gt=0.0)
-    t1_max_us: float = Field(gt=0.0)
-    tphi_max_us: float = Field(gt=0.0)
+    t1_zero_temperature_us: float = Field(gt=0.0)
+    tphi_us: float = Field(gt=0.0)
     ideal_reference: bool = False
 
     @field_validator(
-        "device_quality",
         "temperature_mk",
-        "flux_noise_phi0",
         "qubit_frequency_ghz",
-        "t1_max_us",
-        "tphi_max_us",
+        "t1_zero_temperature_us",
+        "tphi_us",
     )
     @classmethod
     def validate_finite_environment_value(cls, value: float) -> float:
@@ -264,14 +262,14 @@ class PulseSimulateRequest(StrictPulseModel):
 
 
 class PulseQubitCoherenceRequest(StrictPulseModel):
-    t1_max_us: float = Field(gt=0.0)
-    tphi_max_us: float = Field(gt=0.0)
+    t1_zero_temperature_us: float = Field(gt=0.0)
+    tphi_us: float = Field(gt=0.0)
 
 
 class QutritPulsePhysicalEnvironmentRequest(
     PulsePhysicalEnvironmentRequest
 ):
-    """Physical environment fields shared with the educational profile."""
+    """Physical environment fields with optional per-transmon coherence times."""
 
     per_qubit: list[PulseQubitCoherenceRequest] = Field(
         default_factory=list,

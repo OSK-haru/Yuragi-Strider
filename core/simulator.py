@@ -68,7 +68,6 @@ from core.internal_profiling import active_internal_profile
 from core.metrics import effective_time
 from core.physical_environment import (
     EnvironmentRates,
-    SUPPORTED_ENVIRONMENT_MODELS,
     UNIFIED_ENVIRONMENT_MODEL,
     compute_environment_rates,
     compute_environment_rates_per_qubit,
@@ -996,14 +995,7 @@ def _runtime_issues(config: SimulationConfig) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if config.model != DEFAULT_SIMULATION_MODEL:
         return issues
-    if config.environment.mode != "normalized":
-        issues.append(_runtime_error(
-            "UNSUPPORTED_ENVIRONMENT_MODE",
-            "The current simulator supports only normalized environment mode.",
-            f"Received mode={config.environment.mode!r}",
-            "Use mode='normalized' for this simulation backend.",
-        ))
-    if config.environment.model not in SUPPORTED_ENVIRONMENT_MODELS:
+    if config.environment.model != UNIFIED_ENVIRONMENT_MODEL:
         issues.append(_runtime_error(
             "UNSUPPORTED_ENVIRONMENT_MODEL",
             "The current simulator does not support this environment model.",

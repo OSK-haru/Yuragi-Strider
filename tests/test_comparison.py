@@ -27,15 +27,15 @@ class ComparisonTest(unittest.TestCase):
         result = run_comparison(
             ComparisonConfig(
                 circuit=CircuitConfig.one_qubit_h(),
-                environment_a=EnvironmentConfig(noise_level=1.2),
-                environment_b=EnvironmentConfig(noise_level=1.3),
+                environment_a=EnvironmentConfig(t1_zero_temperature_us=-1.0),
+                environment_b=EnvironmentConfig(tphi_us=0.0),
                 label_a="A",
                 label_b="B",
             )
         )
 
         self.assertGreaterEqual(len(result.warnings), 2)
-        self.assertTrue(any("INVALID_NOISE_LEVEL" in warning for warning in result.warnings))
+        self.assertTrue(any("INVALID_COHERENCE_TIME" in warning for warning in result.warnings))
 
     def test_two_qubit_bell_circuit_can_compare(self) -> None:
         result = run_comparison(
@@ -68,8 +68,16 @@ class ComparisonTest(unittest.TestCase):
                         ),
                     ],
                 ),
-                environment_a=EnvironmentConfig(noise_level=0.0),
-                environment_b=EnvironmentConfig(noise_level=0.8),
+                environment_a=EnvironmentConfig(
+                    t1_zero_temperature_us=100.0,
+                    tphi_us=66.66666666666667,
+                    temperature_mk=11.8,
+                ),
+                environment_b=EnvironmentConfig(
+                    t1_zero_temperature_us=2.5118864315095797,
+                    tphi_us=2.4807298729688254,
+                    temperature_mk=11.8,
+                ),
                 duration_us=0.001,
                 time_steps=3,
                 fidelity_threshold=0.9,
@@ -87,16 +95,14 @@ def _comparison_config() -> ComparisonConfig:
     return ComparisonConfig(
         circuit=CircuitConfig.one_qubit_h(),
         environment_a=EnvironmentConfig(
-            mode="normalized",
-            temperature=0.1,
-            magnetic_field=0.1,
-            noise_level=0.1,
+            t1_zero_temperature_us=63.095734448,
+            tphi_us=45.159858934213595,
+            temperature_mk=19.0,
         ),
         environment_b=EnvironmentConfig(
-            mode="normalized",
-            temperature=0.8,
-            magnetic_field=0.1,
-            noise_level=0.8,
+            t1_zero_temperature_us=2.5118864315095797,
+            tphi_us=2.4727882168275728,
+            temperature_mk=82.0,
         ),
         duration_us=20.0,
         time_steps=101,

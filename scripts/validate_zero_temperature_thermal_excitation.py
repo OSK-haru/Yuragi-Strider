@@ -194,7 +194,7 @@ def main() -> int:
         },
         "implementation_functions_inspected": [
             "core.physical_environment.compute_thermal_occupation",
-            "core.physical_environment._compute_rates_from_physical_inputs",
+            "core.physical_environment.rates_from_times",
             "core.physical_environment.compute_environment_rates",
             "core.gates.multi_qubit_environment_collapse_operators",
         ],
@@ -209,13 +209,10 @@ def main() -> int:
             "gamma_population_relaxation_per_us": "gamma_down_per_us + gamma_up_per_us",
             "t1_effective_us": "1 / gamma_population_relaxation_per_us",
         },
-        "gamma1_alias": "gamma1_per_us is a legacy alias for gamma_down_per_us",
         "edge_case_policy": "T <= 0 returns n_th=0 explicitly; exponent > 700 returns n_th=0 to avoid overflow",
         "cases": rows,
         "overall_pass": all(str(row["result"]) == "PASS" for row in rows),
-        "ambiguities": [
-            "gamma1_per_us is retained only as a compatibility alias for gamma_down_per_us.",
-        ],
+        "ambiguities": [],
     }
     json_path = args.output_dir / "validation2_zero_temperature.json"
     csv_path = args.output_dir / "validation2_zero_temperature.csv"

@@ -169,8 +169,8 @@ class GateAwareMeasurementExecutionTests(unittest.TestCase):
     def test_ui_response_discloses_measurement_semantics_and_counts(self) -> None:
         config = _measurement_config("fixed_step_rk4")
         config.environment.ideal_reference = False
-        config.environment.t1_max_us = 1e12
-        config.environment.tphi_max_us = 1e12
+        config.environment.t1_zero_temperature_us = 1e12
+        config.environment.tphi_us = 1e12
         response = simulation_result_to_ui_response(
             run_simulation(config)
         )
@@ -210,9 +210,10 @@ class GateAwareMeasurementApiTests(unittest.TestCase):
             circuit_preset="bit_flip_repetition",
             simulation_backend="python_dense",
             parameters={
-                "normalized_temperature": 0.0,
-                "normalized_magnetic_field": 0.0,
-                "noise_level": 0.0,
+                "temperature_mk": 10.0,
+                "qubit_frequency_ghz": 5.0,
+                "t1_zero_temperature_us": 100.0,
+                "tphi_us": 66.66666666666667,
                 "duration_us": 2.0,
                 "time_steps": 5,
                 "fidelity_threshold": 0.9,
@@ -225,7 +226,7 @@ class GateAwareMeasurementApiTests(unittest.TestCase):
     def test_ideal_teleportation_preserves_input_on_target(self) -> None:
         result = run_simulation(SimulationConfig(
             circuit=build_teleportation_circuit(),
-            environment=EnvironmentConfig(input_mode="physical", ideal_reference=True),
+            environment=EnvironmentConfig(temperature_mk=15.0, ideal_reference=True),
             duration_us=2.0,
             time_steps=11,
         ))
@@ -242,7 +243,7 @@ class GateAwareMeasurementApiTests(unittest.TestCase):
     def test_ideal_repetition_code_corrects_injected_bit_flip(self) -> None:
         result = run_simulation(SimulationConfig(
             circuit=build_bit_flip_repetition_circuit(),
-            environment=EnvironmentConfig(input_mode="physical", ideal_reference=True),
+            environment=EnvironmentConfig(temperature_mk=15.0, ideal_reference=True),
             duration_us=2.0,
             time_steps=11,
         ))
@@ -261,7 +262,7 @@ class GateAwareMeasurementApiTests(unittest.TestCase):
                 initial_states=["0"] * 8,
                 columns=[GateColumn(0, [GateOperation("H", [0])])],
             ),
-            environment=EnvironmentConfig(input_mode="physical", ideal_reference=True),
+            environment=EnvironmentConfig(temperature_mk=15.0, ideal_reference=True),
             duration_us=1.0,
             time_steps=3,
         )
@@ -349,13 +350,7 @@ def _measurement_config(evolution_method: str) -> SimulationConfig:
                 )]),
             ],
         ),
-        environment=EnvironmentConfig(
-            input_mode="physical",
-            ideal_reference=True,
-            device_quality=1.0,
-            temperature_mk=0.0,
-            flux_noise_phi0=0.0,
-        ),
+        environment=EnvironmentConfig(temperature_mk=0.0, ideal_reference=True),
         duration_us=0.1,
         time_steps=21,
         fidelity_threshold=0.9,
@@ -376,7 +371,6 @@ def _measurement_config(evolution_method: str) -> SimulationConfig:
 def _api_payload(*, shots: int, seed: int) -> dict[str, object]:
     return {
         "simulation_backend": "python_dense",
-        "input_mode": "normalized",
         "measurement_options": {"shots": shots, "seed": seed},
         "circuit_config": {
             "logical_qubits": 1,
@@ -387,9 +381,10 @@ def _api_payload(*, shots: int, seed: int) -> dict[str, object]:
             }],
         },
         "parameters": {
-            "normalized_temperature": 0.0,
-            "normalized_magnetic_field": 0.0,
-            "noise_level": 0.0,
+            "temperature_mk": 10.0,
+            "qubit_frequency_ghz": 5.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 66.66666666666667,
             "duration_us": 0.1,
             "time_steps": 11,
             "fidelity_threshold": 0.9,

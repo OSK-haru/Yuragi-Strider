@@ -14,12 +14,10 @@ def _payload() -> dict[str, object]:
         "maximum_delay_us": 300.0,
         "point_count": 21,
         "parameters": {
-            "device_quality": 1.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 100.0,
             "temperature_mk": 0.0,
-            "flux_noise_phi0": 0.0,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 100.0,
-            "tphi_max_us": 100.0,
         },
     }
 

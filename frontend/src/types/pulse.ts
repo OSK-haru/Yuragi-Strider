@@ -45,12 +45,10 @@ export type PulseLabForm = {
   networkExchangeCouplingRadPerUs: number
   dragBetaUs: number
   environmentMode: PulseEnvironmentMode
-  deviceQuality: number
   temperatureMk: number
-  fluxNoisePhi0: number
   qubitFrequencyGhz: number
-  t1MaxUs: number
-  tphiMaxUs: number
+  t1ZeroTemperatureUs: number
+  tphiUs: number
   gammaDownPerUs: number
   gammaUpPerUs: number
   gammaPhiPerUs: number
@@ -71,8 +69,8 @@ export type PulseLabForm = {
   networkQuasiStaticAdjacentCorrelation: number
   networkQuasiStaticQuadratureOrder: 3 | 5
   networkPerQubitCalibrationEnabled: boolean
-  networkT1MaxUs: number[]
-  networkTphiMaxUs: number[]
+  networkT1Us: number[]
+  networkTphiUs: number[]
   networkReadoutP10: number[]
   networkReadoutP01: number[]
   readoutErrorEnabled: boolean

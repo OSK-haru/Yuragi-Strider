@@ -25,10 +25,11 @@ from core.attack_simulation.workload_config import serialize_workload_plan
 from core.attack_simulation.scenario_compiler import ScenarioOverride
 from core.attack_simulation.scenario_policy import ObservationBudget, ScenarioTemplate
 from core.attack_simulation.shared_qpu_runtime import SharedQpuRuntimeConfig
-from core.device_profiles import GenericTransmonProfile
 from core.experimental_isolation_physics.imperfect_reset import ImperfectResetSpec
 from core.experimental_isolation_physics.reset_model import PerQubitPhenomenologicalResetModel
-from core.physical_environment import UNIFIED_ENVIRONMENT_MODEL
+from core.physical_environment import (
+    DEFAULT_QUBIT_FREQUENCY_GHZ, DEFAULT_TEMPERATURE_MK, UNIFIED_ENVIRONMENT_MODEL,
+)
 
 
 OPERATIONS = (
@@ -280,15 +281,9 @@ def _profile(snapshot: DeviceSnapshot, topology: QpuTopology, region: tuple[int,
             item.t1_us is None or item.t2_us is None for item in calibrations.values()):
         raise ValueError("calibration mode region contains a qubit without T1/T2")
 
-    physical = GenericTransmonProfile()
     physical_inputs = {
         "environment_model": UNIFIED_ENVIRONMENT_MODEL,
-        "device_quality": 0.8,
-        "temperature_mk": physical.default_temperature_mk,
-        "flux_noise_phi0": physical.flux_noise_min_phi0,
-        "qubit_frequency_ghz": physical.qubit_frequency_ghz,
-        "t1_max_us": physical.t1_max_us,
-        "tphi_max_us": physical.tphi_max_us,
+        **_physical_input_values(),
         "per_qubit": {},
     }
     idle = ({"model_id": "independent_constant_rate_v1", "input_mode": mode,
@@ -610,8 +605,7 @@ def _template(template_id: str, qpu: Mapping[str, object], mode: str,
     else:
         editable.extend(
             f"qpu_service.idle_dynamics.physical_inputs.{field}"
-            for field in ("device_quality", "temperature_mk", "flux_noise_phi0",
-                          "qubit_frequency_ghz", "t1_max_us", "tphi_max_us")
+            for field in ("temperature_mk", "qubit_frequency_ghz", "t1_zero_temperature_us", "tphi_us")
         )
     editable.extend((INTERLEAVED_RUN_SECRET_BIT, INTERLEAVED_MAX_ROUNDS, RESET_CONFIGURATION_ID,
                      ABSTRACT_INTERLEAVE, ABSTRACT_VICTIM_ACTIVITY, SUPPORTED_OPERATIONS_PATH,
@@ -928,14 +922,13 @@ def _interleaving_assumptions(region: tuple[int, ...]) -> list[AssumptionRecord]
 
 
 def _physical_input_values() -> dict[str, object]:
-    profile = GenericTransmonProfile()
+    """Sample physical-mode inputs (not a device calibration). T1 = 40 us and Tphi = 33 us keep the idle
+    rates the earlier quality-0.8 default produced (39.8 us, and 33.2 us with its flux term), rounded."""
     return {
-        "device_quality": 0.8,
-        "temperature_mk": profile.default_temperature_mk,
-        "flux_noise_phi0": profile.flux_noise_min_phi0,
-        "qubit_frequency_ghz": profile.qubit_frequency_ghz,
-        "t1_max_us": profile.t1_max_us,
-        "tphi_max_us": profile.tphi_max_us,
+        "temperature_mk": DEFAULT_TEMPERATURE_MK,
+        "qubit_frequency_ghz": DEFAULT_QUBIT_FREQUENCY_GHZ,
+        "t1_zero_temperature_us": 40.0,
+        "tphi_us": 33.0,
     }
 
 
@@ -1061,14 +1054,11 @@ def _fields(region: tuple[int, ...], mode: str, calibrations: Mapping[int, objec
     if mode == IDLE_INPUT_CALIBRATION:
         fields.extend(_qubit_noise_fields(region, calibrations, "qpu_service.idle_dynamics.qubits"))
     else:
-        defaults = GenericTransmonProfile()
         for name, label, lower, upper, unit in (
-            ("device_quality", "デバイス品質", 0.0, 1.0, None),
             ("temperature_mk", "温度", 0.0, 100.0, "mK"),
-            ("flux_noise_phi0", "磁束ノイズ", 0.0, 1e-3, "Phi0"),
             ("qubit_frequency_ghz", "qubit周波数", 0.1, 20.0, "GHz"),
-            ("t1_max_us", "T1の上限", 0.001, 1e6, "us"),
-            ("tphi_max_us", "Tφの上限", 0.001, 1e6, "us"),
+            ("t1_zero_temperature_us", "T1（0 K）", 0.001, 1e6, "us"),
+            ("tphi_us", "Tφ", 0.001, 1e6, "us"),
         ):
             fields.append(_number(f"qpu_service.idle_dynamics.physical_inputs.{name}", label,
                                   lower, upper, unit, "本体シミュレーターと同じ物理モデルへの入力です。スナップショットの較正値ではありません。",

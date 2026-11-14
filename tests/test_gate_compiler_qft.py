@@ -401,13 +401,7 @@ def _as_matrix(array):
 def _simulation_config(n_qubits, targets, mode):
     return SimulationConfig(
         circuit=_qft_circuit(n_qubits, targets),
-        environment=EnvironmentConfig(
-            input_mode="physical",
-            ideal_reference=True,
-            device_quality=1.0,
-            temperature_mk=0.0,
-            flux_noise_phi0=0.0,
-        ),
+        environment=EnvironmentConfig(temperature_mk=0.0, ideal_reference=True),
         duration_us=1.98,
         time_steps=21,
         fidelity_threshold=0.9,
@@ -420,7 +414,6 @@ def _api_payload(targets, controls=None):
     return {
         "simulation_backend": "python_dense",
         "compilation_mode": "auto_decompose",
-        "input_mode": "normalized",
         "circuit_config": {
             "logical_qubits": 4,
             "initial_states": [0, 0, 0, 0],
@@ -434,9 +427,10 @@ def _api_payload(targets, controls=None):
             }],
         },
         "parameters": {
-            "normalized_temperature": 0.0,
-            "normalized_magnetic_field": 0.0,
-            "noise_level": 0.0,
+            "temperature_mk": 10.0,
+            "qubit_frequency_ghz": 5.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 66.66666666666667,
             "duration_us": 1.98,
             "time_steps": 21,
             "fidelity_threshold": 0.9,

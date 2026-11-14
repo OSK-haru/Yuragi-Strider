@@ -1,7 +1,7 @@
 {
   "validation": "CPTP-MODEL-FREEZE-C10",
   "freeze_schema_version": 1,
-  "generated_at_utc": "2026-10-13T11:51:05.619528+00:00",
+  "generated_at_utc": "2026-11-14T11:14:51.281349+00:00",
   "decision": "PASS WITH RESTRICTIONS",
   "overall_pass": true,
   "frozen_contract": {
@@ -143,8 +143,8 @@
     }
   },
   "source_revision": {
-    "git_commit": "4f18b1ecb061ab66206b9e36fd01d7d42f1fcc60",
-    "critical_source_tree_sha256": "fd8776d9443ff7373faaf5f0bfcd2748345cfc8ab900075e0c7340a3d03fb108",
+    "git_commit": "7b34544901a91e1ae8fa043a883583d2ae13224c",
+    "critical_source_tree_sha256": "6e91eabe4cfdc1b2daedf8e740d6518d01792f908f8700eea78d6c7915db9968",
     "files": [
       {
         "file": "core/cptp.py",
@@ -179,12 +179,12 @@
       {
         "file": "core/pulse_open_system.py",
         "exists": true,
-        "sha256": "eb6969b1bb1b156f4a30215b4e36d85089ad8df5757bcebc27a0456ce3a19d0a"
+        "sha256": "dff3111b27e7901dd03cae8a3c30e768812fe0b9ef8777182b5a23b56e3c46f3"
       },
       {
         "file": "core/pulse_qutrit_open_system.py",
         "exists": true,
-        "sha256": "70189da6baf107a7068f484fa7134ac53aeaf320527fcbc152a47cba3b3626d3"
+        "sha256": "71a37eed1aa4df30744567e6e19910794a9df328eefc7e5f17d70307ff507dee"
       },
       {
         "file": "core/rust_dense_kernel.py",
@@ -199,32 +199,32 @@
       {
         "file": "api/pulse_models.py",
         "exists": true,
-        "sha256": "4785b2782af7c7f261d59ff5992d231865f72bf8948f7fe992f42d2d8c6881d0"
+        "sha256": "af94d3f9bf7c39448141b8b2a7de07344dc449f3fc6d2e239c0a1ac5aed1ec7c"
       },
       {
         "file": "api/pulse_service.py",
         "exists": true,
-        "sha256": "a3e5139db029aad088a92e2c869b80688e8ab358473ced842e4a1587907bbe7b"
+        "sha256": "8f2bb01958f946c9bde710bbd25fc4c3c9bfe5242950f6bb29d05c8db3bed7eb"
       },
       {
         "file": "api/pulse_qutrit_service.py",
         "exists": true,
-        "sha256": "4aa950e307947ebea4170ac89cbbbc350c89fa3a3476e2bcb4b8b588c7baf8fe"
+        "sha256": "536cb7c0bd337abb02b2e88213f0adb8a27d5304fe20997604fdf719dbebde53"
       },
       {
         "file": "frontend/src/types/pulse.ts",
         "exists": true,
-        "sha256": "02fbecbb327ccd0d2be4d0db35703e7756dca7833cee84c40ec64e100e908509"
+        "sha256": "05c0b8fc41a8692fe90bd6c10664f0f67f727a4387c708dd157f448fa7704f27"
       },
       {
         "file": "frontend/src/utils/pulseLab.ts",
         "exists": true,
-        "sha256": "c114fd5a49cd5033c19e9e641b008c49256fa8a3dfc7a6de8614ab64b0bc253e"
+        "sha256": "559c9610431ad822ca0e0f313c68fdfd1f1f6e425f9fd743a396f891b3426cfd"
       },
       {
         "file": "frontend/src/components/PulseEnvironmentPanel.tsx",
         "exists": true,
-        "sha256": "c0b7ff2ca4633559ec52cfa66b51e0f6a05843637d6eb8165d1e435dfabfec75"
+        "sha256": "3359cfee862be324a9f4d839151f3589642028065acd6a9373eb66b9bc4f4349"
       },
       {
         "file": "frontend/src/pages/PulseLabPage.tsx",

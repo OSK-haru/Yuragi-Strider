@@ -34,12 +34,10 @@ const parameterRanges: Record<
   EditableParameterName,
   { min: number; max?: number; step: number }
 > = {
-  device_quality: { min: 0, max: 1, step: 0.01 },
   temperature_mk: { min: 0, step: 1 },
-  flux_noise_phi0: { min: 0, step: 0.000001 },
   qubit_frequency_ghz: { min: 0.001, step: 0.1 },
-  t1_max_us: { min: 0.001, step: 1 },
-  tphi_max_us: { min: 0.001, step: 1 },
+  t1_zero_temperature_us: { min: 0.001, step: 1 },
+  tphi_us: { min: 0.001, step: 1 },
   duration_us: { min: 0.001, step: 0.1 },
   time_steps: { min: 2, step: 1 },
   fidelity_threshold: { min: 0, max: 1, step: 0.01 },
@@ -77,12 +75,10 @@ type DialConfig = {
 }
 
 const dialConfigs: Partial<Record<EditableParameterName, DialConfig>> = {
-  device_quality: { dialMax: 1, formatValue: (value) => value.toFixed(2) },
   qubit_frequency_ghz: { dialMax: 10, unit: 'GHz', formatValue: (value) => value.toFixed(2) },
-  t1_max_us: { dialMax: 200, unit: 'μs', formatValue: (value) => value.toFixed(1) },
-  tphi_max_us: { dialMax: 200, unit: 'μs', formatValue: (value) => value.toFixed(1) },
+  t1_zero_temperature_us: { dialMax: 200, unit: 'μs', formatValue: (value) => value.toFixed(1) },
+  tphi_us: { dialMax: 200, unit: 'μs', formatValue: (value) => value.toFixed(1) },
   temperature_mk: { dialMax: 100, unit: 'mK', formatValue: (value) => value.toFixed(1) },
-  flux_noise_phi0: { dialMax: 0.00001, unit: 'Φ0', formatValue: (value) => value.toExponential(2) },
 }
 
 type GateDurationGroup = {
@@ -295,24 +291,19 @@ export function ParameterPanel({
           />
           <div className="parameter-panel__fields parameter-panel__fields--dials">
             {renderDial(
-              'device_quality',
-              'デバイス品質',
-              '学習用デバイスモデルで使用する 0〜1 の抽象的なプロファイル値です。',
-            )}
-            {renderDial(
               'qubit_frequency_ghz',
               '量子ビット周波数',
               '0 より大きい値',
             )}
             {renderDial(
-              't1_max_us',
-              '最大 T1',
-              '0 より大きい値',
+              't1_zero_temperature_us',
+              'T1（0 K）',
+              '0 K でのエネルギー緩和時間。温度が上がると実効 T1 は短くなる',
             )}
             {renderDial(
-              'tphi_max_us',
-              '最大 Tφ',
-              '0 より大きい値',
+              'tphi_us',
+              'Tφ',
+              '純粋位相緩和の時間（1/γφ）',
             )}
           </div>
         </article>
@@ -328,11 +319,6 @@ export function ParameterPanel({
             {renderDial(
               'temperature_mk',
               '温度',
-              '0 以上',
-            )}
-            {renderDial(
-              'flux_noise_phi0',
-              '磁束ノイズ',
               '0 以上',
             )}
           </div>
@@ -447,10 +433,10 @@ export function ParameterPanel({
               {perQubitCalibration.values.slice(0, logicalQubits).map((entry, qubit) => (
                 <div className="parameter-panel__qubit-calibration" key={qubit}>
                   <strong>q{qubit}</strong>
-                  {(['t1_max_us', 'tphi_max_us', 'p10', 'p01'] as const).map((name) => (
+                  {(['t1_zero_temperature_us', 'tphi_us', 'p10', 'p01'] as const).map((name) => (
                     <label className="parameter-panel__field" key={name}>
                       <span className="parameter-panel__field-label">
-                        {name === 't1_max_us' ? 'T1 max [μs]' : name === 'tphi_max_us' ? 'Tφ max [μs]' : name}
+                        {name === 't1_zero_temperature_us' ? 'T1（0 K）[μs]' : name === 'tphi_us' ? 'Tφ [μs]' : name}
                       </span>
                       <input
                         className="parameter-panel__input"

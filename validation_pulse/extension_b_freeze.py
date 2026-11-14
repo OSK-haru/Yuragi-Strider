@@ -506,14 +506,13 @@ def _qutrit_direct_payload() -> dict[str, Any]:
 
 def _qutrit_physical_payload() -> dict[str, Any]:
     payload = _qutrit_direct_payload()
+    # Coherence times equal to the rates of the removed quality/flux inputs (D89), so frozen results still apply.
     payload["environment"] = {
         "input_mode": "physical",
-        "device_quality": 0.8,
         "temperature_mk": 15.0,
-        "flux_noise_phi0": 1e-6,
         "qubit_frequency_ghz": 5.0,
-        "t1_max_us": 100.0,
-        "tphi_max_us": 100.0,
+        "t1_zero_temperature_us": 39.810717055349734,
+        "tphi_us": 33.20178309308936,
     }
     return payload
 

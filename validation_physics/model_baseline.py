@@ -82,7 +82,7 @@ def build_freeze_report(root: Path = ROOT) -> dict[str, Any]:
                 "per_qubit_t1_tphi_and_independent_affine_readout_v1"
             ),
             "per_qubit_rules": {
-                "input_mode": "physical_only",
+                "inputs": "t1_zero_temperature_us and tphi_us (D89)",
                 "coherence_entry_count": "exactly one per logical qubit or transmon",
                 "readout_entry_count": "exactly one per logical qubit or transmon",
                 "shared_values_when_omitted": True,
@@ -137,7 +137,6 @@ def write_freeze_report(output_path: Path, *, root: Path = ROOT) -> dict[str, An
 def _gate_aware_smoke() -> dict[str, Any]:
     request = SimulateRequest.model_validate({
         "simulation_backend": "python_dense",
-        "input_mode": "physical",
         "circuit_config": {
             "logical_qubits": 2,
             "initial_states": [0, 0],
@@ -145,15 +144,13 @@ def _gate_aware_smoke() -> dict[str, Any]:
         },
         "parameters": {
             "fidelity_threshold": 0.9,
-            "device_quality": 1.0,
             "temperature_mk": 0.0,
-            "flux_noise_phi0": 0.0,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 100.0,
-            "tphi_max_us": 100.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 100.0,
             "per_qubit": [
-                {"t1_max_us": 20.0, "tphi_max_us": 40.0},
-                {"t1_max_us": 200.0, "tphi_max_us": 400.0},
+                {"t1_zero_temperature_us": 20.0, "tphi_us": 40.0},
+                {"t1_zero_temperature_us": 200.0, "tphi_us": 400.0},
             ],
             "duration_us": 0.1,
             "time_steps": 5,
@@ -215,15 +212,13 @@ def _network_smoke() -> dict[str, Any]:
         "total_simulation_time_us": 0.02,
         "environment": {
             "input_mode": "physical",
-            "device_quality": 1.0,
             "temperature_mk": 0.0,
-            "flux_noise_phi0": 0.0,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 100.0,
-            "tphi_max_us": 100.0,
+            "t1_zero_temperature_us": 100.0,
+            "tphi_us": 100.0,
             "per_qubit": [
-                {"t1_max_us": 25.0, "tphi_max_us": 50.0},
-                {"t1_max_us": 250.0, "tphi_max_us": 500.0},
+                {"t1_zero_temperature_us": 25.0, "tphi_us": 50.0},
+                {"t1_zero_temperature_us": 250.0, "tphi_us": 500.0},
             ],
         },
         "readout_error": {

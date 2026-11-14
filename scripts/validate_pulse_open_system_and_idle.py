@@ -511,14 +511,12 @@ def _run_zero_rate_audit():
 
 
 def _run_mode_match_audit():
+    # The rates of the removed quality-0.8 / flux-2e-6 inputs (D89), so the stored audit stays comparable.
     environment = EnvironmentConfig(
-        input_mode="physical",
-        device_quality=0.8,
         temperature_mk=100.0,
-        flux_noise_phi0=2e-6,
         qubit_frequency_ghz=5.0,
-        t1_max_us=100.0,
-        tphi_max_us=100.0,
+        t1_zero_temperature_us=39.810717055349734,
+        tphi_us=28.474724895080143,
     )
     physical_rates = pulse_dissipation_rates(environment)
     direct_rates = pulse_dissipation_rates(SimpleNamespace(
@@ -558,12 +556,10 @@ def _run_mode_match_audit():
     return {
         "physical_input": {
             **physical_rates.to_dict(),
-            "device_quality": environment.device_quality,
             "temperature_mk": environment.temperature_mk,
-            "flux_noise_phi0": environment.flux_noise_phi0,
             "qubit_frequency_ghz": environment.qubit_frequency_ghz,
-            "t1_max_us": environment.t1_max_us,
-            "tphi_max_us": environment.tphi_max_us,
+            "t1_zero_temperature_us": environment.t1_zero_temperature_us,
+            "tphi_us": environment.tphi_us,
         },
         "direct_rates": direct_rates.to_dict(),
         "pulse_end_max_element_error": pulse_error,

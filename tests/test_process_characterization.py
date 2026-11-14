@@ -24,19 +24,17 @@ def _request(n_qubits: int, columns: list[dict], *, t1_us: float = 5.0, method: 
     return {
         "simulation_backend": "python_dense",
         "evolution_method": method,
-        "input_mode": "physical",
         "circuit_config": {
             "logical_qubits": n_qubits,
             "initial_states": ["0"] * n_qubits,
             "columns": columns,
         },
         "parameters": {
-            "device_quality": 0.8,
             "temperature_mk": 40.0,
-            "flux_noise_phi0": 1e-6,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": t1_us,
-            "tphi_max_us": t1_us,
+            # The rates of the removed quality-0.8 / flux-1e-6 mapping (D89) for the same t1_us.
+            "t1_zero_temperature_us": t1_us ** 0.8,
+            "tphi_us": 1.0 / (t1_us ** -0.8 + 0.005),
             "duration_us": 2.0,
             "time_steps": 21,
             "fidelity_threshold": 0.9,
@@ -138,7 +136,7 @@ class EstimatorTests(unittest.TestCase):
 
     def test_noise_free_circuit_is_its_ideal_unitary(self) -> None:
         payload = _request(2, BELL)
-        payload["parameters"].update({"device_quality": 1.0, "temperature_mk": 0.0, "flux_noise_phi0": 0.0})
+        payload["parameters"].update({"t1_zero_temperature_us": 100.0, "tphi_us": 100.0, "temperature_mk": 0.0, })
         payload["parameters"]["ideal_reference"] = True
         result = characterize_process(_config(payload))
         self.assertAlmostEqual(result["average_gate_fidelity"], 1.0, places=10)

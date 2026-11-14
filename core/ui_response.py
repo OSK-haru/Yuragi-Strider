@@ -253,9 +253,6 @@ def _ideal_reference_data(
     config_data = result.config.to_dict()
     environment = dict(config_data.get("environment") or {})
     environment["ideal_reference"] = True
-    physical = dict(environment.get("physical") or {})
-    physical["ideal_reference"] = True
-    environment["physical"] = physical
     config_data["environment"] = environment
 
     try:
@@ -273,7 +270,6 @@ def _rates_response(result: SimulationResult) -> dict[str, Any]:
 
     derived = result.derived_parameters
     gamma_down = _safe_float_or_none(derived.get("gamma_down_per_us"))
-    legacy_gamma1 = _safe_float_or_none(derived.get("gamma1_per_us"))
 
     return {
         "gamma0_per_us": _safe_float_or_none(derived.get("gamma0_per_us")),
@@ -283,15 +279,10 @@ def _rates_response(result: SimulationResult) -> dict[str, Any]:
             derived.get("gamma_population_relaxation_per_us")
         ),
         "gamma_phi_per_us": _safe_float_or_none(derived.get("gamma_phi_per_us")),
-        "t1_base_us": _safe_float_or_none(derived.get("t1_base_us")),
-        "t1_effective_us": _safe_float_or_none(derived.get("t1_effective_us")),
-        "tphi_base_us": _safe_float_or_none(derived.get("tphi_base_us")),
-        "t2_effective_us": _safe_float_or_none(derived.get("t2_effective_us")),
-        # Compatibility only: gamma1 historically meant the downward rate, not total T1 decay.
-        "gamma1_per_us": legacy_gamma1 if legacy_gamma1 is not None else gamma_down,
-        "gamma1_per_us_deprecation": (
-            "Legacy alias for gamma_down_per_us; it is not the population relaxation rate."
-        ),
+        "t1_zero_temperature_us": _time_or_none(derived.get("t1_zero_temperature_us")),
+        "t1_effective_us": _time_or_none(derived.get("t1_effective_us")),
+        "tphi_us": _time_or_none(derived.get("tphi_us")),
+        "t2_effective_us": _time_or_none(derived.get("t2_effective_us")),
         "per_qubit": list(derived.get("per_qubit") or []),
         "per_qubit_environment_enabled": bool(
             derived.get("per_qubit_environment_enabled", False)
@@ -421,42 +412,14 @@ def _classical_gate_metadata(gate: GateOperation) -> dict[str, Any]:
 
 def _parameters_response(config: SimulationConfig) -> dict[str, Any]:
     environment = config.environment
-    is_physical = _is_physical_mode(environment)
-    is_normalized = _is_normalized_mode(environment)
-
     return {
         "environment_model": str(environment.model),
-        "input_mode": str(environment.input_mode),
-        "temperature_k": (
-            _safe_float_or_none(environment.temperature_mk / 1000.0)
-            if is_physical
-            else None
-        ),
-        "temperature_mk": (
-            _safe_float_or_none(environment.temperature_mk)
-            if is_physical
-            else None
-        ),
-        "normalized_temperature": (
-            _safe_float_or_none(environment.temperature)
-            if is_normalized
-            else None
-        ),
-        "qubit_frequency_ghz": (
-            _safe_float_or_none(environment.qubit_frequency_ghz)
-            if is_physical
-            else None
-        ),
-        "device_quality": (
-            _safe_float_or_none(environment.device_quality)
-            if is_physical
-            else None
-        ),
-        "flux_noise_phi0": (
-            _safe_float_or_none(environment.flux_noise_phi0)
-            if is_physical
-            else None
-        ),
+        "temperature_k": _safe_float_or_none(environment.temperature_mk / 1000.0),
+        "temperature_mk": _safe_float_or_none(environment.temperature_mk),
+        "qubit_frequency_ghz": _safe_float_or_none(environment.qubit_frequency_ghz),
+        "t1_zero_temperature_us": _time_or_none(environment.t1_zero_temperature_us),
+        "tphi_us": _time_or_none(environment.tphi_us),
+        "ideal_reference": bool(environment.ideal_reference),
         "duration_us": _safe_float(config.duration_us),
         "time_steps": int(config.time_steps),
         "fidelity_threshold": _safe_float(config.fidelity_threshold),
@@ -677,14 +640,6 @@ def _measurement_response(result: SimulationResult) -> dict[str, Any]:
         "conditional_operations": conditional_operations,
         "branch_state_representation": "probability_and_classical_bits_only_v1",
     }
-def _is_physical_mode(environment: EnvironmentConfig) -> bool:
-    return str(environment.input_mode).lower() == "physical"
-
-
-def _is_normalized_mode(environment: EnvironmentConfig) -> bool:
-    return str(environment.input_mode).lower() == "normalized"
-
-
 def _has_fatal_or_error_issue(issues: list[Any]) -> bool:
     for issue in issues:
         level = getattr(issue, "level", None)
@@ -728,6 +683,13 @@ def _safe_float(value: Any) -> float:
     if converted is None:
         raise ValueError("value must be a finite number")
     return converted
+
+
+def _time_or_none(value: Any) -> float | None:
+    """A coherence time; ``None`` stands for an infinite time (no dissipation)."""
+    if value is None or float(value) == float("inf"):
+        return None
+    return _safe_float_or_none(value)
 
 
 def _safe_float_or_none(value: Any) -> float | None:

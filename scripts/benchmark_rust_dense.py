@@ -55,13 +55,10 @@ def benchmark_environment() -> EnvironmentConfig:
     """Return the shared environment documented in the performance page."""
 
     return EnvironmentConfig(
-        input_mode="physical",
         temperature_mk=0.0,
-        flux_noise_phi0=0.0,
         qubit_frequency_ghz=5.0,
-        t1_max_us=10.0,
-        tphi_max_us=10.0,
-        device_quality=1.0,
+        t1_zero_temperature_us=10.0,
+        tphi_us=10.0,
     )
 
 

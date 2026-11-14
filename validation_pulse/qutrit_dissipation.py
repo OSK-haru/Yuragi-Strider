@@ -372,7 +372,8 @@ def _gibbs_case(
     rates = qutrit_dissipation_rates(
         _physical_environment(
             temperature_mk=temperature_mk,
-            device_quality=0.0,
+            t1_zero_temperature_us=1.0,
+            tphi_us=0.9950248756218907,
         ),
         -250.0,
     )
@@ -660,16 +661,16 @@ def _direct_rates(
 def _physical_environment(
     *,
     temperature_mk: float,
-    device_quality: float = 0.8,
+    t1_zero_temperature_us: float = 39.810717055349734,
+    tphi_us: float = 33.20178309308936,
 ) -> SimpleNamespace:
+    # Coherence times equal to the rates of the removed quality/flux inputs (D89), so frozen results still apply.
     return SimpleNamespace(
         input_mode="physical",
-        device_quality=device_quality,
         temperature_mk=temperature_mk,
-        flux_noise_phi0=1e-6,
         qubit_frequency_ghz=5.0,
-        t1_max_us=100.0,
-        tphi_max_us=100.0,
+        t1_zero_temperature_us=t1_zero_temperature_us,
+        tphi_us=tphi_us,
         ideal_reference=False,
     )
 

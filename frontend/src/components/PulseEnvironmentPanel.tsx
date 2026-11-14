@@ -181,7 +181,7 @@ export function PulseEnvironmentPanel({
           </div>
           <h3>量子ビット別校正値</h3>
           <p className="pulse-parameters__model-note">
-            共通の最大 T1・Tφ・読み出し誤差を、各トランズモンの値で上書きします。
+            共通の T1（0 K）・Tφ・読み出し誤差を、各トランズモンの値で上書きします。
           </p>
           <label className="pulse-parameters__calibration-toggle">
             <span>個別校正</span>
@@ -203,8 +203,8 @@ export function PulseEnvironmentPanel({
                 <div className="pulse-parameters__calibration-row" key={index}>
                   <strong>q{index}</strong>
                   {([
-                    ['networkT1MaxUs', '最大 T1 [us]', form.networkT1MaxUs, 0.001, undefined],
-                    ['networkTphiMaxUs', '最大 Tφ [us]', form.networkTphiMaxUs, 0.001, undefined],
+                    ['networkT1Us', 'T1（0 K）[us]', form.networkT1Us, 0.001, undefined],
+                    ['networkTphiUs', 'Tφ [us]', form.networkTphiUs, 0.001, undefined],
                     ['networkReadoutP10', 'p10', form.networkReadoutP10, 0, 1],
                     ['networkReadoutP01', 'p01', form.networkReadoutP01, 0, 1],
                   ] as const).map(([field, label, values, min, max]) => (
@@ -227,9 +227,9 @@ export function PulseEnvironmentPanel({
                   ))}
                 </div>
               ))}
-              {errors.networkT1MaxUs || errors.networkTphiMaxUs || errors.networkReadoutP01 ? (
+              {errors.networkT1Us || errors.networkTphiUs || errors.networkReadoutP01 ? (
                 <p className="pulse-parameters__error">
-                  {errors.networkT1MaxUs ?? errors.networkTphiMaxUs ?? errors.networkReadoutP01}
+                  {errors.networkT1Us ?? errors.networkTphiUs ?? errors.networkReadoutP01}
                 </p>
               ) : null}
             </div>
@@ -383,12 +383,10 @@ export function PulseEnvironmentPanel({
         <h3>{form.environmentMode === 'physical' ? '外界の物理環境' : '外界との結合率'}</h3>
         {form.environmentMode === 'physical' ? (
           <div className="pulse-parameters__grid">
-            <NumberField field="deviceQuality" label="デバイス品質" value={form.deviceQuality} error={errors.deviceQuality} step={0.05} min={0} max={1} disabled={disabled} onChange={setNumber} />
             <NumberField field="temperatureMk" label="温度 [mK]" value={form.temperatureMk} error={errors.temperatureMk} step={1} min={0} disabled={disabled} onChange={setNumber} />
-            <NumberField field="fluxNoisePhi0" label="磁束ノイズ [Phi0]" value={form.fluxNoisePhi0} error={errors.fluxNoisePhi0} step={0.000001} min={0} disabled={disabled} onChange={setNumber} />
             <NumberField field="qubitFrequencyGhz" label="量子ビット周波数 [GHz]" value={form.qubitFrequencyGhz} error={errors.qubitFrequencyGhz} step={0.1} min={0} disabled={disabled} onChange={setNumber} />
-            <NumberField field="t1MaxUs" label="最大 T1 [us]" value={form.t1MaxUs} error={errors.t1MaxUs} step={1} min={0} disabled={disabled} onChange={setNumber} />
-            <NumberField field="tphiMaxUs" label="最大 Tphi [us]" value={form.tphiMaxUs} error={errors.tphiMaxUs} step={1} min={0} disabled={disabled} onChange={setNumber} />
+            <NumberField field="t1ZeroTemperatureUs" label="T1（0 K）[us]" value={form.t1ZeroTemperatureUs} error={errors.t1ZeroTemperatureUs} step={1} min={0} disabled={disabled} onChange={setNumber} />
+            <NumberField field="tphiUs" label="Tφ [us]" value={form.tphiUs} error={errors.tphiUs} step={1} min={0} disabled={disabled} onChange={setNumber} />
           </div>
         ) : (
           <div className="pulse-parameters__grid">

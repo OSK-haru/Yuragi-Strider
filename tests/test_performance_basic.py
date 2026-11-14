@@ -58,8 +58,8 @@ class PerformanceBasicTest(unittest.TestCase):
 def _comparison_config(config):
     return ComparisonConfig(
         circuit=config.circuit,
-        environment_a=EnvironmentConfig(noise_level=0.0),
-        environment_b=EnvironmentConfig(noise_level=0.8),
+        environment_a=EnvironmentConfig(t1_zero_temperature_us=100.0, tphi_us=100.0),
+        environment_b=EnvironmentConfig(t1_zero_temperature_us=2.5, tphi_us=2.5),
         duration_us=config.duration_us,
         time_steps=config.time_steps,
         fidelity_threshold=config.fidelity_threshold,

@@ -103,14 +103,7 @@ def _simple_config() -> SimulationConfig:
                 )
             ],
         ),
-        environment=EnvironmentConfig(
-            input_mode="physical",
-            device_quality=1.0,
-            temperature_mk=0.0,
-            flux_noise_phi0=0.0,
-            t1_max_us=10.0,
-            tphi_max_us=10.0,
-        ),
+        environment=EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_us=10.0, temperature_mk=0.0),
         duration_us=1.0,
         time_steps=11,
         fidelity_threshold=0.9,

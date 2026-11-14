@@ -201,9 +201,10 @@ def _api_payload() -> dict[str, object]:
         "circuit_preset": "bell",
         "simulation_backend": "python_dense",
         "parameters": {
-            "normalized_temperature": 0.2,
-            "normalized_magnetic_field": 0.3,
-            "noise_level": 0.4,
+            "temperature_mk": 28.0,
+            "qubit_frequency_ghz": 5.0,
+            "t1_zero_temperature_us": 15.848931924611133,
+            "tphi_us": 13.68512385279464,
             "duration_us": 2.0,
             "time_steps": 11,
             "fidelity_threshold": 0.9,

@@ -16,148 +16,57 @@ from core.evolution_methods import (
     SUPPORTED_GATE_AWARE_EVOLUTION_METHODS,
 )
 from core.physical_environment import (
-    INPUT_MODE_NORMALIZED,
-    INPUT_MODE_PHYSICAL,
-    NORMALIZED_ENVIRONMENT_MODEL,
-    PHYSICAL_ENVIRONMENT_MODEL,
+    DEFAULT_QUBIT_FREQUENCY_GHZ,
+    DEFAULT_T1_ZERO_TEMPERATURE_US,
+    DEFAULT_TEMPERATURE_MK,
+    DEFAULT_TPHI_US,
     UNIFIED_ENVIRONMENT_MODEL,
-    input_mode_from_legacy_model,
-    normalize_environment_model,
+    reject_removed_fields,
 )
 from core.state_snapshots import SnapshotOptions, StateSnapshot
 
 
-@dataclass(init=False)
+@dataclass
 class EnvironmentConfig:
-    """Environmental inputs for the MVP simulation model."""
+    """Environmental inputs: measurable times, temperature and frequency (see core.physical_environment)."""
 
-    mode: str = "normalized"
-    model: str = UNIFIED_ENVIRONMENT_MODEL
-    input_mode: str = INPUT_MODE_NORMALIZED
-    temperature: float = 0.02
-    magnetic_field: float = 0.0
-    noise_level: float = 0.01
-    observation_strength: float | None = None
-    observation_frequency: float | None = None
-    device_quality: float = 0.5
-    temperature_mk: float = 15.0
-    flux_noise_phi0: float = 1e-6
-    qubit_frequency_ghz: float = 5.0
-    t1_max_us: float = 100.0
-    tphi_max_us: float = 100.0
+    t1_zero_temperature_us: float = DEFAULT_T1_ZERO_TEMPERATURE_US
+    tphi_us: float = DEFAULT_TPHI_US
+    temperature_mk: float = DEFAULT_TEMPERATURE_MK
+    qubit_frequency_ghz: float = DEFAULT_QUBIT_FREQUENCY_GHZ
     per_qubit: list[dict[str, float]] = field(default_factory=list)
     ideal_reference: bool = False
-
-    def __init__(
-        self,
-        mode: str = "normalized",
-        model: str | None = None,
-        input_mode: str | None = None,
-        environment_model: str | None = None,
-        temperature: float | None = None,
-        magnetic_field: float | None = None,
-        noise_level: float = 0.01,
-        observation_strength: float | None = None,
-        observation_frequency: float | None = None,
-        temperature_kelvin: float | None = None,
-        magnetic_field_tesla: float | None = None,
-        device_quality: float = 0.5,
-        temperature_mk: float = 15.0,
-        flux_noise_phi0: float = 1e-6,
-        qubit_frequency_ghz: float = 5.0,
-        t1_max_us: float = 100.0,
-        tphi_max_us: float = 100.0,
-        per_qubit: list[dict[str, float]] | None = None,
-        ideal_reference: bool = False,
-    ) -> None:
-        legacy_model = environment_model if environment_model is not None else model
-        if input_mode is None:
-            input_mode = input_mode_from_legacy_model(legacy_model)
-        if temperature is None:
-            temperature = 0.02 if temperature_kelvin is None else temperature_kelvin
-        if magnetic_field is None:
-            magnetic_field = (
-                0.0
-                if magnetic_field_tesla is None
-                else magnetic_field_tesla
-            )
-
-        self.mode = mode
-        self.model = normalize_environment_model(legacy_model)
-        self.input_mode = input_mode
-        self.temperature = temperature
-        self.magnetic_field = magnetic_field
-        self.noise_level = noise_level
-        self.observation_strength = observation_strength
-        self.observation_frequency = observation_frequency
-        self.device_quality = device_quality
-        self.temperature_mk = temperature_mk
-        self.flux_noise_phi0 = flux_noise_phi0
-        self.qubit_frequency_ghz = qubit_frequency_ghz
-        self.t1_max_us = t1_max_us
-        self.tphi_max_us = tphi_max_us
-        self.per_qubit = list(per_qubit or [])
-        self.ideal_reference = ideal_reference
-        self.__post_init__()
+    model: str = UNIFIED_ENVIRONMENT_MODEL
+    observation_strength: float | None = None
+    observation_frequency: float | None = None
 
     def __post_init__(self) -> None:
-        self.mode = str(self.mode)
-        if not self.mode:
-            raise ValueError("mode must not be empty")
-        self.model = normalize_environment_model(self.model)
-        if not self.model:
-            raise ValueError("model must not be empty")
-        self.input_mode = str(self.input_mode)
-        if not self.input_mode:
-            raise ValueError("input_mode must not be empty")
-
-        self.temperature = _float(self.temperature, "temperature")
-        self.magnetic_field = _float(self.magnetic_field, "magnetic_field")
-        self.noise_level = _float(self.noise_level, "noise_level")
-        self.observation_strength = _optional_float(
-            self.observation_strength,
-            "observation_strength",
-        )
-        self.observation_frequency = _optional_float(
-            self.observation_frequency,
-            "observation_frequency",
-        )
-        self.device_quality = _float(self.device_quality, "device_quality")
+        self.model = str(self.model)
+        if self.model != UNIFIED_ENVIRONMENT_MODEL:
+            raise ValueError(f"environment model must be {UNIFIED_ENVIRONMENT_MODEL!r}, got {self.model!r}")
+        # Values are only converted here; core.validation reports out-of-range values as issues.
+        self.t1_zero_temperature_us = _time_float(self.t1_zero_temperature_us, "t1_zero_temperature_us")
+        self.tphi_us = _time_float(self.tphi_us, "tphi_us")
         self.temperature_mk = _float(self.temperature_mk, "temperature_mk")
-        self.flux_noise_phi0 = _float(self.flux_noise_phi0, "flux_noise_phi0")
-        self.qubit_frequency_ghz = _float(
-            self.qubit_frequency_ghz,
-            "qubit_frequency_ghz",
-        )
-        self.t1_max_us = _float(self.t1_max_us, "t1_max_us")
-        self.tphi_max_us = _float(self.tphi_max_us, "tphi_max_us")
+        self.qubit_frequency_ghz = _float(self.qubit_frequency_ghz, "qubit_frequency_ghz")
+        self.observation_strength = _optional_float(self.observation_strength, "observation_strength")
+        self.observation_frequency = _optional_float(self.observation_frequency, "observation_frequency")
         normalized_per_qubit: list[dict[str, float]] = []
         for index, entry in enumerate(self.per_qubit):
-            entry = _require_mapping(entry, f"environment.per_qubit[{index}]")
-            t1_max_us = _float(
-                entry.get("t1_max_us", self.t1_max_us),
-                f"environment.per_qubit[{index}].t1_max_us",
-            )
-            tphi_max_us = _float(
-                entry.get("tphi_max_us", self.tphi_max_us),
-                f"environment.per_qubit[{index}].tphi_max_us",
-            )
-            if t1_max_us <= 0.0 or tphi_max_us <= 0.0:
-                raise ValueError("per-qubit T1 and Tphi maxima must be positive")
+            where = f"environment.per_qubit[{index}]"
+            entry = _require_mapping(entry, where)
+            reject_removed_fields(entry, where)
+            unknown = sorted(set(entry) - {"t1_zero_temperature_us", "tphi_us"})
+            if unknown:
+                raise ValueError(f"{where}: unknown fields {', '.join(unknown)}")
             normalized_per_qubit.append({
-                "t1_max_us": t1_max_us,
-                "tphi_max_us": tphi_max_us,
+                "t1_zero_temperature_us": _time_float(
+                    entry.get("t1_zero_temperature_us", self.t1_zero_temperature_us),
+                    f"{where}.t1_zero_temperature_us"),
+                "tphi_us": _time_float(entry.get("tphi_us", self.tphi_us), f"{where}.tphi_us"),
             })
         self.per_qubit = normalized_per_qubit
         self.ideal_reference = bool(self.ideal_reference)
-
-    @property
-    def temperature_kelvin(self) -> float:
-        return self.temperature
-
-    @property
-    def magnetic_field_tesla(self) -> float:
-        return self.magnetic_field
 
     @property
     def environment_model(self) -> str:
@@ -165,112 +74,60 @@ class EnvironmentConfig:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "mode": self.mode,
             "model": self.model,
-            "input_mode": self.input_mode,
-            "normalized": {
-                "temperature_parameter": self.temperature,
-                "magnetic_field_parameter": self.magnetic_field,
-                "noise_level": self.noise_level,
-            },
-            "physical": {
-                "device_quality": self.device_quality,
-                "temperature_mk": self.temperature_mk,
-                "flux_noise_phi0": self.flux_noise_phi0,
-                "qubit_frequency_ghz": self.qubit_frequency_ghz,
-                "t1_max_us": self.t1_max_us,
-                "tphi_max_us": self.tphi_max_us,
-                "per_qubit": [dict(entry) for entry in self.per_qubit],
-                "ideal_reference": self.ideal_reference,
-            },
+            "t1_zero_temperature_us": _json_time(self.t1_zero_temperature_us),
+            "tphi_us": _json_time(self.tphi_us),
+            "temperature_mk": self.temperature_mk,
+            "qubit_frequency_ghz": self.qubit_frequency_ghz,
+            "per_qubit": [{key: _json_time(value) for key, value in entry.items()} for entry in self.per_qubit],
+            "ideal_reference": self.ideal_reference,
             "observation_strength": self.observation_strength,
             "observation_frequency": self.observation_frequency,
-            "temperature": self.temperature,
-            "magnetic_field": self.magnetic_field,
-            "noise_level": self.noise_level,
-            "device_quality": self.device_quality,
-            "temperature_mk": self.temperature_mk,
-            "flux_noise_phi0": self.flux_noise_phi0,
-            "qubit_frequency_ghz": self.qubit_frequency_ghz,
-            "t1_max_us": self.t1_max_us,
-            "tphi_max_us": self.tphi_max_us,
-            "per_qubit": [dict(entry) for entry in self.per_qubit],
-            "ideal_reference": self.ideal_reference,
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "EnvironmentConfig":
         data = _require_mapping(data, "environment config")
-        normalized = data.get("normalized") or {}
-        physical = data.get("physical") or {}
-        if not isinstance(normalized, Mapping):
-            raise TypeError("environment.normalized must be a mapping")
-        if not isinstance(physical, Mapping):
-            raise TypeError("environment.physical must be a mapping")
-        legacy_model = data.get("environment_model", data.get("model"))
-        input_mode = data.get("input_mode")
-        if input_mode is None and legacy_model in {
-            NORMALIZED_ENVIRONMENT_MODEL,
-            PHYSICAL_ENVIRONMENT_MODEL,
-        }:
-            input_mode = input_mode_from_legacy_model(legacy_model)
+        reject_removed_fields(data, "environment")
+        known = {"model", "t1_zero_temperature_us", "tphi_us", "temperature_mk", "qubit_frequency_ghz",
+                 "per_qubit", "ideal_reference", "observation_strength", "observation_frequency"}
+        unknown = sorted(set(data) - known)
+        if unknown:
+            raise ValueError(f"environment: unknown fields {', '.join(unknown)}")
         return cls(
-            mode=data.get("mode", "normalized"),
-            model=data.get("model"),
-            input_mode=input_mode,
-            environment_model=data.get("environment_model"),
-            temperature=data.get(
-                "temperature",
-                data.get(
-                    "temperature_kelvin",
-                    normalized.get("temperature_parameter", 0.02),
-                ),
-            ),
-            magnetic_field=data.get(
-                "magnetic_field",
-                data.get(
-                    "magnetic_field_tesla",
-                    normalized.get("magnetic_field_parameter", 0.0),
-                ),
-            ),
-            noise_level=data.get(
-                "noise_level",
-                normalized.get("noise_level", 0.01),
-            ),
+            t1_zero_temperature_us=data.get("t1_zero_temperature_us", DEFAULT_T1_ZERO_TEMPERATURE_US),
+            tphi_us=data.get("tphi_us", DEFAULT_TPHI_US),
+            temperature_mk=data.get("temperature_mk", DEFAULT_TEMPERATURE_MK),
+            qubit_frequency_ghz=data.get("qubit_frequency_ghz", DEFAULT_QUBIT_FREQUENCY_GHZ),
+            per_qubit=list(data.get("per_qubit") or []),
+            ideal_reference=data.get("ideal_reference", False),
+            model=data.get("model", UNIFIED_ENVIRONMENT_MODEL),
             observation_strength=data.get("observation_strength"),
             observation_frequency=data.get("observation_frequency"),
-            device_quality=data.get(
-                "device_quality",
-                physical.get("device_quality", 0.5),
-            ),
-            temperature_mk=data.get(
-                "temperature_mk",
-                physical.get("temperature_mk", 15.0),
-            ),
-            flux_noise_phi0=data.get(
-                "flux_noise_phi0",
-                physical.get("flux_noise_phi0", 1e-6),
-            ),
-            qubit_frequency_ghz=data.get(
-                "qubit_frequency_ghz",
-                physical.get("qubit_frequency_ghz", 5.0),
-            ),
-            t1_max_us=data.get(
-                "t1_max_us",
-                physical.get("t1_max_us", 100.0),
-            ),
-            tphi_max_us=data.get(
-                "tphi_max_us",
-                physical.get("tphi_max_us", 100.0),
-            ),
-            per_qubit=list(
-                data.get("per_qubit", physical.get("per_qubit", [])) or []
-            ),
-            ideal_reference=data.get(
-                "ideal_reference",
-                physical.get("ideal_reference", False),
-            ),
         )
+
+
+def _time_float(value: Any, name: str) -> float:
+    """A coherence time: finite, or infinite for no dissipation."""
+    value = _parse_time(value)
+    try:
+        converted = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a number") from exc
+    if math.isnan(converted):
+        raise ValueError(f"{name} must not be NaN")
+    return converted
+
+
+def _parse_time(value: Any) -> Any:
+    """JSON has no infinity: ``None`` or ``"inf"`` mean an infinite time (no dissipation)."""
+    if value is None or (isinstance(value, str) and value.strip().lower() in {"inf", "infinity"}):
+        return math.inf
+    return value
+
+
+def _json_time(value: float) -> float | None:
+    return None if math.isinf(value) else value
 
 
 @dataclass

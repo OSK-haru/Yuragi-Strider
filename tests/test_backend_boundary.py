@@ -156,7 +156,7 @@ def _config(
 ) -> SimulationConfig:
     return SimulationConfig(
         circuit=CircuitConfig.one_qubit_h(),
-        environment=EnvironmentConfig(input_mode="physical", ideal_reference=True),
+        environment=EnvironmentConfig(temperature_mk=15.0, ideal_reference=True),
         duration_us=1.0,
         time_steps=21,
         fidelity_threshold=0.9,

@@ -25,13 +25,10 @@ def run_ramsey_sweep(
     readout_error: Any | None,
 ) -> dict[str, object]:
     environment = EnvironmentConfig(
-        input_mode="physical",
-        device_quality=_required(parameters.device_quality, "device_quality"),
         temperature_mk=_required(parameters.temperature_mk, "temperature_mk"),
-        flux_noise_phi0=_required(parameters.flux_noise_phi0, "flux_noise_phi0"),
         qubit_frequency_ghz=_required(parameters.qubit_frequency_ghz, "qubit_frequency_ghz"),
-        t1_max_us=_required(parameters.t1_max_us, "t1_max_us"),
-        tphi_max_us=_required(parameters.tphi_max_us, "tphi_max_us"),
+        t1_zero_temperature_us=_required(parameters.t1_zero_temperature_us, "t1_zero_temperature_us"),
+        tphi_us=_required(parameters.tphi_us, "tphi_us"),
         ideal_reference=False,
     )
     delays = [

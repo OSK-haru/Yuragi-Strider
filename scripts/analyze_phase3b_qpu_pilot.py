@@ -178,13 +178,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("T1, T2, and gate duration must be positive")
     tphi_us = _tphi_from_t1_t2(args.t1_us, args.t2_us)
     environment = EnvironmentConfig(
-        input_mode="physical",
-        device_quality=1.0,
         temperature_mk=args.temperature_mk,
-        flux_noise_phi0=0.0,
         qubit_frequency_ghz=args.qubit_frequency_ghz,
-        t1_max_us=args.t1_us,
-        tphi_max_us=tphi_us,
+        t1_zero_temperature_us=args.t1_us,
+        tphi_us=tphi_us,
     )
 
     rows: list[dict[str, Any]] = []
@@ -238,9 +235,6 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "temperature_mk": args.temperature_mk,
             "qubit_frequency_ghz": args.qubit_frequency_ghz,
             "logical_gate_duration_us": args.gate_duration_us,
-            "model_input_mode": "physical",
-            "model_device_quality": 1.0,
-            "flux_noise_phi0": 0.0,
             "model_refit": False,
         },
         "rows": rows,

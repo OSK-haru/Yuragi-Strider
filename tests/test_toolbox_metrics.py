@@ -155,7 +155,6 @@ class ToolboxSpecTests(unittest.TestCase):
 def _bell_request(toolbox: dict[str, object]) -> dict[str, object]:
     return {
         "simulation_backend": "python_dense",
-        "input_mode": "physical",
         "circuit_config": {
             "logical_qubits": 2,
             "initial_states": ["0", "0"],
@@ -165,12 +164,10 @@ def _bell_request(toolbox: dict[str, object]) -> dict[str, object]:
             ],
         },
         "parameters": {
-            "device_quality": 0.8,
+            "t1_zero_temperature_us": 10.98560543306118,
+            "tphi_us": 10.413606568573751,
             "temperature_mk": 15.0,
-            "flux_noise_phi0": 1e-6,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 20.0,
-            "tphi_max_us": 20.0,
             "duration_us": 1.0,
             "time_steps": 21,
             "fidelity_threshold": 0.9,

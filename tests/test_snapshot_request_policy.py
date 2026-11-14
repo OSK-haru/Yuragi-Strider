@@ -88,11 +88,11 @@ class SnapshotRequestPolicyTests(unittest.TestCase):
         base = {
             "circuit_preset": "bell",
             "simulation_backend": "python_dense",
-            "input_mode": "normalized",
             "parameters": {
-                "normalized_temperature": 0.2,
-                "normalized_magnetic_field": 0.1,
-                "noise_level": 0.1,
+                "temperature_mk": 28.0,
+                "qubit_frequency_ghz": 5.0,
+                "t1_zero_temperature_us": 63.09573444801933,
+                "tphi_us": 45.159858934213595,
                 "duration_us": 2.0,
                 "time_steps": 11,
                 "fidelity_threshold": 0.9,

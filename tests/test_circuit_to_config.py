@@ -23,10 +23,9 @@ class CircuitToConfigTest(unittest.TestCase):
         config = SimulationConfig(
             circuit=state.to_config(),
             environment=EnvironmentConfig(
-                mode="normalized",
-                temperature=0.02,
-                magnetic_field=0.0,
-                noise_level=0.01,
+                t1_zero_temperature_us=95.49925860214358,
+                tphi_us=64.63587019060685,
+                temperature_mk=11.8,
             ),
             duration_us=20.0,
             time_steps=101,
@@ -63,10 +62,9 @@ class CircuitToConfigTest(unittest.TestCase):
         config = SimulationConfig(
             circuit=state.to_config(),
             environment=EnvironmentConfig(
-                mode="normalized",
-                temperature=0.02,
-                magnetic_field=0.0,
-                noise_level=0.01,
+                t1_zero_temperature_us=95.49925860214358,
+                tphi_us=64.63587019060685,
+                temperature_mk=11.8,
             ),
             duration_us=20.0,
             time_steps=101,

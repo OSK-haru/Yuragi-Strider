@@ -32,7 +32,7 @@ from api.t1_sweep_service import run_t1_sweep
 from api.ramsey_sweep_service import run_ramsey_sweep
 from core.capabilities import DECLARED_PULSE_MODELS, PULSE_MODEL_STATUSES
 from core.circuit_model import CircuitAnnotation, CircuitConfig, GateColumn, GateOperation
-from core.physical_environment import INPUT_MODE_NORMALIZED, INPUT_MODE_PHYSICAL
+from core.physical_environment import reject_removed_fields
 from core.results import EnvironmentConfig, SimulationConfig
 from core.gate_compiler import compile_gate_aware_circuit
 from core.process_characterization import (
@@ -499,28 +499,42 @@ class ReadoutErrorRequest(BaseModel):
     per_qubit: list[ReadoutErrorQubitRequest] = Field(default_factory=list)
 
 
-class QubitCoherenceRequest(BaseModel):
-    """Per-qubit coherence maxima overriding the shared physical defaults."""
+REQUIRED_ENVIRONMENT_PARAMETERS = ("temperature_mk", "qubit_frequency_ghz", "t1_zero_temperature_us", "tphi_us")
 
-    t1_max_us: float = Field(gt=0.0)
-    tphi_max_us: float = Field(gt=0.0)
+
+class QubitCoherenceRequest(BaseModel):
+    """Per-qubit coherence times overriding the shared values."""
+
+    t1_zero_temperature_us: float = Field(gt=0.0)
+    tphi_us: float = Field(gt=0.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed(cls, values: object) -> object:
+        if isinstance(values, dict):
+            reject_removed_fields(values, "parameters.per_qubit[]")
+        return values
 
 
 class SimulationParametersRequest(BaseModel):
-    normalized_temperature: float | None = Field(default=None, ge=0.0, le=1.0)
-    normalized_magnetic_field: float | None = Field(default=None, ge=0.0, le=1.0)
-    noise_level: float | None = Field(default=None, ge=0.0, le=1.0)
-    device_quality: float | None = Field(default=None, ge=0.0, le=1.0)
+    """Environment and run parameters. The coherence times are measurable inputs (decision D89)."""
+
     temperature_mk: float | None = Field(default=None, ge=0.0)
-    flux_noise_phi0: float | None = Field(default=None, ge=0.0)
     qubit_frequency_ghz: float | None = Field(default=None, gt=0.0)
-    t1_max_us: float | None = Field(default=None, gt=0.0)
-    tphi_max_us: float | None = Field(default=None, gt=0.0)
+    t1_zero_temperature_us: float | None = Field(default=None, gt=0.0)
+    tphi_us: float | None = Field(default=None, gt=0.0)
     per_qubit: list[QubitCoherenceRequest] = Field(default_factory=list, max_length=18)
     ideal_reference: bool = False
     duration_us: float | None = Field(default=None, gt=0.0, le=MAX_API_DURATION_US)
     time_steps: int | None = Field(default=None, ge=2, le=MAX_API_TIME_STEPS)
     fidelity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed(cls, values: object) -> object:
+        if isinstance(values, dict):
+            reject_removed_fields(values, "parameters")
+        return values
 
 
 class CircuitGateParamsRequest(BaseModel):
@@ -852,7 +866,6 @@ class SimulateRequest(BaseModel):
     compilation_mode: Literal["logical_direct", "auto_decompose"] = (
         "logical_direct"
     )
-    input_mode: Literal["normalized", "physical"] = INPUT_MODE_NORMALIZED
     gate_duration_defaults: GateDurationDefaultsRequest = Field(
         default_factory=GateDurationDefaultsRequest
     )
@@ -868,28 +881,22 @@ class SimulateRequest(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def validate_parameters_for_input_mode(cls, values: object) -> object:
+    def validate_required_parameters(cls, values: object) -> object:
         # A "before" validator sees the raw input, which is a mapping for the
         # JSON request path but not for e.g. model_validate on an instance.
         if not isinstance(values, dict):
             return values
         if values.get("circuit_config") is None and values.get("circuit_preset") is None:
             raise ValueError("circuit_preset or circuit_config is required")
-        input_mode = values.get("input_mode", INPUT_MODE_NORMALIZED)
-        if input_mode not in {INPUT_MODE_NORMALIZED, INPUT_MODE_PHYSICAL}:
-            return values
+        reject_removed_fields(values, "request")
         parameters = values.get("parameters")
         if not isinstance(parameters, dict):
             return values
-        required_fields = ["duration_us", "time_steps", "fidelity_threshold"]
-        required_fields.extend(
-            ["normalized_temperature", "normalized_magnetic_field", "noise_level"]
-            if input_mode == INPUT_MODE_NORMALIZED
-            else ["device_quality", "temperature_mk", "flux_noise_phi0", "qubit_frequency_ghz", "t1_max_us", "tphi_max_us"]
-        )
-        missing_fields = [field_name for field_name in required_fields if parameters.get(field_name) is None]
+        missing_fields = [field_name for field_name in REQUIRED_ENVIRONMENT_PARAMETERS
+                          + ("duration_us", "time_steps", "fidelity_threshold")
+                          if parameters.get(field_name) is None]
         if missing_fields:
-            raise ValueError(f"parameters missing required fields for {input_mode} input_mode: {', '.join(missing_fields)}")
+            raise ValueError(f"parameters missing required fields: {', '.join(missing_fields)}")
         snapshot_options = values.get("snapshot_options")
         if isinstance(snapshot_options, dict):
             duration_us = parameters.get("duration_us")
@@ -907,8 +914,6 @@ class SimulateRequest(BaseModel):
             )
         )
         if self.parameters.per_qubit:
-            if self.input_mode != INPUT_MODE_PHYSICAL:
-                raise ValueError("parameters.per_qubit requires physical input_mode")
             if len(self.parameters.per_qubit) != qubit_count:
                 raise ValueError(
                     "parameters.per_qubit must match circuit logical_qubits "
@@ -955,15 +960,8 @@ class T1SweepRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_t1_sweep(self) -> "T1SweepRequest":
-        required = (
-            "device_quality",
-            "temperature_mk",
-            "flux_noise_phi0",
-            "qubit_frequency_ghz",
-            "t1_max_us",
-            "tphi_max_us",
-        )
-        missing = [name for name in required if getattr(self.parameters, name) is None]
+        missing = [name for name in REQUIRED_ENVIRONMENT_PARAMETERS
+                   if getattr(self.parameters, name) is None]
         if missing:
             raise ValueError(
                 "parameters missing required physical fields for T1 sweep: "
@@ -1031,15 +1029,8 @@ class RamseySweepRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_ramsey_sweep(self) -> "RamseySweepRequest":
-        required = (
-            "device_quality",
-            "temperature_mk",
-            "flux_noise_phi0",
-            "qubit_frequency_ghz",
-            "t1_max_us",
-            "tphi_max_us",
-        )
-        missing = [name for name in required if getattr(self.parameters, name) is None]
+        missing = [name for name in REQUIRED_ENVIRONMENT_PARAMETERS
+                   if getattr(self.parameters, name) is None]
         if missing:
             raise ValueError(
                 "parameters missing required physical fields for Ramsey sweep: "
@@ -1315,6 +1306,21 @@ def build_custom_circuit(
     )
 
 
+def environment_from_parameters(parameters: SimulationParametersRequest) -> EnvironmentConfig:
+    """The environment of a request: measurable coherence times, temperature and frequency."""
+    return EnvironmentConfig(
+        temperature_mk=_required(parameters.temperature_mk, "temperature_mk"),
+        qubit_frequency_ghz=_required(parameters.qubit_frequency_ghz, "qubit_frequency_ghz"),
+        t1_zero_temperature_us=_required(parameters.t1_zero_temperature_us, "t1_zero_temperature_us"),
+        tphi_us=_required(parameters.tphi_us, "tphi_us"),
+        per_qubit=[
+            {"t1_zero_temperature_us": entry.t1_zero_temperature_us, "tphi_us": entry.tphi_us}
+            for entry in parameters.per_qubit
+        ],
+        ideal_reference=parameters.ideal_reference,
+    )
+
+
 def build_example_config() -> SimulationConfig:
     return SimulationConfig(
         circuit=build_bell_circuit(),
@@ -1344,40 +1350,7 @@ def _build_requested_circuit(
 
 def build_config_from_simulate_request(request: SimulateRequest) -> SimulationConfig:
     parameters = request.parameters
-    if request.input_mode == INPUT_MODE_PHYSICAL:
-        environment = EnvironmentConfig(
-            input_mode=INPUT_MODE_PHYSICAL,
-            device_quality=_required(parameters.device_quality, "device_quality"),
-            temperature_mk=_required(parameters.temperature_mk, "temperature_mk"),
-            flux_noise_phi0=_required(parameters.flux_noise_phi0, "flux_noise_phi0"),
-            qubit_frequency_ghz=_required(
-                parameters.qubit_frequency_ghz,
-                "qubit_frequency_ghz",
-            ),
-            t1_max_us=_required(parameters.t1_max_us, "t1_max_us"),
-            tphi_max_us=_required(parameters.tphi_max_us, "tphi_max_us"),
-            per_qubit=[
-                {
-                    "t1_max_us": entry.t1_max_us,
-                    "tphi_max_us": entry.tphi_max_us,
-                }
-                for entry in parameters.per_qubit
-            ],
-            ideal_reference=parameters.ideal_reference,
-        )
-    else:
-        environment = EnvironmentConfig(
-            input_mode=INPUT_MODE_NORMALIZED,
-            temperature=_required(
-                parameters.normalized_temperature,
-                "normalized_temperature",
-            ),
-            magnetic_field=_required(
-                parameters.normalized_magnetic_field,
-                "normalized_magnetic_field",
-            ),
-            noise_level=_required(parameters.noise_level, "noise_level"),
-        )
+    environment = environment_from_parameters(parameters)
 
     circuit = _build_requested_circuit(
         request.circuit_config,

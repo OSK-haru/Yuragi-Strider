@@ -287,15 +287,15 @@ const calibratedNetworkPayload = buildTransmonNetworkPayload(
     ...networkForm,
     readoutErrorEnabled: true,
     networkPerQubitCalibrationEnabled: true,
-    networkT1MaxUs: [50, 75, 125, 100],
-    networkTphiMaxUs: [60, 90, 140, 100],
+    networkT1Us: [50, 75, 125, 100],
+    networkTphiUs: [60, 90, 140, 100],
     networkReadoutP10: [0.01, 0.02, 0.03, 0.04],
     networkReadoutP01: [0.04, 0.03, 0.02, 0.01],
   },
   networkCircuit,
 )
 assert(calibratedNetworkPayload.environment.per_qubit.length === 3, 'network coherence calibration count mismatch')
-assert(calibratedNetworkPayload.environment.per_qubit[1].t1_max_us === 75, 'network q1 T1 calibration missing')
+assert(calibratedNetworkPayload.environment.per_qubit[1].t1_zero_temperature_us === 75, 'network q1 T1 calibration missing')
 assert(calibratedNetworkPayload.readout_error.per_qubit.length === 3, 'network readout calibration count mismatch')
 assert(calibratedNetworkPayload.readout_error.per_qubit[2].p10 === 0.03, 'network q2 readout calibration missing')
 

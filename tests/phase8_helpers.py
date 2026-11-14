@@ -4,16 +4,12 @@ from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.results import EnvironmentConfig, SimulationConfig
 
 
-def environment(noise_level: float = 0.0) -> EnvironmentConfig:
-    return EnvironmentConfig(
-        mode="normalized",
-        temperature=0.0,
-        magnetic_field=0.0,
-        noise_level=noise_level,
-    )
+def environment() -> EnvironmentConfig:
+    # The rates of the removed normalized default (10 mK, flux term 0.005/us), kept for the stored values.
+    return EnvironmentConfig(temperature_mk=10.0, t1_zero_temperature_us=100.0, tphi_us=1.0 / 0.015)
 
 
-def one_qubit_gate_config(gate_type: str, noise_level: float = 0.0) -> SimulationConfig:
+def one_qubit_gate_config(gate_type: str) -> SimulationConfig:
     return SimulationConfig(
         circuit=CircuitConfig(
             logical_qubits=1,
@@ -32,14 +28,14 @@ def one_qubit_gate_config(gate_type: str, noise_level: float = 0.0) -> Simulatio
                 )
             ],
         ),
-        environment=environment(noise_level),
+        environment=environment(),
         duration_us=0.001,
         time_steps=3,
         fidelity_threshold=0.9,
     )
 
 
-def bell_config(noise_level: float = 0.0) -> SimulationConfig:
+def bell_config() -> SimulationConfig:
     return SimulationConfig(
         circuit=CircuitConfig(
             logical_qubits=2,
@@ -69,7 +65,7 @@ def bell_config(noise_level: float = 0.0) -> SimulationConfig:
                 ),
             ],
         ),
-        environment=environment(noise_level),
+        environment=environment(),
         duration_us=0.001,
         time_steps=3,
         fidelity_threshold=0.9,

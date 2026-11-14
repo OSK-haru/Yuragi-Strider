@@ -81,7 +81,6 @@ type SimulateRequestPayload = {
   simulation_backend: SimulationBackend
   evolution_method: GateAwareEvolutionMethod
   compilation_mode: GateCompilationMode
-  input_mode: 'physical'
   circuit_config: ReturnType<typeof circuitEditorStateToConfig>
   gate_duration_defaults: GateDurationDefaults
   measurement_options: MeasurementOptions
@@ -92,7 +91,7 @@ type SimulateRequestPayload = {
   }
   snapshot_options: SnapshotOptions
   parameters: SimulateRequestParameters & {
-    per_qubit?: Array<{ t1_max_us: number; tphi_max_us: number }>
+    per_qubit?: Array<{ t1_zero_temperature_us: number; tphi_us: number }>
   }
   toolbox?: Record<string, unknown>
 }
@@ -169,11 +168,7 @@ function validateSimulationParameters(parameters: SimulateRequestParameters): {
   const errors: SimulateRequestParameterErrors = {}
 
   const validateZeroToOne = (
-    name: keyof Pick<
-      SimulateRequestParameters,
-      | 'device_quality'
-      | 'fidelity_threshold'
-    >,
+    name: keyof Pick<SimulateRequestParameters, 'fidelity_threshold'>,
     label: string,
   ) => {
     const value = parameters[name]
@@ -182,7 +177,6 @@ function validateSimulationParameters(parameters: SimulateRequestParameters): {
     }
   }
 
-  validateZeroToOne('device_quality', 'デバイス品質')
   validateZeroToOne('fidelity_threshold', '忠実度のしきい値')
 
   if (!Number.isFinite(parameters.temperature_mk)) {
@@ -191,28 +185,22 @@ function validateSimulationParameters(parameters: SimulateRequestParameters): {
     errors.temperature_mk = '温度は 0 mK 以上で入力してください。'
   }
 
-  if (!Number.isFinite(parameters.flux_noise_phi0)) {
-    errors.flux_noise_phi0 = '磁束ノイズは有限の数値で入力してください。'
-  } else if (parameters.flux_noise_phi0 < 0) {
-    errors.flux_noise_phi0 = '磁束ノイズは 0 以上で入力してください。'
-  }
-
   if (!Number.isFinite(parameters.qubit_frequency_ghz)) {
     errors.qubit_frequency_ghz = '量子ビット周波数は有限の数値で入力してください。'
   } else if (parameters.qubit_frequency_ghz <= 0) {
     errors.qubit_frequency_ghz = '量子ビット周波数は 0 GHz より大きい値で入力してください。'
   }
 
-  if (!Number.isFinite(parameters.t1_max_us)) {
-    errors.t1_max_us = '最大 T1 は有限の数値で入力してください。'
-  } else if (parameters.t1_max_us <= 0) {
-    errors.t1_max_us = '最大 T1 は 0 us より大きい値で入力してください。'
+  if (!Number.isFinite(parameters.t1_zero_temperature_us)) {
+    errors.t1_zero_temperature_us = 'T1（0 K）は有限の数値で入力してください。'
+  } else if (parameters.t1_zero_temperature_us <= 0) {
+    errors.t1_zero_temperature_us = 'T1（0 K）は 0 us より大きい値で入力してください。'
   }
 
-  if (!Number.isFinite(parameters.tphi_max_us)) {
-    errors.tphi_max_us = '最大 Tφ は有限の数値で入力してください。'
-  } else if (parameters.tphi_max_us <= 0) {
-    errors.tphi_max_us = '最大 Tφ は 0 us より大きい値で入力してください。'
+  if (!Number.isFinite(parameters.tphi_us)) {
+    errors.tphi_us = 'Tφ は有限の数値で入力してください。'
+  } else if (parameters.tphi_us <= 0) {
+    errors.tphi_us = 'Tφ は 0 us より大きい値で入力してください。'
   }
 
   if (!Number.isFinite(parameters.duration_us)) {
@@ -260,8 +248,8 @@ function normalizePerQubitCalibration(
   return {
     ...settings,
     values: Array.from({ length: qubitCount }, (_, index) => settings.values[index] ?? ({
-      t1_max_us: parameters.t1_max_us,
-      tphi_max_us: parameters.tphi_max_us,
+      t1_zero_temperature_us: parameters.t1_zero_temperature_us,
+      tphi_us: parameters.tphi_us,
       p10: readoutError.p10,
       p01: readoutError.p01,
     })),
@@ -275,11 +263,11 @@ function validatePerQubitCalibration(
   if (!settings.enabled) return null
   for (let index = 0; index < settings.values.length; index += 1) {
     const entry = settings.values[index]
-    if (!Number.isFinite(entry.t1_max_us) || entry.t1_max_us <= 0) {
-      return `q${index} の T1 max は0より大きい有限値にしてください。`
+    if (!Number.isFinite(entry.t1_zero_temperature_us) || entry.t1_zero_temperature_us <= 0) {
+      return `q${index} の T1（0 K）は0より大きい有限値にしてください。`
     }
-    if (!Number.isFinite(entry.tphi_max_us) || entry.tphi_max_us <= 0) {
-      return `q${index} の Tφ max は0より大きい有限値にしてください。`
+    if (!Number.isFinite(entry.tphi_us) || entry.tphi_us <= 0) {
+      return `q${index} の Tφ は0より大きい有限値にしてください。`
     }
     if (readoutEnabled && (
       !Number.isFinite(entry.p10) || !Number.isFinite(entry.p01)
@@ -615,8 +603,8 @@ export function SimulatePage({
     [updateSettings],
   )
   const toolboxSweepDelays = useMemo(
-    () => resolvedSweepDelays(toolboxSettings, simulationParameters.t1_max_us, simulationParameters.tphi_max_us),
-    [toolboxSettings, simulationParameters.t1_max_us, simulationParameters.tphi_max_us],
+    () => resolvedSweepDelays(toolboxSettings, simulationParameters.t1_zero_temperature_us, simulationParameters.tphi_us),
+    [toolboxSettings, simulationParameters.t1_zero_temperature_us, simulationParameters.tphi_us],
   )
   const toolboxCheck = useMemo(
     () => checkToolbox(toolboxSettings, circuitEditorStateToConfig(circuitState), toolboxSweepDelays),
@@ -876,7 +864,6 @@ export function SimulatePage({
         simulation_backend: simulationBackend,
         evolution_method: evolutionMethod,
         compilation_mode: compilationMode,
-        input_mode: 'physical',
         circuit_config: circuitConfig,
         gate_duration_defaults: gateDurationDefaults,
         measurement_options: defaultMeasurementOptions,
@@ -893,9 +880,9 @@ export function SimulatePage({
         parameters: {
           ...simulationParameters,
           ...(resolvedPerQubitCalibration.enabled ? {
-            per_qubit: resolvedPerQubitCalibration.values.map(({ t1_max_us, tphi_max_us }) => ({
-              t1_max_us,
-              tphi_max_us,
+            per_qubit: resolvedPerQubitCalibration.values.map(({ t1_zero_temperature_us, tphi_us }) => ({
+              t1_zero_temperature_us,
+              tphi_us,
             })),
           } : {}),
         },
@@ -977,7 +964,7 @@ export function SimulatePage({
       recordRun({
         fidelity: parsed.summary.final_fidelity,
         purity: parsed.summary.final_purity,
-        t1Us: simulationParameters.t1_max_us,
+        t1Us: simulationParameters.t1_zero_temperature_us,
         durationUs: simulationParameters.duration_us,
       })
     } catch (error) {

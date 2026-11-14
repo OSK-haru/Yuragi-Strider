@@ -48,7 +48,6 @@ from core.attack_simulation.declared_world_clock import WorldClockSettings
 from core.attack_simulation.declared_world_clock import CatchUpMonotonicSource
 from core.attack_simulation.live_time_policy import EXPLICIT_WAIT, HOST_CLOCK, parse_live_time_policy
 from core.attack_simulation.workload_config import parse_workload_plan
-from core.device_profiles import GenericTransmonProfile
 from core.experimental_isolation_physics.idle_evolution import (
     IdleQubitSpec, IndependentIdleModel,
 )
@@ -56,10 +55,7 @@ from core.experimental_isolation_physics.imperfect_reset import ImperfectResetSp
 from core.experimental_isolation_physics.reset_model import (
     PerQubitPhenomenologicalResetModel, PhenomenologicalResetModel, ResetModelRegistry,
 )
-from core.physical_environment import (
-    INPUT_MODE_PHYSICAL, UNIFIED_ENVIRONMENT_MODEL, PhysicalEnvironmentInputs,
-    compute_environment_rates_per_qubit,
-)
+from core.physical_environment import UNIFIED_ENVIRONMENT_MODEL, compute_environment_rates_per_qubit
 from core.results import EnvironmentConfig
 
 
@@ -340,8 +336,8 @@ class ProductEnvironmentFactory:
                     for field in ("t1_us", "t2_us", "equilibrium_excited_population"):
                         required.add(f"qpu_service.idle_dynamics.qubits.{qubit_id}.{field}")
             elif idle.get("input_mode") == IDLE_INPUT_PHYSICAL and isinstance(idle.get("physical_inputs"), Mapping):
-                for field in ("environment_model", "device_quality", "temperature_mk",
-                              "flux_noise_phi0", "qubit_frequency_ghz", "t1_max_us", "tphi_max_us"):
+                for field in ("environment_model", "temperature_mk", "qubit_frequency_ghz",
+                              "t1_zero_temperature_us", "tphi_us"):
                     required.add(f"qpu_service.idle_dynamics.physical_inputs.{field}")
                 overrides = idle["physical_inputs"].get("per_qubit")
                 if isinstance(overrides, Mapping):
@@ -849,20 +845,19 @@ def _build_idle_model(
             raise ValueError("physical-parameter mode accepts only physical inputs")
         values = raw["physical_inputs"]
         fields = {
-            "environment_model", "device_quality", "temperature_mk", "flux_noise_phi0",
-            "qubit_frequency_ghz", "t1_max_us", "tphi_max_us", "per_qubit",
+            "environment_model", "temperature_mk", "qubit_frequency_ghz",
+            "t1_zero_temperature_us", "tphi_us", "per_qubit",
         }
         if not isinstance(values, Mapping) or set(values) != fields:
             raise ValueError("physical mode requires explicit environment parameters and per-qubit overrides")
         if values["environment_model"] != UNIFIED_ENVIRONMENT_MODEL:
             raise ValueError("unsupported physical environment model")
-        device_quality = _finite_number(values["device_quality"], "device_quality", minimum=0.0, maximum=1.0)
         temperature = _finite_number(values["temperature_mk"], "temperature_mk", minimum=0.0)
-        flux_noise = _finite_number(values["flux_noise_phi0"], "flux_noise_phi0", minimum=0.0)
         frequency = _finite_number(values["qubit_frequency_ghz"], "qubit_frequency_ghz",
                                    minimum=0.0, strict_minimum=True)
-        t1_max = _finite_number(values["t1_max_us"], "t1_max_us", minimum=0.0, strict_minimum=True)
-        tphi_max = _finite_number(values["tphi_max_us"], "tphi_max_us", minimum=0.0, strict_minimum=True)
+        t1 = _finite_number(values["t1_zero_temperature_us"], "t1_zero_temperature_us", minimum=0.0,
+                            strict_minimum=True)
+        tphi = _finite_number(values["tphi_us"], "tphi_us", minimum=0.0, strict_minimum=True)
         per_qubit = values["per_qubit"]
         if not isinstance(per_qubit, Mapping) or set(per_qubit) - qubit_names:
             raise ValueError("per-qubit physical overrides must use retained physical qubit IDs")
@@ -870,34 +865,20 @@ def _build_idle_model(
         has_overrides = bool(per_qubit)
         for qubit_id in physical_qubit_ids:
             entry = per_qubit.get(str(qubit_id), {})
-            if not isinstance(entry, Mapping) or set(entry) - {"t1_max_us", "tphi_max_us"}:
-                raise ValueError("per-qubit overrides may contain only T1/Tphi maxima")
+            if not isinstance(entry, Mapping) or set(entry) - {"t1_zero_temperature_us", "tphi_us"}:
+                raise ValueError("per-qubit overrides may contain only t1_zero_temperature_us and tphi_us")
             normalized_overrides.append({
                 key: _finite_number(entry[key], f"qubit {qubit_id} {key}", minimum=0.0,
                                     strict_minimum=True)
                 for key in entry
             })
-        physical = PhysicalEnvironmentInputs(
-            device_quality=device_quality, temperature_mk=temperature,
-            flux_noise_phi0=flux_noise, qubit_frequency_ghz=frequency,
-            ideal_reference=False,
-        )
-        # EnvironmentConfig is the same validated input envelope used by the
-        # simulator; the rate helper resolves it through PhysicalEnvironmentInputs.
+        # EnvironmentConfig is the same input envelope the simulator uses.
         rates_input = EnvironmentConfig(
-            input_mode=INPUT_MODE_PHYSICAL,
-            model=UNIFIED_ENVIRONMENT_MODEL,
-            device_quality=physical.device_quality,
-            temperature_mk=physical.temperature_mk,
-            flux_noise_phi0=physical.flux_noise_phi0,
-            qubit_frequency_ghz=physical.qubit_frequency_ghz,
-            ideal_reference=physical.ideal_reference,
-            t1_max_us=t1_max, tphi_max_us=tphi_max,
+            t1_zero_temperature_us=t1, tphi_us=tphi, temperature_mk=temperature,
+            qubit_frequency_ghz=frequency, ideal_reference=False,
             per_qubit=normalized_overrides if has_overrides else [],
         )
-        rates = compute_environment_rates_per_qubit(
-            rates_input, len(physical_qubit_ids), GenericTransmonProfile(),
-        )
+        rates = compute_environment_rates_per_qubit(rates_input, len(physical_qubit_ids))
         specs = []
         for qubit_id, value in zip(physical_qubit_ids, rates, strict=True):
             population_rate = value.gamma_down_per_us + value.gamma_up_per_us

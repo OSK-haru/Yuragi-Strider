@@ -16,7 +16,6 @@ from core.gates import (
     scale,
 )
 from core.physical_environment import (
-    INPUT_MODE_PHYSICAL,
     compute_environment_rates,
     compute_thermal_occupation,
 )
@@ -27,7 +26,7 @@ from core.pulse_evolution import (
     TimeDependentEvolutionResult,
     evolve_time_dependent_segment,
 )
-from core.pulse_open_system import DIRECT_RATES_INPUT_MODE
+from core.pulse_open_system import DIRECT_RATES_INPUT_MODE, INPUT_MODE_PHYSICAL
 from core.pulse_qutrit import (
     QutritLeakageSummary,
     QutritPopulationPoint,
@@ -237,7 +236,8 @@ def qutrit_dissipation_rates(
 ) -> QutritDissipationRates:
     """Normalize physical or explicit qutrit-rate inputs."""
 
-    input_mode = str(getattr(environment, "input_mode", ""))
+    # An EnvironmentConfig has no input_mode: it always carries physical times.
+    input_mode = str(getattr(environment, "input_mode", INPUT_MODE_PHYSICAL))
     if input_mode == INPUT_MODE_PHYSICAL:
         two_level_profile_rates = compute_environment_rates(environment)
         frequency_01 = _positive_finite(

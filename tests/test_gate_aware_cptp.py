@@ -234,13 +234,10 @@ def _bell_config(
 
 def _finite_environment() -> EnvironmentConfig:
     return EnvironmentConfig(
-        input_mode="physical",
-        device_quality=1.0,
+        t1_zero_temperature_us=100.0,
+        tphi_us=66.66666666666667,
         temperature_mk=15.0,
-        flux_noise_phi0=1e-6,
         qubit_frequency_ghz=5.0,
-        t1_max_us=100.0,
-        tphi_max_us=100.0,
     )
 
 
@@ -249,14 +246,11 @@ def _physical_payload(evolution_method: str) -> dict[str, object]:
         "circuit_preset": "bell",
         "simulation_backend": "python_dense",
         "evolution_method": evolution_method,
-        "input_mode": "physical",
         "parameters": {
-            "device_quality": 0.8,
+            "t1_zero_temperature_us": 39.810717055349734,
+            "tphi_us": 33.20178309308936,
             "temperature_mk": 15.0,
-            "flux_noise_phi0": 1e-6,
             "qubit_frequency_ghz": 5.0,
-            "t1_max_us": 100.0,
-            "tphi_max_us": 100.0,
             "duration_us": 0.4,
             "time_steps": 9,
             "fidelity_threshold": 0.9,
