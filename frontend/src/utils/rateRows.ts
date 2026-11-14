@@ -29,7 +29,8 @@ export function coherenceTimeRows(rates: SimulationRates): RateRow[] {
   return [
     { label: 'T1（0 K）', value: rates.t1_zero_temperature_us },
     { label: '実効 T1', value: rates.t1_effective_us },
-    { label: 'Tφ', value: rates.tphi_us },
+    { label: 'Tφ（0 K）', value: rates.tphi_zero_temperature_us },
+    { label: '実効 Tφ', value: rates.tphi_effective_us ?? null },
     { label: '実効 T2', value: rates.t2_effective_us },
   ]
     .filter((row) => row.value !== null)

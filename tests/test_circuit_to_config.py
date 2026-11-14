@@ -24,7 +24,7 @@ class CircuitToConfigTest(unittest.TestCase):
             circuit=state.to_config(),
             environment=EnvironmentConfig(
                 t1_zero_temperature_us=95.49925860214358,
-                tphi_us=64.63587019060685,
+                tphi_zero_temperature_us=64.63587019060685,
                 temperature_mk=11.8,
             ),
             duration_us=20.0,
@@ -63,7 +63,7 @@ class CircuitToConfigTest(unittest.TestCase):
             circuit=state.to_config(),
             environment=EnvironmentConfig(
                 t1_zero_temperature_us=95.49925860214358,
-                tphi_us=64.63587019060685,
+                tphi_zero_temperature_us=64.63587019060685,
                 temperature_mk=11.8,
             ),
             duration_us=20.0,

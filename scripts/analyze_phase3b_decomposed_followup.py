@@ -162,11 +162,11 @@ def analyze(raw_path: Path, output_path: Path) -> dict[str, Any]:
     damped_fit = _fit_damped_oscillation(t2_points)
     t1_us = t1_fit.get("decay_time_us")
     t2_us = t2_fit.get("decay_time_us")
-    tphi_us = None
+    tphi_zero_temperature_us = None
     if isinstance(t1_us, float) and isinstance(t2_us, float):
         inverse = 1.0 / t2_us - 1.0 / (2.0 * t1_us)
         if inverse > 0.0:
-            tphi_us = 1.0 / inverse
+            tphi_zero_temperature_us = 1.0 / inverse
 
     report = {
         "analysis_id": "phase3b_decomposed_followup_analysis_v1",
@@ -185,7 +185,7 @@ def analyze(raw_path: Path, output_path: Path) -> dict[str, Any]:
         },
         "t1": {"fit": t1_fit, "calibration_reference_us": 303.33},
         "t2_ramsey": {"fit": t2_fit, "calibration_reference_us": 339.99},
-        "tphi_derived_us": tphi_us,
+        "tphi_derived_us": tphi_zero_temperature_us,
         "t2_damped_oscillation_fit": damped_fit,
         "rows": rows,
         "limitations": [

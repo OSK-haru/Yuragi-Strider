@@ -288,7 +288,7 @@ const calibratedNetworkPayload = buildTransmonNetworkPayload(
     readoutErrorEnabled: true,
     networkPerQubitCalibrationEnabled: true,
     networkT1Us: [50, 75, 125, 100],
-    networkTphiUs: [60, 90, 140, 100],
+    networkTphiZeroTemperatureUs: [60, 90, 140, 100],
     networkReadoutP10: [0.01, 0.02, 0.03, 0.04],
     networkReadoutP01: [0.04, 0.03, 0.02, 0.01],
   },

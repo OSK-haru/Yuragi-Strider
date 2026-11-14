@@ -17,7 +17,7 @@ class ApiSimulateInputModesTest(unittest.TestCase):
                     circuit_preset="bell",
                     simulation_backend="python_dense",
                     parameters={"temperature_mk": 15.0, "qubit_frequency_ghz": 5.0,
-                                "t1_zero_temperature_us": 40.0, "tphi_us": 33.0,
+                                "t1_zero_temperature_us": 40.0, "tphi_zero_temperature_us": 33.0,
                                 "duration_us": 2.0, "time_steps": 11, "fidelity_threshold": 0.9,
                                 **parameters},
                 )
@@ -28,7 +28,10 @@ class ApiSimulateInputModesTest(unittest.TestCase):
             simulation_backend="python_dense",
             parameters={
                 "t1_zero_temperature_us": 39.810717055349734,
-                "tphi_us": 33.20178309308936,
+                "tphi_zero_temperature_us": 33.20178309308936,
+                "readout_resonator_frequency_ghz": 7.0,
+                "readout_resonator_kappa_mhz": 1.0,
+                "readout_resonator_chi_mhz": 0.5,
                 "temperature_mk": 15.0,
                 "qubit_frequency_ghz": 5.0,
                 "duration_us": 2.0,
@@ -42,7 +45,7 @@ class ApiSimulateInputModesTest(unittest.TestCase):
         self.assertAlmostEqual(config.environment.temperature_mk, 15.0)
         self.assertAlmostEqual(config.environment.qubit_frequency_ghz, 5.0)
         self.assertAlmostEqual(config.environment.t1_zero_temperature_us, 39.810717055349734)
-        self.assertAlmostEqual(config.environment.tphi_us, 33.20178309308936)
+        self.assertAlmostEqual(config.environment.tphi_zero_temperature_us, 33.20178309308936)
 
     def test_gate_duration_defaults_override_bell_preset_gate_durations(self) -> None:
         request = SimulateRequest(
@@ -57,7 +60,10 @@ class ApiSimulateInputModesTest(unittest.TestCase):
             },
             parameters={
                 "t1_zero_temperature_us": 39.810717055349734,
-                "tphi_us": 33.20178309308936,
+                "tphi_zero_temperature_us": 33.20178309308936,
+                "readout_resonator_frequency_ghz": 7.0,
+                "readout_resonator_kappa_mhz": 1.0,
+                "readout_resonator_chi_mhz": 0.5,
                 "temperature_mk": 15.0,
                 "qubit_frequency_ghz": 5.0,
                 "duration_us": 2.0,
@@ -87,7 +93,10 @@ class ApiSimulateInputModesTest(unittest.TestCase):
                 },
                 parameters={
                     "t1_zero_temperature_us": 39.810717055349734,
-                    "tphi_us": 33.20178309308936,
+                    "tphi_zero_temperature_us": 33.20178309308936,
+                    "readout_resonator_frequency_ghz": 7.0,
+                    "readout_resonator_kappa_mhz": 1.0,
+                    "readout_resonator_chi_mhz": 0.5,
                     "temperature_mk": 15.0,
                     "qubit_frequency_ghz": 5.0,
                     "duration_us": 2.0,
@@ -102,7 +111,10 @@ class ApiSimulateInputModesTest(unittest.TestCase):
             simulation_backend="python_dense",
             parameters={
                 "t1_zero_temperature_us": 39.810717055349734,
-                "tphi_us": 33.20178309308936,
+                "tphi_zero_temperature_us": 33.20178309308936,
+                "readout_resonator_frequency_ghz": 7.0,
+                "readout_resonator_kappa_mhz": 1.0,
+                "readout_resonator_chi_mhz": 0.5,
                 "temperature_mk": 15.0,
                 "qubit_frequency_ghz": 5.0,
                 "duration_us": 2.0,
@@ -123,7 +135,7 @@ class ApiSimulateInputModesTest(unittest.TestCase):
         self.assertIn("run", response)
         self.assertIn("warnings", response)
         self.assertIn("issues", response)
-        self.assertAlmostEqual(response["parameters"]["tphi_us"], 33.20178309308936)
+        self.assertAlmostEqual(response["parameters"]["tphi_zero_temperature_us"], 33.20178309308936)
         self.assertIn("gamma_down_per_us", response["rates"])
         self.assertIn("gamma_up_per_us", response["rates"])
         self.assertIn("gamma_population_relaxation_per_us", response["rates"])
@@ -163,7 +175,10 @@ class ApiSimulateInputModesTest(unittest.TestCase):
             simulation_backend="python_dense",
             parameters={
                 "t1_zero_temperature_us": 39.810717055349734,
-                "tphi_us": 33.20178309308936,
+                "tphi_zero_temperature_us": 33.20178309308936,
+                "readout_resonator_frequency_ghz": 7.0,
+                "readout_resonator_kappa_mhz": 1.0,
+                "readout_resonator_chi_mhz": 0.5,
                 "temperature_mk": 15.0,
                 "qubit_frequency_ghz": 5.0,
                 "duration_us": 2.0,

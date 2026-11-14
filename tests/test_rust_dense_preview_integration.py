@@ -293,7 +293,7 @@ def _bell_like_config(
 
 
 def _finite_environment() -> EnvironmentConfig:
-    return EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_us=10.0, temperature_mk=0.0)
+    return EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_zero_temperature_us=10.0, temperature_mk=0.0)
 
 
 def _assert_results_close(test_case: unittest.TestCase, left, right) -> None:

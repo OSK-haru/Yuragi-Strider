@@ -119,7 +119,7 @@ class GateExecutionTest(unittest.TestCase):
                 environment_a=_environment(),
                 environment_b=EnvironmentConfig(
                     t1_zero_temperature_us=2.5118864315095797,
-                    tphi_us=2.4727882168275728,
+                    tphi_zero_temperature_us=2.4727882168275728,
                     temperature_mk=82.0,
                 ),
                 duration_us=0.001,
@@ -168,7 +168,7 @@ def _circuit_for_gate(gate_type: str) -> CircuitConfig:
 def _environment() -> EnvironmentConfig:
     return EnvironmentConfig(
         t1_zero_temperature_us=100.0,
-        tphi_us=66.66666666666667,
+        tphi_zero_temperature_us=66.66666666666667,
         temperature_mk=10.0,
     )
 

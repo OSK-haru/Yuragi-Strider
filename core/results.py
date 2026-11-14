@@ -17,9 +17,12 @@ from core.evolution_methods import (
 )
 from core.physical_environment import (
     DEFAULT_QUBIT_FREQUENCY_GHZ,
+    DEFAULT_READOUT_RESONATOR_CHI_MHZ,
+    DEFAULT_READOUT_RESONATOR_FREQUENCY_GHZ,
+    DEFAULT_READOUT_RESONATOR_KAPPA_MHZ,
     DEFAULT_T1_ZERO_TEMPERATURE_US,
     DEFAULT_TEMPERATURE_MK,
-    DEFAULT_TPHI_US,
+    DEFAULT_TPHI_ZERO_TEMPERATURE_US,
     UNIFIED_ENVIRONMENT_MODEL,
     reject_removed_fields,
 )
@@ -28,12 +31,18 @@ from core.state_snapshots import SnapshotOptions, StateSnapshot
 
 @dataclass
 class EnvironmentConfig:
-    """Environmental inputs: measurable times, temperature and frequency (see core.physical_environment)."""
+    """Environmental inputs: measurable times, temperature, frequencies and the readout resonator.
+
+    See core.physical_environment for how they determine the Lindblad rates.
+    """
 
     t1_zero_temperature_us: float = DEFAULT_T1_ZERO_TEMPERATURE_US
-    tphi_us: float = DEFAULT_TPHI_US
+    tphi_zero_temperature_us: float = DEFAULT_TPHI_ZERO_TEMPERATURE_US
     temperature_mk: float = DEFAULT_TEMPERATURE_MK
     qubit_frequency_ghz: float = DEFAULT_QUBIT_FREQUENCY_GHZ
+    readout_resonator_frequency_ghz: float = DEFAULT_READOUT_RESONATOR_FREQUENCY_GHZ
+    readout_resonator_kappa_mhz: float = DEFAULT_READOUT_RESONATOR_KAPPA_MHZ
+    readout_resonator_chi_mhz: float = DEFAULT_READOUT_RESONATOR_CHI_MHZ
     per_qubit: list[dict[str, float]] = field(default_factory=list)
     ideal_reference: bool = False
     model: str = UNIFIED_ENVIRONMENT_MODEL
@@ -46,9 +55,13 @@ class EnvironmentConfig:
             raise ValueError(f"environment model must be {UNIFIED_ENVIRONMENT_MODEL!r}, got {self.model!r}")
         # Values are only converted here; core.validation reports out-of-range values as issues.
         self.t1_zero_temperature_us = _time_float(self.t1_zero_temperature_us, "t1_zero_temperature_us")
-        self.tphi_us = _time_float(self.tphi_us, "tphi_us")
+        self.tphi_zero_temperature_us = _time_float(self.tphi_zero_temperature_us, "tphi_zero_temperature_us")
         self.temperature_mk = _float(self.temperature_mk, "temperature_mk")
         self.qubit_frequency_ghz = _float(self.qubit_frequency_ghz, "qubit_frequency_ghz")
+        self.readout_resonator_frequency_ghz = _float(
+            self.readout_resonator_frequency_ghz, "readout_resonator_frequency_ghz")
+        self.readout_resonator_kappa_mhz = _float(self.readout_resonator_kappa_mhz, "readout_resonator_kappa_mhz")
+        self.readout_resonator_chi_mhz = _float(self.readout_resonator_chi_mhz, "readout_resonator_chi_mhz")
         self.observation_strength = _optional_float(self.observation_strength, "observation_strength")
         self.observation_frequency = _optional_float(self.observation_frequency, "observation_frequency")
         normalized_per_qubit: list[dict[str, float]] = []
@@ -56,14 +69,16 @@ class EnvironmentConfig:
             where = f"environment.per_qubit[{index}]"
             entry = _require_mapping(entry, where)
             reject_removed_fields(entry, where)
-            unknown = sorted(set(entry) - {"t1_zero_temperature_us", "tphi_us"})
+            unknown = sorted(set(entry) - {"t1_zero_temperature_us", "tphi_zero_temperature_us"})
             if unknown:
                 raise ValueError(f"{where}: unknown fields {', '.join(unknown)}")
             normalized_per_qubit.append({
                 "t1_zero_temperature_us": _time_float(
                     entry.get("t1_zero_temperature_us", self.t1_zero_temperature_us),
                     f"{where}.t1_zero_temperature_us"),
-                "tphi_us": _time_float(entry.get("tphi_us", self.tphi_us), f"{where}.tphi_us"),
+                "tphi_zero_temperature_us": _time_float(
+                    entry.get("tphi_zero_temperature_us", self.tphi_zero_temperature_us),
+                    f"{where}.tphi_zero_temperature_us"),
             })
         self.per_qubit = normalized_per_qubit
         self.ideal_reference = bool(self.ideal_reference)
@@ -76,9 +91,12 @@ class EnvironmentConfig:
         return {
             "model": self.model,
             "t1_zero_temperature_us": _json_time(self.t1_zero_temperature_us),
-            "tphi_us": _json_time(self.tphi_us),
+            "tphi_zero_temperature_us": _json_time(self.tphi_zero_temperature_us),
             "temperature_mk": self.temperature_mk,
             "qubit_frequency_ghz": self.qubit_frequency_ghz,
+            "readout_resonator_frequency_ghz": self.readout_resonator_frequency_ghz,
+            "readout_resonator_kappa_mhz": self.readout_resonator_kappa_mhz,
+            "readout_resonator_chi_mhz": self.readout_resonator_chi_mhz,
             "per_qubit": [{key: _json_time(value) for key, value in entry.items()} for entry in self.per_qubit],
             "ideal_reference": self.ideal_reference,
             "observation_strength": self.observation_strength,
@@ -89,16 +107,21 @@ class EnvironmentConfig:
     def from_dict(cls, data: Mapping[str, Any]) -> "EnvironmentConfig":
         data = _require_mapping(data, "environment config")
         reject_removed_fields(data, "environment")
-        known = {"model", "t1_zero_temperature_us", "tphi_us", "temperature_mk", "qubit_frequency_ghz",
+        known = {"model", "t1_zero_temperature_us", "tphi_zero_temperature_us", "temperature_mk", "qubit_frequency_ghz",
+                 "readout_resonator_frequency_ghz", "readout_resonator_kappa_mhz", "readout_resonator_chi_mhz",
                  "per_qubit", "ideal_reference", "observation_strength", "observation_frequency"}
         unknown = sorted(set(data) - known)
         if unknown:
             raise ValueError(f"environment: unknown fields {', '.join(unknown)}")
         return cls(
             t1_zero_temperature_us=data.get("t1_zero_temperature_us", DEFAULT_T1_ZERO_TEMPERATURE_US),
-            tphi_us=data.get("tphi_us", DEFAULT_TPHI_US),
+            tphi_zero_temperature_us=data.get("tphi_zero_temperature_us", DEFAULT_TPHI_ZERO_TEMPERATURE_US),
             temperature_mk=data.get("temperature_mk", DEFAULT_TEMPERATURE_MK),
             qubit_frequency_ghz=data.get("qubit_frequency_ghz", DEFAULT_QUBIT_FREQUENCY_GHZ),
+            readout_resonator_frequency_ghz=data.get(
+                "readout_resonator_frequency_ghz", DEFAULT_READOUT_RESONATOR_FREQUENCY_GHZ),
+            readout_resonator_kappa_mhz=data.get("readout_resonator_kappa_mhz", DEFAULT_READOUT_RESONATOR_KAPPA_MHZ),
+            readout_resonator_chi_mhz=data.get("readout_resonator_chi_mhz", DEFAULT_READOUT_RESONATOR_CHI_MHZ),
             per_qubit=list(data.get("per_qubit") or []),
             ideal_reference=data.get("ideal_reference", False),
             model=data.get("model", UNIFIED_ENVIRONMENT_MODEL),

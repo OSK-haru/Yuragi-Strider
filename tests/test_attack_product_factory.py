@@ -97,8 +97,10 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
             "physical_inputs": {
                 "environment_model": UNIFIED_ENVIRONMENT_MODEL,
                 "temperature_mk": 15.0, "qubit_frequency_ghz": 5.0,
-                "t1_zero_temperature_us": 40.0, "tphi_us": 33.0,
-                "per_qubit": {"151": {"t1_zero_temperature_us": 45.0, "tphi_us": 250.0}},
+                "t1_zero_temperature_us": 40.0, "tphi_zero_temperature_us": 33.0,
+                "readout_resonator_frequency_ghz": 7.0, "readout_resonator_kappa_mhz": 1.0,
+                "readout_resonator_chi_mhz": 0.5,
+                "per_qubit": {"151": {"t1_zero_temperature_us": 45.0, "tphi_zero_temperature_us": 250.0}},
             },
         }
     qpu = {
@@ -153,7 +155,7 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
     if idle_input_mode == IDLE_INPUT_PHYSICAL:
         editable += (
             "qpu_service.idle_dynamics.physical_inputs.temperature_mk",
-            "qpu_service.idle_dynamics.physical_inputs.tphi_us",
+            "qpu_service.idle_dynamics.physical_inputs.tphi_zero_temperature_us",
             "qpu_service.idle_dynamics.physical_inputs.qubit_frequency_ghz",
         )
     template = ScenarioTemplate(
@@ -216,7 +218,8 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
     else:
         physical_paths = (
             "environment_model", "temperature_mk", "qubit_frequency_ghz",
-            "t1_zero_temperature_us", "tphi_us",
+            "t1_zero_temperature_us", "tphi_zero_temperature_us",
+            "readout_resonator_frequency_ghz", "readout_resonator_kappa_mhz", "readout_resonator_chi_mhz",
         )
         assumptions.extend(_assumption(
             f"qpu_service.idle_dynamics.physical_inputs.{field}",
@@ -224,7 +227,7 @@ def prepared_environment(mode=ScenarioMode.FREE, *, malformed_idle=False,
         ) for field in physical_paths)
         assumptions.extend([
             _assumption("qpu_service.idle_dynamics.physical_inputs.per_qubit.151.t1_zero_temperature_us"),
-            _assumption("qpu_service.idle_dynamics.physical_inputs.per_qubit.151.tphi_us"),
+            _assumption("qpu_service.idle_dynamics.physical_inputs.per_qubit.151.tphi_zero_temperature_us"),
         ])
     session = ScenarioPreset(template, policy, tuple(assumptions)).materialize(mode)
     return ScenarioEnvironment(session)
@@ -402,7 +405,10 @@ class ProductFactoryTests(unittest.TestCase):
             temperature_mk=physical_inputs["temperature_mk"],
             qubit_frequency_ghz=physical_inputs["qubit_frequency_ghz"],
             t1_zero_temperature_us=physical_inputs["t1_zero_temperature_us"],
-            tphi_us=physical_inputs["tphi_us"],
+            tphi_zero_temperature_us=physical_inputs["tphi_zero_temperature_us"],
+            readout_resonator_frequency_ghz=physical_inputs["readout_resonator_frequency_ghz"],
+            readout_resonator_kappa_mhz=physical_inputs["readout_resonator_kappa_mhz"],
+            readout_resonator_chi_mhz=physical_inputs["readout_resonator_chi_mhz"],
             per_qubit=[physical_inputs["per_qubit"].get(str(q), {}) for q in (150, 151)],
             ideal_reference=False,
         )
@@ -434,7 +440,9 @@ class ProductFactoryTests(unittest.TestCase):
         hotter = build_with(temperature_mk=30.0)
         self.assertGreater(hotter.qubits[0].equilibrium_excited_population,
                            colder.qubits[0].equilibrium_excited_population)
-        self.assertEqual(build_with(tphi_us=12.0).qubits[0].tphi_us, 12.0)    # Tphi is taken as given
+        # Tphi(0 K) is taken as given; at 15 mK the thermal-photon term is ~1e-9 of it.
+        self.assertAlmostEqual(build_with(tphi_zero_temperature_us=12.0).qubits[0].tphi_us, 12.0, places=6)
+        self.assertLess(build_with(temperature_mk=120.0, tphi_zero_temperature_us=12.0).qubits[0].tphi_us, 12.0)
         with self.assertRaisesRegex(ValueError, "explicit environment parameters"):
             build_with(device_quality=0.8)
 

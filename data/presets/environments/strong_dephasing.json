@@ -1,6 +1,9 @@
 {
   "t1_zero_temperature_us": 100.0,
-  "tphi_us": 5.0,
+  "tphi_zero_temperature_us": 5.0,
   "temperature_mk": 30.0,
-  "qubit_frequency_ghz": 5.0
+  "qubit_frequency_ghz": 5.0,
+  "readout_resonator_frequency_ghz": 7.0,
+  "readout_resonator_kappa_mhz": 1.0,
+  "readout_resonator_chi_mhz": 0.5
 }

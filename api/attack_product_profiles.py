@@ -28,7 +28,8 @@ from core.attack_simulation.shared_qpu_runtime import SharedQpuRuntimeConfig
 from core.experimental_isolation_physics.imperfect_reset import ImperfectResetSpec
 from core.experimental_isolation_physics.reset_model import PerQubitPhenomenologicalResetModel
 from core.physical_environment import (
-    DEFAULT_QUBIT_FREQUENCY_GHZ, DEFAULT_TEMPERATURE_MK, UNIFIED_ENVIRONMENT_MODEL,
+    DEFAULT_QUBIT_FREQUENCY_GHZ, DEFAULT_READOUT_RESONATOR_CHI_MHZ, DEFAULT_READOUT_RESONATOR_FREQUENCY_GHZ,
+    DEFAULT_READOUT_RESONATOR_KAPPA_MHZ, DEFAULT_TEMPERATURE_MK, READOUT_RESONATOR_FIELDS, UNIFIED_ENVIRONMENT_MODEL,
 )
 
 
@@ -605,7 +606,8 @@ def _template(template_id: str, qpu: Mapping[str, object], mode: str,
     else:
         editable.extend(
             f"qpu_service.idle_dynamics.physical_inputs.{field}"
-            for field in ("temperature_mk", "qubit_frequency_ghz", "t1_zero_temperature_us", "tphi_us")
+            for field in ("temperature_mk", "qubit_frequency_ghz", "t1_zero_temperature_us", "tphi_zero_temperature_us",
+                          *READOUT_RESONATOR_FIELDS)
         )
     editable.extend((INTERLEAVED_RUN_SECRET_BIT, INTERLEAVED_MAX_ROUNDS, RESET_CONFIGURATION_ID,
                      ABSTRACT_INTERLEAVE, ABSTRACT_VICTIM_ACTIVITY, SUPPORTED_OPERATIONS_PATH,
@@ -923,12 +925,16 @@ def _interleaving_assumptions(region: tuple[int, ...]) -> list[AssumptionRecord]
 
 def _physical_input_values() -> dict[str, object]:
     """Sample physical-mode inputs (not a device calibration). T1 = 40 us and Tphi = 33 us keep the idle
-    rates the earlier quality-0.8 default produced (39.8 us, and 33.2 us with its flux term), rounded."""
+    rates the earlier quality-0.8 default produced (39.8 us, and 33.2 us with its flux term), rounded.
+    The readout resonator is the shared sample of core.physical_environment."""
     return {
         "temperature_mk": DEFAULT_TEMPERATURE_MK,
         "qubit_frequency_ghz": DEFAULT_QUBIT_FREQUENCY_GHZ,
         "t1_zero_temperature_us": 40.0,
-        "tphi_us": 33.0,
+        "tphi_zero_temperature_us": 33.0,
+        "readout_resonator_frequency_ghz": DEFAULT_READOUT_RESONATOR_FREQUENCY_GHZ,
+        "readout_resonator_kappa_mhz": DEFAULT_READOUT_RESONATOR_KAPPA_MHZ,
+        "readout_resonator_chi_mhz": DEFAULT_READOUT_RESONATOR_CHI_MHZ,
     }
 
 
@@ -1058,7 +1064,10 @@ def _fields(region: tuple[int, ...], mode: str, calibrations: Mapping[int, objec
             ("temperature_mk", "温度", 0.0, 100.0, "mK"),
             ("qubit_frequency_ghz", "qubit周波数", 0.1, 20.0, "GHz"),
             ("t1_zero_temperature_us", "T1（0 K）", 0.001, 1e6, "us"),
-            ("tphi_us", "Tφ", 0.001, 1e6, "us"),
+            ("tphi_zero_temperature_us", "Tφ（0 K）", 0.001, 1e6, "us"),
+            ("readout_resonator_frequency_ghz", "読み出し共振器の周波数", 0.1, 20.0, "GHz"),
+            ("readout_resonator_kappa_mhz", "読み出し共振器の κ/2π", 0.001, 100.0, "MHz"),
+            ("readout_resonator_chi_mhz", "分散結合 χ/2π", 0.0, 100.0, "MHz"),
         ):
             fields.append(_number(f"qpu_service.idle_dynamics.physical_inputs.{name}", label,
                                   lower, upper, unit, "本体シミュレーターと同じ物理モデルへの入力です。スナップショットの較正値ではありません。",

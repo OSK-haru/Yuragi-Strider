@@ -33,7 +33,7 @@ class GoldenPhysicsCasesTest(unittest.TestCase):
     def test_bell_with_finite_profile_rates_decoheres_at_zero_temperature_and_flux(self) -> None:
         result, _ = run_and_reconstruct(
             make_bell_config(
-                make_physical_environment(t1_zero_temperature_us=20.0, tphi_us=20.0, temperature_mk=0.0),
+                make_physical_environment(t1_zero_temperature_us=20.0, tphi_zero_temperature_us=20.0, temperature_mk=0.0),
                 duration_us=50.0,
                 time_steps=101,
             )
@@ -48,7 +48,7 @@ class GoldenPhysicsCasesTest(unittest.TestCase):
         ideal = run_and_reconstruct(make_bell_config(make_ideal_environment()))[0]
         hot = run_and_reconstruct(
             make_bell_config(
-                make_physical_environment(t1_zero_temperature_us=20.0, tphi_us=20.0, temperature_mk=500.0),
+                make_physical_environment(t1_zero_temperature_us=20.0, tphi_zero_temperature_us=20.0, temperature_mk=500.0),
                 duration_us=50.0,
                 time_steps=101,
             )

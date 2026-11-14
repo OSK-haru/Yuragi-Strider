@@ -12,7 +12,7 @@ from core.simulator import run_simulation
 def _environment(per_qubit=None) -> EnvironmentConfig:
     return EnvironmentConfig(
         t1_zero_temperature_us=100.0,
-        tphi_us=100.0,
+        tphi_zero_temperature_us=100.0,
         temperature_mk=0.0,
         qubit_frequency_ghz=5.0,
         per_qubit=per_qubit or [],
@@ -29,15 +29,18 @@ def _payload() -> dict[str, object]:
         },
         "parameters": {
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 100.0,
+            "tphi_zero_temperature_us": 100.0,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "temperature_mk": 0.0,
             "qubit_frequency_ghz": 5.0,
             "duration_us": 10.0,
             "time_steps": 21,
             "fidelity_threshold": 0.9,
             "per_qubit": [
-                {"t1_zero_temperature_us": 10.0, "tphi_us": 1000.0},
-                {"t1_zero_temperature_us": 100.0, "tphi_us": 1000.0},
+                {"t1_zero_temperature_us": 10.0, "tphi_zero_temperature_us": 1000.0},
+                {"t1_zero_temperature_us": 100.0, "tphi_zero_temperature_us": 1000.0},
             ],
         },
     }
@@ -54,8 +57,8 @@ class PerQubitEnvironmentTest(unittest.TestCase):
     def test_local_t1_and_tphi_create_distinct_local_rates(self) -> None:
         rates = compute_environment_rates_per_qubit(
             _environment([
-                {"t1_zero_temperature_us": 10.0, "tphi_us": 20.0},
-                {"t1_zero_temperature_us": 100.0, "tphi_us": 200.0},
+                {"t1_zero_temperature_us": 10.0, "tphi_zero_temperature_us": 20.0},
+                {"t1_zero_temperature_us": 100.0, "tphi_zero_temperature_us": 200.0},
             ]),
             2,
         )
@@ -69,8 +72,8 @@ class PerQubitEnvironmentTest(unittest.TestCase):
         result = run_simulation(SimulationConfig(
             circuit=CircuitConfig(logical_qubits=2, initial_states=["1", "1"], columns=[]),
             environment=_environment([
-                {"t1_zero_temperature_us": 10.0, "tphi_us": 1000.0},
-                {"t1_zero_temperature_us": 100.0, "tphi_us": 1000.0},
+                {"t1_zero_temperature_us": 10.0, "tphi_zero_temperature_us": 1000.0},
+                {"t1_zero_temperature_us": 100.0, "tphi_zero_temperature_us": 1000.0},
             ]),
             duration_us=10.0,
             time_steps=21,
@@ -99,7 +102,7 @@ class PerQubitCalibrationApiTest(unittest.TestCase):
     def test_per_qubit_coherence_count_must_match_circuit(self) -> None:
         payload = _payload()
         payload["parameters"]["per_qubit"] = [
-            {"t1_zero_temperature_us": 10.0, "tphi_us": 20.0}
+            {"t1_zero_temperature_us": 10.0, "tphi_zero_temperature_us": 20.0}
         ]
 
         with self.assertRaises(ValidationError):

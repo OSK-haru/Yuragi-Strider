@@ -103,7 +103,7 @@ def _simple_config() -> SimulationConfig:
                 )
             ],
         ),
-        environment=EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_us=10.0, temperature_mk=0.0),
+        environment=EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_zero_temperature_us=10.0, temperature_mk=0.0),
         duration_us=1.0,
         time_steps=11,
         fidelity_threshold=0.9,

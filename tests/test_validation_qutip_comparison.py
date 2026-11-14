@@ -126,7 +126,7 @@ class QuTiPComparisonTest(unittest.TestCase):
     def test_v7_6_physical_input_path(self) -> None:
         environment = EnvironmentConfig(
             t1_zero_temperature_us=100.0,
-            tphi_us=100.0,
+            tphi_zero_temperature_us=100.0,
             temperature_mk=100.0,
             qubit_frequency_ghz=5.0,
         )

@@ -6,7 +6,7 @@ from core.results import EnvironmentConfig, SimulationConfig
 
 def environment() -> EnvironmentConfig:
     # The rates of the removed normalized default (10 mK, flux term 0.005/us), kept for the stored values.
-    return EnvironmentConfig(temperature_mk=10.0, t1_zero_temperature_us=100.0, tphi_us=1.0 / 0.015)
+    return EnvironmentConfig(temperature_mk=10.0, t1_zero_temperature_us=100.0, tphi_zero_temperature_us=1.0 / 0.015)
 
 
 def one_qubit_gate_config(gate_type: str) -> SimulationConfig:

@@ -105,7 +105,7 @@ class PythonBackendOptimizationTest(unittest.TestCase):
 
 
 def _finite_environment() -> EnvironmentConfig:
-    return EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_us=10.0, temperature_mk=0.0)
+    return EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_zero_temperature_us=10.0, temperature_mk=0.0)
 
 
 def _one_qubit_h_config(environment: EnvironmentConfig) -> SimulationConfig:

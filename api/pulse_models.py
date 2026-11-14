@@ -28,20 +28,27 @@ class StrictPulseModel(BaseModel):
 
 
 class PulsePhysicalEnvironmentRequest(StrictPulseModel):
-    """Measurable inputs: T1 at zero temperature, Tphi, temperature and frequency (decision D89)."""
+    """Measurable inputs: T1 and Tphi at zero temperature, temperature, qubit frequency and the
+    readout resonator (decisions D89, D90)."""
 
     input_mode: Literal["physical"]
     temperature_mk: float = Field(ge=0.0)
     qubit_frequency_ghz: float = Field(gt=0.0)
     t1_zero_temperature_us: float = Field(gt=0.0)
-    tphi_us: float = Field(gt=0.0)
+    tphi_zero_temperature_us: float = Field(gt=0.0)
+    readout_resonator_frequency_ghz: float = Field(gt=0.0)
+    readout_resonator_kappa_mhz: float = Field(gt=0.0)
+    readout_resonator_chi_mhz: float = Field(ge=0.0)
     ideal_reference: bool = False
 
     @field_validator(
         "temperature_mk",
         "qubit_frequency_ghz",
         "t1_zero_temperature_us",
-        "tphi_us",
+        "tphi_zero_temperature_us",
+        "readout_resonator_frequency_ghz",
+        "readout_resonator_kappa_mhz",
+        "readout_resonator_chi_mhz",
     )
     @classmethod
     def validate_finite_environment_value(cls, value: float) -> float:
@@ -263,7 +270,7 @@ class PulseSimulateRequest(StrictPulseModel):
 
 class PulseQubitCoherenceRequest(StrictPulseModel):
     t1_zero_temperature_us: float = Field(gt=0.0)
-    tphi_us: float = Field(gt=0.0)
+    tphi_zero_temperature_us: float = Field(gt=0.0)
 
 
 class QutritPulsePhysicalEnvironmentRequest(

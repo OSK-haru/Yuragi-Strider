@@ -260,7 +260,7 @@ class PulseB2QutritEvolutionTests(unittest.TestCase):
         environment = _physical_environment(
             temperature_mk=temperature_mk,
             t1_zero_temperature_us=1.0,
-            tphi_us=0.9950248756218907,
+            tphi_zero_temperature_us=0.9950248756218907,
         )
         rates = qutrit_dissipation_rates(environment, -250.0)
         assert rates.transition_01_frequency_ghz is not None
@@ -405,7 +405,7 @@ def _physical_environment(
     *,
     temperature_mk: float,
     t1_zero_temperature_us: float = 39.810717055349734,
-    tphi_us: float = 33.20178309308936,
+    tphi_zero_temperature_us: float = 33.20178309308936,
 ) -> SimpleNamespace:
     # Defaults: the rates of the removed quality-0.8 / flux-1e-6 mapping (D89).
     return SimpleNamespace(
@@ -413,7 +413,7 @@ def _physical_environment(
         temperature_mk=temperature_mk,
         qubit_frequency_ghz=5.0,
         t1_zero_temperature_us=t1_zero_temperature_us,
-        tphi_us=tphi_us,
+        tphi_zero_temperature_us=tphi_zero_temperature_us,
         ideal_reference=False,
     )
 

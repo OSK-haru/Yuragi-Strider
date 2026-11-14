@@ -28,7 +28,11 @@ def run_ramsey_sweep(
         temperature_mk=_required(parameters.temperature_mk, "temperature_mk"),
         qubit_frequency_ghz=_required(parameters.qubit_frequency_ghz, "qubit_frequency_ghz"),
         t1_zero_temperature_us=_required(parameters.t1_zero_temperature_us, "t1_zero_temperature_us"),
-        tphi_us=_required(parameters.tphi_us, "tphi_us"),
+        tphi_zero_temperature_us=_required(parameters.tphi_zero_temperature_us, "tphi_zero_temperature_us"),
+        readout_resonator_frequency_ghz=_required(
+            parameters.readout_resonator_frequency_ghz, "readout_resonator_frequency_ghz"),
+        readout_resonator_kappa_mhz=_required(parameters.readout_resonator_kappa_mhz, "readout_resonator_kappa_mhz"),
+        readout_resonator_chi_mhz=_required(parameters.readout_resonator_chi_mhz, "readout_resonator_chi_mhz"),
         ideal_reference=False,
     )
     delays = [

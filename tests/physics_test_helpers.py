@@ -48,13 +48,13 @@ def assert_matrix_close(actual, expected, tolerance: float = 1e-12) -> None:
 
 def make_physical_environment(
     t1_zero_temperature_us: float = 100.0,
-    tphi_us: float = 100.0,
+    tphi_zero_temperature_us: float = 100.0,
     temperature_mk: float = 0.0,
     ideal_reference: bool = False,
 ) -> EnvironmentConfig:
     return EnvironmentConfig(
         t1_zero_temperature_us=t1_zero_temperature_us,
-        tphi_us=tphi_us,
+        tphi_zero_temperature_us=tphi_zero_temperature_us,
         temperature_mk=temperature_mk,
         qubit_frequency_ghz=5.0,
         ideal_reference=ideal_reference,

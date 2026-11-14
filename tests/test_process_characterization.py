@@ -34,7 +34,10 @@ def _request(n_qubits: int, columns: list[dict], *, t1_us: float = 5.0, method: 
             "qubit_frequency_ghz": 5.0,
             # The rates of the removed quality-0.8 / flux-1e-6 mapping (D89) for the same t1_us.
             "t1_zero_temperature_us": t1_us ** 0.8,
-            "tphi_us": 1.0 / (t1_us ** -0.8 + 0.005),
+            "tphi_zero_temperature_us": 1.0 / (t1_us ** -0.8 + 0.005),
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "duration_us": 2.0,
             "time_steps": 21,
             "fidelity_threshold": 0.9,
@@ -136,7 +139,7 @@ class EstimatorTests(unittest.TestCase):
 
     def test_noise_free_circuit_is_its_ideal_unitary(self) -> None:
         payload = _request(2, BELL)
-        payload["parameters"].update({"t1_zero_temperature_us": 100.0, "tphi_us": 100.0, "temperature_mk": 0.0, })
+        payload["parameters"].update({"t1_zero_temperature_us": 100.0, "tphi_zero_temperature_us": 100.0, "temperature_mk": 0.0, })
         payload["parameters"]["ideal_reference"] = True
         result = characterize_process(_config(payload))
         self.assertAlmostEqual(result["average_gate_fidelity"], 1.0, places=10)

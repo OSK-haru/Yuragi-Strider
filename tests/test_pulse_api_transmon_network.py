@@ -43,13 +43,16 @@ class CoupledTransmonNetworkApiTests(unittest.TestCase):
         payload["environment"] = {
             "input_mode": "physical",
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 100.0,
+            "tphi_zero_temperature_us": 100.0,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "temperature_mk": 0.0,
             "qubit_frequency_ghz": 5.0,
             "per_qubit": [
-                {"t1_zero_temperature_us": 10.0, "tphi_us": 20.0, },
-                {"t1_zero_temperature_us": 100.0, "tphi_us": 200.0, },
-                {"t1_zero_temperature_us": 1000.0, "tphi_us": 2000.0, },
+                {"t1_zero_temperature_us": 10.0, "tphi_zero_temperature_us": 20.0, },
+                {"t1_zero_temperature_us": 100.0, "tphi_zero_temperature_us": 200.0, },
+                {"t1_zero_temperature_us": 1000.0, "tphi_zero_temperature_us": 2000.0, },
             ],
         }
         request = CoupledTransmonNetworkPulseSimulateRequest.model_validate(payload)
@@ -68,10 +71,13 @@ class CoupledTransmonNetworkApiTests(unittest.TestCase):
         payload["environment"] = {
             "input_mode": "physical",
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 100.0,
+            "tphi_zero_temperature_us": 100.0,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "temperature_mk": 0.0,
             "qubit_frequency_ghz": 5.0,
-            "per_qubit": [{"t1_zero_temperature_us": 10.0, "tphi_us": 20.0, }],
+            "per_qubit": [{"t1_zero_temperature_us": 10.0, "tphi_zero_temperature_us": 20.0, }],
         }
 
         with self.assertRaises(ValidationError):

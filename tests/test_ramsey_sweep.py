@@ -16,7 +16,10 @@ def _payload() -> dict[str, object]:
         "detuning_mhz": 0.01,
         "parameters": {
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 100.0,
+            "tphi_zero_temperature_us": 100.0,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "temperature_mk": 0.0,
             "qubit_frequency_ghz": 5.0,
         },

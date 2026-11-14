@@ -157,7 +157,7 @@ class PulseRequestContractTests(unittest.TestCase):
 
     def test_environment_mode_requires_its_fields(self) -> None:
         payload = _physical_gaussian_payload()
-        del payload["environment"]["tphi_us"]
+        del payload["environment"]["tphi_zero_temperature_us"]
 
         with self.assertRaises(ValidationError):
             PulseSimulateRequest.model_validate(payload)
@@ -266,7 +266,10 @@ def _physical_gaussian_payload() -> dict[str, object]:
         "environment": {
             "input_mode": "physical",
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 100.0,
+            "tphi_zero_temperature_us": 100.0,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "temperature_mk": 20.0,
             "qubit_frequency_ghz": 5.0,
         },

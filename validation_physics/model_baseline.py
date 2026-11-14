@@ -50,6 +50,7 @@ REQUIRED_EVIDENCE_FILES = (
     "docs/validation/physical-model-baseline-v1.md",
     "validation_results/cptp_model_freeze.json",
     "validation_results/pulse_transmon_network_qutip_audit.json",
+    "validation_results/thermal_photon_dephasing.json",
 )
 
 
@@ -82,7 +83,7 @@ def build_freeze_report(root: Path = ROOT) -> dict[str, Any]:
                 "per_qubit_t1_tphi_and_independent_affine_readout_v1"
             ),
             "per_qubit_rules": {
-                "inputs": "t1_zero_temperature_us and tphi_us (D89)",
+                "inputs": "t1_zero_temperature_us, tphi_zero_temperature_us and the readout resonator (D89, D90)",
                 "coherence_entry_count": "exactly one per logical qubit or transmon",
                 "readout_entry_count": "exactly one per logical qubit or transmon",
                 "shared_values_when_omitted": True,
@@ -147,10 +148,13 @@ def _gate_aware_smoke() -> dict[str, Any]:
             "temperature_mk": 0.0,
             "qubit_frequency_ghz": 5.0,
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 100.0,
+            "tphi_zero_temperature_us": 100.0,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "per_qubit": [
-                {"t1_zero_temperature_us": 20.0, "tphi_us": 40.0},
-                {"t1_zero_temperature_us": 200.0, "tphi_us": 400.0},
+                {"t1_zero_temperature_us": 20.0, "tphi_zero_temperature_us": 40.0},
+                {"t1_zero_temperature_us": 200.0, "tphi_zero_temperature_us": 400.0},
             ],
             "duration_us": 0.1,
             "time_steps": 5,
@@ -215,10 +219,13 @@ def _network_smoke() -> dict[str, Any]:
             "temperature_mk": 0.0,
             "qubit_frequency_ghz": 5.0,
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 100.0,
+            "tphi_zero_temperature_us": 100.0,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "per_qubit": [
-                {"t1_zero_temperature_us": 25.0, "tphi_us": 50.0},
-                {"t1_zero_temperature_us": 250.0, "tphi_us": 500.0},
+                {"t1_zero_temperature_us": 25.0, "tphi_zero_temperature_us": 50.0},
+                {"t1_zero_temperature_us": 250.0, "tphi_zero_temperature_us": 500.0},
             ],
         },
         "readout_error": {

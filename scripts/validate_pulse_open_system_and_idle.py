@@ -516,7 +516,7 @@ def _run_mode_match_audit():
         temperature_mk=100.0,
         qubit_frequency_ghz=5.0,
         t1_zero_temperature_us=39.810717055349734,
-        tphi_us=28.474724895080143,
+        tphi_zero_temperature_us=28.474724895080143,
     )
     physical_rates = pulse_dissipation_rates(environment)
     direct_rates = pulse_dissipation_rates(SimpleNamespace(
@@ -559,7 +559,10 @@ def _run_mode_match_audit():
             "temperature_mk": environment.temperature_mk,
             "qubit_frequency_ghz": environment.qubit_frequency_ghz,
             "t1_zero_temperature_us": environment.t1_zero_temperature_us,
-            "tphi_us": environment.tphi_us,
+            "tphi_zero_temperature_us": environment.tphi_zero_temperature_us,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
         },
         "direct_rates": direct_rates.to_dict(),
         "pulse_end_max_element_error": pulse_error,

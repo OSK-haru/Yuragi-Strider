@@ -136,7 +136,7 @@ export type ReadoutErrorSettings = {
 
 export type QubitCalibration = {
   t1_zero_temperature_us: number
-  tphi_us: number
+  tphi_zero_temperature_us: number
   p10: number
   p01: number
 }
@@ -211,7 +211,10 @@ export type SimulationParameters = {
   qubit_frequency_ghz: number | null
   /** null means an infinite time (no dissipation). */
   t1_zero_temperature_us: number | null
-  tphi_us: number | null
+  tphi_zero_temperature_us: number | null
+  readout_resonator_frequency_ghz: number | null
+  readout_resonator_kappa_mhz: number | null
+  readout_resonator_chi_mhz: number | null
   ideal_reference: boolean
   duration_us: number
   time_steps: number
@@ -227,7 +230,11 @@ export type SimulationRates = {
   gamma_phi_per_us: number | null
   t1_zero_temperature_us: number | null
   t1_effective_us: number | null
-  tphi_us: number | null
+  tphi_zero_temperature_us: number | null
+  gamma_phi_zero_temperature_per_us?: number | null
+  gamma_phi_thermal_photon_per_us?: number | null
+  n_th_resonator?: number | null
+  tphi_effective_us?: number | null
   t2_effective_us: number | null
   per_qubit?: Array<Record<string, string | number | boolean | null>>
   per_qubit_environment_enabled?: boolean
@@ -238,8 +245,14 @@ export type PhysicalSimulationParameters = {
   qubit_frequency_ghz: number
   /** T1 the qubit would have at 0 K (1/gamma_0); temperature then shortens the effective T1. */
   t1_zero_temperature_us: number
-  /** Pure-dephasing time (1/gamma_phi). */
-  tphi_us: number
+  /** Pure-dephasing time at 0 K: every source except thermal photons in the readout resonator. */
+  tphi_zero_temperature_us: number
+  /** Readout resonator; with the temperature it fixes the thermal-photon dephasing (decision D90). */
+  readout_resonator_frequency_ghz: number
+  /** kappa/2pi */
+  readout_resonator_kappa_mhz: number
+  /** chi/2pi for H = chi a^dag a sigma_z (the two qubit states shift the resonator by 2 chi). */
+  readout_resonator_chi_mhz: number
   duration_us: number
   time_steps: number
   fidelity_threshold: number

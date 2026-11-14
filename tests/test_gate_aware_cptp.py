@@ -235,7 +235,7 @@ def _bell_config(
 def _finite_environment() -> EnvironmentConfig:
     return EnvironmentConfig(
         t1_zero_temperature_us=100.0,
-        tphi_us=66.66666666666667,
+        tphi_zero_temperature_us=66.66666666666667,
         temperature_mk=15.0,
         qubit_frequency_ghz=5.0,
     )
@@ -248,7 +248,10 @@ def _physical_payload(evolution_method: str) -> dict[str, object]:
         "evolution_method": evolution_method,
         "parameters": {
             "t1_zero_temperature_us": 39.810717055349734,
-            "tphi_us": 33.20178309308936,
+            "tphi_zero_temperature_us": 33.20178309308936,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "temperature_mk": 15.0,
             "qubit_frequency_ghz": 5.0,
             "duration_us": 0.4,

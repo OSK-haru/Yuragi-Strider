@@ -62,12 +62,12 @@ def _comparison():
         circuit=CircuitConfig.one_qubit_h(),
         environment_a=EnvironmentConfig(
             t1_zero_temperature_us=95.49925860214358,
-            tphi_us=64.63587019060685,
+            tphi_zero_temperature_us=64.63587019060685,
             temperature_mk=11.8,
         ),
         environment_b=EnvironmentConfig(
             t1_zero_temperature_us=2.5118864315095797,
-            tphi_us=2.4807298729688254,
+            tphi_zero_temperature_us=2.4807298729688254,
             temperature_mk=11.8,
         ),
         duration_us=20.0,

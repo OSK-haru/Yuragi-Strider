@@ -209,7 +209,7 @@ def _bell_config(
                 ),
             ],
         ),
-        environment=EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_us=10.0, temperature_mk=0.0),
+        environment=EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_zero_temperature_us=10.0, temperature_mk=0.0),
         duration_us=duration_us,
         time_steps=time_steps,
         fidelity_threshold=0.9,

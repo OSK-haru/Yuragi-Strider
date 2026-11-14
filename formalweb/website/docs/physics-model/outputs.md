@@ -57,7 +57,7 @@ $$
 
 ## 量子ビット別のコヒーレンス時間
 
-共通の `t1_zero_temperature_us`・`tphi_us` に加えて、量子ビットごとの
+共通の `t1_zero_temperature_us`・`tphi_zero_temperature_us` に加えて、量子ビットごとの
 値を `parameters.per_qubit` で指定できます。省略時は従来どおり共通値が全量子ビットへ
 適用されます。
 
@@ -65,10 +65,10 @@ $$
 {
   "parameters": {
     "t1_zero_temperature_us": 100.0,
-    "tphi_us": 100.0,
+    "tphi_zero_temperature_us": 100.0,
     "per_qubit": [
-      {"t1_zero_temperature_us": 72.0, "tphi_us": 55.0},
-      {"t1_zero_temperature_us": 108.0, "tphi_us": 83.0}
+      {"t1_zero_temperature_us": 72.0, "tphi_zero_temperature_us": 55.0},
+      {"t1_zero_temperature_us": 108.0, "tphi_zero_temperature_us": 83.0}
     ]
   }
 }
@@ -76,7 +76,7 @@ $$
 
 各値から量子ビットごとに下降・上昇・純位相緩和レートを計算し、それぞれの局所
 Lindblad演算子へ適用します。レスポンスの `rates.per_qubit` には使用した局所レートを
-量子ビット順に返します。温度と周波数は共通です。実機の測定済みの $T_1$ は有限温度での値
+量子ビット順に返します。温度、周波数、読み出し共振器は共通です。実機の測定済みの $T_1$ は有限温度での値
 なので、`t1_zero_temperature_us` に入れると、測定時の温度が低い($n_\mathrm{th} \ll 1$)限りほぼ同じ値になります。
 
 Pulse-levelの結合トランズモン・ネットワークでも、物理環境の `environment.per_qubit` に

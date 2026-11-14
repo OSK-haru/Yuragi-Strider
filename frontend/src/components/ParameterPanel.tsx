@@ -37,7 +37,10 @@ const parameterRanges: Record<
   temperature_mk: { min: 0, step: 1 },
   qubit_frequency_ghz: { min: 0.001, step: 0.1 },
   t1_zero_temperature_us: { min: 0.001, step: 1 },
-  tphi_us: { min: 0.001, step: 1 },
+  tphi_zero_temperature_us: { min: 0.001, step: 1 },
+  readout_resonator_frequency_ghz: { min: 0.001, step: 0.1 },
+  readout_resonator_kappa_mhz: { min: 0.001, step: 0.1 },
+  readout_resonator_chi_mhz: { min: 0, step: 0.05 },
   duration_us: { min: 0.001, step: 0.1 },
   time_steps: { min: 2, step: 1 },
   fidelity_threshold: { min: 0, max: 1, step: 0.01 },
@@ -77,7 +80,10 @@ type DialConfig = {
 const dialConfigs: Partial<Record<EditableParameterName, DialConfig>> = {
   qubit_frequency_ghz: { dialMax: 10, unit: 'GHz', formatValue: (value) => value.toFixed(2) },
   t1_zero_temperature_us: { dialMax: 200, unit: 'μs', formatValue: (value) => value.toFixed(1) },
-  tphi_us: { dialMax: 200, unit: 'μs', formatValue: (value) => value.toFixed(1) },
+  tphi_zero_temperature_us: { dialMax: 200, unit: 'μs', formatValue: (value) => value.toFixed(1) },
+  readout_resonator_frequency_ghz: { dialMax: 12, unit: 'GHz', formatValue: (value) => value.toFixed(2) },
+  readout_resonator_kappa_mhz: { dialMax: 10, unit: 'MHz', formatValue: (value) => value.toFixed(2) },
+  readout_resonator_chi_mhz: { dialMax: 5, unit: 'MHz', formatValue: (value) => value.toFixed(2) },
   temperature_mk: { dialMax: 100, unit: 'mK', formatValue: (value) => value.toFixed(1) },
 }
 
@@ -277,7 +283,7 @@ export function ParameterPanel({
           title="シミュレーションパラメーター"
         />
         <p className="parameter-panel__note">
-          校正済みのハードウェアモデルではなく、学習用の一般的なプロファイルです。
+          既定値は見本の値で、特定の実機の校正値ではありません。
         </p>
       </div>
 
@@ -301,9 +307,24 @@ export function ParameterPanel({
               '0 K でのエネルギー緩和時間。温度が上がると実効 T1 は短くなる',
             )}
             {renderDial(
-              'tphi_us',
-              'Tφ',
-              '純粋位相緩和の時間（1/γφ）',
+              'tphi_zero_temperature_us',
+              'Tφ（0 K）',
+              '0 K での純粋位相緩和の時間。温度が上がると、読み出し共振器の熱光子で実効 Tφ が短くなる',
+            )}
+            {renderDial(
+              'readout_resonator_frequency_ghz',
+              '読み出し共振器の周波数',
+              '温度とあわせて共振器の熱光子数が決まる',
+            )}
+            {renderDial(
+              'readout_resonator_kappa_mhz',
+              '共振器の κ/2π',
+              '共振器の線幅（エネルギー減衰率）',
+            )}
+            {renderDial(
+              'readout_resonator_chi_mhz',
+              '分散結合 χ/2π',
+              '量子ビットの状態で共振器が ±χ ずれる。0 なら熱光子による位相緩和なし',
             )}
           </div>
         </article>
@@ -433,10 +454,10 @@ export function ParameterPanel({
               {perQubitCalibration.values.slice(0, logicalQubits).map((entry, qubit) => (
                 <div className="parameter-panel__qubit-calibration" key={qubit}>
                   <strong>q{qubit}</strong>
-                  {(['t1_zero_temperature_us', 'tphi_us', 'p10', 'p01'] as const).map((name) => (
+                  {(['t1_zero_temperature_us', 'tphi_zero_temperature_us', 'p10', 'p01'] as const).map((name) => (
                     <label className="parameter-panel__field" key={name}>
                       <span className="parameter-panel__field-label">
-                        {name === 't1_zero_temperature_us' ? 'T1（0 K）[μs]' : name === 'tphi_us' ? 'Tφ [μs]' : name}
+                        {name === 't1_zero_temperature_us' ? 'T1（0 K）[μs]' : name === 'tphi_zero_temperature_us' ? 'Tφ（0 K）[μs]' : name}
                       </span>
                       <input
                         className="parameter-panel__input"

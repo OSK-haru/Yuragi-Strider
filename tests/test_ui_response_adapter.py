@@ -57,7 +57,7 @@ class UiResponseAdapterTests(unittest.TestCase):
         config = SimulationConfig(
             environment=EnvironmentConfig(
                 t1_zero_temperature_us=50.11872336272722,
-                tphi_us=0.00999800513571278,
+                tphi_zero_temperature_us=0.00999800513571278,
                 temperature_mk=15.0,
                 qubit_frequency_ghz=5.0,
             )
@@ -75,7 +75,7 @@ class UiResponseAdapterTests(unittest.TestCase):
         config = SimulationConfig(
             environment=EnvironmentConfig(
                 t1_zero_temperature_us=50.11872336272722,
-                tphi_us=0.00999800513571278,
+                tphi_zero_temperature_us=0.00999800513571278,
                 temperature_mk=15.0,
                 qubit_frequency_ghz=5.0,
             )
@@ -91,14 +91,14 @@ class UiResponseAdapterTests(unittest.TestCase):
             rates["gamma_population_relaxation_per_us"],
         )
         self.assertNotIn("gamma1_per_us", rates)
-        self.assertAlmostEqual(rates["tphi_us"], 0.00999800513571278)
+        self.assertAlmostEqual(rates["tphi_zero_temperature_us"], 0.00999800513571278)
 
     def test_infinite_times_are_reported_as_null(self):
-        result = run_simulation(SimulationConfig(environment=EnvironmentConfig(tphi_us=float("inf"))))
+        result = run_simulation(SimulationConfig(environment=EnvironmentConfig(tphi_zero_temperature_us=float("inf"))))
 
         parameters = simulation_result_to_ui_response(result)["parameters"]
 
-        self.assertIsNone(parameters["tphi_us"])
+        self.assertIsNone(parameters["tphi_zero_temperature_us"])
         self.assertIsNotNone(parameters["t1_zero_temperature_us"])
 
     def test_cnot_maps_to_control_and_target_entries(self):

@@ -1,5 +1,9 @@
 """Switch leakage channels on and off one at a time: residual ZZ, drive crosstalk, reset residue.
 
+The ZZ is either a measured value (ZZ_KHZ) or follows from device values (J_MHZ, FREQUENCY_GHZ,
+ANHARMONICITY_MHZ; D91). Only the static shift of the exchange coupling is in the runtime so far: the
+drive it passes to the neighbour and the third level are not.
+
 Two dedicated 2-qubit regions: V (physical 0,1) and A (physical 2,3). The coupled pair is 1 -- 2.
 
   victim   on V, starts VICTIM_START_US: X on physical 1 only if secret == 1 -> idle VICTIM_IDLE_US -> measure
@@ -22,17 +26,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from core.attack_simulation.coupled_regions import ResidualZZSettings  # noqa: E402
+from core.attack_simulation.coupled_regions import CoupledTransmonSettings, ResidualZZSettings  # noqa: E402
 from core.attack_simulation.jobs import JobCommand  # noqa: E402
 from core.attack_simulation.resource_binding import PhysicalQubitLayout  # noqa: E402
 from core.experimental_isolation_physics.coherent_crosstalk import (  # noqa: E402
     DriveCrosstalkTransfer, ResidualZZCoupling,
 )
+from core.experimental_isolation_physics.transmon_cluster import TransmonCluster, TransmonSpec  # noqa: E402
+from core.pulse_transmon_network import TransmonExchangeCoupling  # noqa: E402
 from tests.test_coupled_regions import build, operation, register  # noqa: E402
 from tests.test_concurrent_regions import run_in_order  # noqa: E402
 
 # ---------------- PARAMETERS ----------------
-ZZ_KHZ = 0.9               # residual ZZ zeta/2pi in kHz (H = zeta * n_1 * n_2)
+ZZ_KHZ = 0.9               # residual ZZ zeta/2pi in kHz (H = zeta * n_1 * n_2), used when J_MHZ is None
+J_MHZ = None               # exchange J/2pi in MHz between 1 and 2; when set, the ZZ follows from the device
+                           # values below instead of ZZ_KHZ (D91)
+FREQUENCY_GHZ = (5.10, 5.00)          # measured 0-1 frequencies of physical 1 and 2
+ANHARMONICITY_MHZ = (-330.0, -310.0)  # measured f12 - f01 of physical 1 and 2
 CROSSTALK = 0.05           # drive-crosstalk transfer 1 -> 2, real part (leaked drive along the same axis)
 CROSSTALK_IMAG = 0.0       # imaginary part (leaked drive turned by 90 degrees); |real + i imag| <= 1
 CROSSTALK_DETUNING_MHZ = 0.0   # 0 = resonant leak; the product default is 100 MHz
@@ -55,22 +65,39 @@ SHOTS = int(sys.argv[1]) if len(sys.argv) > 1 else 400   # repetitions per (cond
 V, A = (0, 1), (2, 3)
 
 
+def device_specs():
+    return tuple(TransmonSpec(frequency, anharmonicity)
+                 for frequency, anharmonicity in zip(FREQUENCY_GHZ, ANHARMONICITY_MHZ))
+
+
+def device_summary():
+    """What the device values imply: the ZZ, and how strongly 1's control line drives 2 through J alone."""
+    cluster = TransmonCluster(device_specs(), (TransmonExchangeCoupling(0, 1, 2 * math.pi * J_MHZ),))
+    zz_khz = 1e3 * cluster.zz_rad_per_us(0, 1) / (2 * math.pi)
+    return (f"J={J_MHZ} MHz -> ZZ={zz_khz:.3f} kHz; a drive on 1's line at 2's frequency turns 2 at "
+            f"{cluster.drive_element(0, 1, (0, 0)).real:+.4f} (1 in |0>) / "
+            f"{cluster.drive_element(0, 1, (1, 0)).real:+.4f} (1 in |1>) of its Rabi rate")
+
+
 def job(runtime, tenant, physical, columns, key, seed):
     op = operation(columns, physical, seed=seed)
     return runtime.submit(JobCommand(tenant, op, key, layout=PhysicalQubitLayout("qpu-1", physical)))
 
 
 def one_run(use_zz, use_xt, use_residue, secret, seed):
-    zz = None
-    if use_zz:
+    zz = transmons = None
+    if use_zz and J_MHZ is None:
         zz = ResidualZZSettings((ResidualZZCoupling(1, 2, 2 * math.pi * ZZ_KHZ * 1e-3),), model="exact")
+    elif use_zz:
+        transmons = CoupledTransmonSettings(tuple(zip((1, 2), device_specs())), ((1, 2, 2 * math.pi * J_MHZ),),
+                                            model="exact")
     transfers = ([DriveCrosstalkTransfer(1, 2, CROSSTALK, CROSSTALK_IMAG, 2 * math.pi * CROSSTALK_DETUNING_MHZ)]
                  if use_xt else [])
     runtime, executor = build(transfers=transfers, zz=zz, t1=T1_US, tphi=TPHI_US,
                               reset_success=RESET_SUCCESS if use_residue else 1.0,
                               region_access={"attacker": (A, V)},    # the attacker may take over V
                               durations=(RESET_US, MEASUREMENT_US),
-                              readout_dephasing=READOUT_DEPHASING_PER_US)
+                              readout_dephasing=READOUT_DEPHASING_PER_US, transmons=transmons)
     probe = job(runtime, "attacker", A, [[{"type": "H", "targets": [0]}],
                                          [{"type": "I", "targets": [0], "params": {"duration_us": WAIT_US}}],
                                          [{"type": "H", "targets": [0]}]], f"p{seed}", seed)
@@ -91,7 +118,9 @@ def one_run(use_zz, use_xt, use_residue, secret, seed):
 
 
 def main():
-    print(f"ZZ={ZZ_KHZ} kHz  crosstalk={CROSSTALK}{CROSSTALK_IMAG:+}i (detuning {CROSSTALK_DETUNING_MHZ} MHz)  "
+    if J_MHZ is not None:
+        print(device_summary())
+    print(f"ZZ={'from J' if J_MHZ is not None else ZZ_KHZ} kHz  crosstalk={CROSSTALK}{CROSSTALK_IMAG:+}i (detuning {CROSSTALK_DETUNING_MHZ} MHz)  "
           f"reset success={RESET_SUCCESS}  T1={T1_US} Tphi={TPHI_US}  wait={WAIT_US} us  shots={SHOTS}")
     print(f"{'ZZ':<4}{'xt':<4}{'res':<5}| {'probe P(1|0)':>12}{'P(1|1)':>8}{'diff':>8} | "
           f"{'takeover P(1|0)':>15}{'P(1|1)':>8}{'diff':>8} | sd")

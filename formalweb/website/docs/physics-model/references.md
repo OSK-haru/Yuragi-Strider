@@ -19,7 +19,11 @@ A. A. Clerk, M. H. Devoret, S. M. Girvin, F. Marquardt, and R. J. Schoelkopf, "I
 
 G. Ithier et al., "Decoherence in a superconducting quantum bit circuit," *Physical Review B* **72**, 134519 (2005). [DOI: 10.1103/PhysRevB.72.134519](https://doi.org/10.1103/PhysRevB.72.134519)
 
-これらはGKSL方程式の構成、有限温度の上下遷移、緩和と純位相緩和の位置づけの根拠です。ただし、**Born-Markov近似がYuragi-Striderの全入力範囲で成立すること**や、**使用するレートが特定実機のレートと一致すること**は、これらの文献からは支持されません。
+A. A. Clerk and D. W. Utami, "Using a qubit to measure photon-number statistics of a driven thermal oscillator," *Physical Review A* **75**, 042302 (2007). [DOI: 10.1103/PhysRevA.75.042302](https://doi.org/10.1103/PhysRevA.75.042302)
+
+C. Rigetti et al., "Superconducting qubit in a waveguide cavity with a coherence time approaching 0.1 ms," *Physical Review B* **86**, 100506(R) (2012). [DOI: 10.1103/PhysRevB.86.100506](https://doi.org/10.1103/PhysRevB.86.100506)
+
+これらはGKSL方程式の構成、有限温度の上下遷移、緩和と純位相緩和の位置づけの根拠です。Clerk & Utami と Rigetti et al. は、分散結合した共振器の熱光子による位相緩和率 $\Gamma_\phi^{\text{th}}$ の式(時間 $t \gg 1/\kappa$ での減衰率)の根拠です。共振器が量子ビットと同じ温度にあることは、これらの文献からは支持されない前提です。ただし、**Born-Markov近似がYuragi-Striderの全入力範囲で成立すること**や、**使用するレートが特定実機のレートと一致すること**は、これらの文献からは支持されません。
 
 ## 量子チャネル・CPTP・Choi監査
 

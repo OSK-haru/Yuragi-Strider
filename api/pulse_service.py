@@ -394,7 +394,10 @@ def _build_rates(request: PulseSimulateRequest) -> PulseDissipationRates:
         temperature_mk=environment.temperature_mk,
         qubit_frequency_ghz=environment.qubit_frequency_ghz,
         t1_zero_temperature_us=environment.t1_zero_temperature_us,
-        tphi_us=environment.tphi_us,
+        tphi_zero_temperature_us=environment.tphi_zero_temperature_us,
+        readout_resonator_frequency_ghz=environment.readout_resonator_frequency_ghz,
+        readout_resonator_kappa_mhz=environment.readout_resonator_kappa_mhz,
+        readout_resonator_chi_mhz=environment.readout_resonator_chi_mhz,
         ideal_reference=environment.ideal_reference,
     ))
 

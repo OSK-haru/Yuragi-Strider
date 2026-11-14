@@ -11,8 +11,11 @@ from core.results import EnvironmentConfig, SimulationConfig
 from core.validation import has_blocking_issues, validate_simulation_config
 
 
-SCHEMA_VERSION = "2.0"  # 2.0: environment = measurable coherence times (D89)
+# 2.0: environment = measurable coherence times (D89).
+# 3.0: Tphi at zero temperature plus the readout resonator (D90).
+SCHEMA_VERSION = "3.0"
 REMOVED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1"})
+REPLACED_SCHEMA_VERSIONS = frozenset({"2.0"})
 CONFIG_KIND = "yuragi_strider.config"
 
 
@@ -73,8 +76,15 @@ def config_from_dict(data: dict[str, Any]) -> SimulationConfig:
         if str(data.get("schema_version")) in REMOVED_SCHEMA_VERSIONS:
             raise ValueError(
                 f"config schema {data.get('schema_version')} used the removed device-quality / flux-noise / "
-                "normalized environment inputs; set environment.t1_zero_temperature_us and environment.tphi_us "
-                "and save it again as schema 2.0"
+                "normalized environment inputs; set environment.t1_zero_temperature_us and environment.tphi_zero_temperature_us "
+                f"and save it again as schema {SCHEMA_VERSION}"
+            )
+        if str(data.get("schema_version")) in REPLACED_SCHEMA_VERSIONS:
+            raise ValueError(
+                f"config schema {data.get('schema_version')} gave tphi_us, the total pure-dephasing time at "
+                "the working temperature; schema 3.0 takes environment.tphi_zero_temperature_us (without the "
+                "thermal-photon dephasing, which is now derived) and the readout resonator "
+                "(readout_resonator_frequency_ghz, readout_resonator_kappa_mhz, readout_resonator_chi_mhz)"
             )
         simulation = dict(data.get("simulation") or {})
         config = SimulationConfig(

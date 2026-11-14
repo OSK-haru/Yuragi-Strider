@@ -1,6 +1,6 @@
 {
   "validation": "PULSE-BA4",
-  "base_git_commit": "7b34544901a91e1ae8fa043a883583d2ae13224c",
+  "base_git_commit": "5ca287d84e3d45c6847e62830c313b8d12a04961",
   "python_version": "3.14.4",
   "numpy_version": "2.4.4",
   "model_id": "driven_two_level_rwa_experimental_v1",
@@ -42,7 +42,7 @@
       "pulse_duration_us": 1.0,
       "idle_duration_us": 3.0,
       "total_duration_us": 4.0,
-      "runtime_ms": 316.3559999957215,
+      "runtime_ms": 260.2617999946233,
       "pulse_internal_step_count": 240,
       "idle_internal_step_count": 600,
       "pulse_end": {
@@ -3523,7 +3523,7 @@
       "pulse_duration_us": 1.6,
       "idle_duration_us": 2.0,
       "total_duration_us": 3.6,
-      "runtime_ms": 280.4832000110764,
+      "runtime_ms": 243.0878000013763,
       "pulse_internal_step_count": 320,
       "idle_internal_step_count": 400,
       "pulse_end": {
@@ -7004,7 +7004,7 @@
       "pulse_duration_us": 0.5,
       "idle_duration_us": 2.5,
       "total_duration_us": 3.0,
-      "runtime_ms": 308.8078000000678,
+      "runtime_ms": 277.52409999084193,
       "pulse_internal_step_count": 160,
       "idle_internal_step_count": 500,
       "pulse_end": {
@@ -10485,7 +10485,7 @@
       "pulse_duration_us": 0.2,
       "idle_duration_us": 20.0,
       "total_duration_us": 20.2,
-      "runtime_ms": 664.8631999996724,
+      "runtime_ms": 590.7628999993904,
       "pulse_internal_step_count": 80,
       "idle_internal_step_count": 2070,
       "pulse_end": {
@@ -13977,19 +13977,22 @@
       "input_mode": "physical",
       "gamma_down_per_us": 0.027625985886320165,
       "gamma_up_per_us": 0.0025071215712243727,
-      "gamma_phi_per_us": 0.035118864315095796,
+      "gamma_phi_per_us": 0.14626568444287663,
       "gamma_population_relaxation_per_us": 0.030133107457544536,
       "n_th": 0.09981030749537737,
       "temperature_mk": 100.0,
       "qubit_frequency_ghz": 5.0,
       "t1_zero_temperature_us": 39.810717055349734,
-      "tphi_us": 28.474724895080143
+      "tphi_zero_temperature_us": 28.474724895080143,
+      "readout_resonator_frequency_ghz": 7.0,
+      "readout_resonator_kappa_mhz": 1.0,
+      "readout_resonator_chi_mhz": 0.5
     },
     "direct_rates": {
       "input_mode": "direct_rates",
       "gamma_down_per_us": 0.027625985886320165,
       "gamma_up_per_us": 0.0025071215712243727,
-      "gamma_phi_per_us": 0.035118864315095796,
+      "gamma_phi_per_us": 0.14626568444287663,
       "gamma_population_relaxation_per_us": 0.030133107457544536,
       "n_th": null
     },

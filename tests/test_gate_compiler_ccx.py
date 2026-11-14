@@ -88,7 +88,7 @@ class CcxGateCompilerTests(unittest.TestCase):
     def test_finite_noise_exposes_ccx_decomposition_cost(self):
         environment = EnvironmentConfig(
             t1_zero_temperature_us=1.0,
-            tphi_us=1.0,
+            tphi_zero_temperature_us=1.0,
             temperature_mk=15.0,
             qubit_frequency_ghz=5.0,
         )
@@ -185,7 +185,10 @@ def _api_payload(controls: list[int], targets: list[int]):
             "temperature_mk": 10.0,
             "qubit_frequency_ghz": 5.0,
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 66.66666666666667,
+            "tphi_zero_temperature_us": 66.66666666666667,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "duration_us": 1.34,
             "time_steps": 21,
             "fidelity_threshold": 0.9,

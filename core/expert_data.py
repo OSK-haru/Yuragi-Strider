@@ -146,9 +146,16 @@ def _noise_data(result: SimulationResult) -> dict[str, Any]:
         "Environment model": environment.model,
         "T1 at zero temperature [us]": derived.get(
             "t1_zero_temperature_us", environment.t1_zero_temperature_us),
-        "Tphi [us]": derived.get("tphi_us", environment.tphi_us),
+        "Tphi at zero temperature [us]": derived.get(
+            "tphi_zero_temperature_us", environment.tphi_zero_temperature_us),
         "Temperature [mK]": derived.get("temperature_mk", environment.temperature_mk),
         "Qubit Frequency [GHz]": derived.get("qubit_frequency_ghz", environment.qubit_frequency_ghz),
+        "Readout resonator frequency [GHz]": derived.get(
+            "readout_resonator_frequency_ghz", environment.readout_resonator_frequency_ghz),
+        "Readout resonator kappa/2pi [MHz]": derived.get(
+            "readout_resonator_kappa_mhz", environment.readout_resonator_kappa_mhz),
+        "Readout resonator chi/2pi [MHz]": derived.get(
+            "readout_resonator_chi_mhz", environment.readout_resonator_chi_mhz),
         "Ideal reference": derived.get("ideal_reference", environment.ideal_reference),
         "n_th": derived.get("n_th"),
         "gamma0_per_us": derived.get("gamma0_per_us"),
@@ -156,7 +163,10 @@ def _noise_data(result: SimulationResult) -> dict[str, Any]:
         "Upward transition rate gamma_up [1/us]": gamma_up,
         "Population relaxation rate gamma_population [1/us]": gamma_population,
         "Pure dephasing rate gamma_phi [1/us]": gamma_phi,
+        "Resonator thermal occupation n_r": derived.get("n_th_resonator"),
+        "Thermal-photon dephasing rate [1/us]": derived.get("gamma_phi_thermal_photon_per_us"),
         "Effective T1 [us]": derived.get("t1_effective_us"),
+        "Effective Tphi [us]": derived.get("tphi_effective_us"),
         "Effective T2 [us]": derived.get("t2_effective_us"),
         "gamma ratio": _gamma_ratio(gamma_down, gamma_phi),
         "Dominant decoherence source": _dominant_source(gamma_down, gamma_phi),

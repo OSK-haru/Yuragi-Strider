@@ -58,7 +58,10 @@ export const initialPulseLabForm: PulseLabForm = {
   temperatureMk: 15,
   qubitFrequencyGhz: 5,
   t1ZeroTemperatureUs: 40,
-  tphiUs: 33,
+  tphiZeroTemperatureUs: 33,
+  readoutResonatorFrequencyGhz: 7,
+  readoutResonatorKappaMhz: 1,
+  readoutResonatorChiMhz: 0.5,
   gammaDownPerUs: 0.1,
   gammaUpPerUs: 0.02,
   gammaPhiPerUs: 0.05,
@@ -75,7 +78,7 @@ export const initialPulseLabForm: PulseLabForm = {
   networkQuasiStaticQuadratureOrder: 3,
   networkPerQubitCalibrationEnabled: false,
   networkT1Us: [100, 100, 100, 100],
-  networkTphiUs: [100, 100, 100, 100],
+  networkTphiZeroTemperatureUs: [100, 100, 100, 100],
   networkReadoutP10: [0.005, 0.005, 0.005, 0.005],
   networkReadoutP01: [0.013, 0.013, 0.013, 0.013],
   readoutErrorEnabled: false,
@@ -195,14 +198,14 @@ export function validatePulseLabForm(form: PulseLabForm, transmonCount = 4): Pul
     if (form.networkPerQubitCalibrationEnabled) {
       for (let index = 0; index < transmonCount; index += 1) {
         const t1 = form.networkT1Us[index]
-        const tphi = form.networkTphiUs[index]
+        const tphi = form.networkTphiZeroTemperatureUs[index]
         const p10 = form.networkReadoutP10[index]
         const p01 = form.networkReadoutP01[index]
         if (!Number.isFinite(t1) || t1 <= 0) {
           errors.networkT1Us = `q${index}のT1（0 K）は0より大きい値にしてください。`
         }
         if (!Number.isFinite(tphi) || tphi <= 0) {
-          errors.networkTphiUs = `q${index}の最大Tφは0より大きい値にしてください。`
+          errors.networkTphiZeroTemperatureUs = `q${index}の最大Tφは0より大きい値にしてください。`
         }
         if (form.readoutErrorEnabled && (
           !Number.isFinite(p10) || !Number.isFinite(p01)
@@ -244,7 +247,10 @@ export function validatePulseLabForm(form: PulseLabForm, transmonCount = 4): Pul
     nonnegative('temperatureMk', form.temperatureMk, '温度')
     positive('qubitFrequencyGhz', form.qubitFrequencyGhz, '量子ビット周波数')
     positive('t1ZeroTemperatureUs', form.t1ZeroTemperatureUs, 'T1（0 K）')
-    positive('tphiUs', form.tphiUs, 'Tφ')
+    positive('tphiZeroTemperatureUs', form.tphiZeroTemperatureUs, 'Tφ（0 K）')
+    positive('readoutResonatorFrequencyGhz', form.readoutResonatorFrequencyGhz, '共振器周波数')
+    positive('readoutResonatorKappaMhz', form.readoutResonatorKappaMhz, '共振器の κ/2π')
+    nonnegative('readoutResonatorChiMhz', form.readoutResonatorChiMhz, 'χ/2π')
   } else if (form.modelId === TWO_LEVEL_PULSE_MODEL) {
     nonnegative('gammaDownPerUs', form.gammaDownPerUs, 'γ↓ (下降)')
     nonnegative('gammaUpPerUs', form.gammaUpPerUs, 'γ↑ (上昇)')
@@ -300,7 +306,10 @@ export function buildPulsePayload(
           temperature_mk: form.temperatureMk,
           qubit_frequency_ghz: form.qubitFrequencyGhz,
           t1_zero_temperature_us: form.t1ZeroTemperatureUs,
-          tphi_us: form.tphiUs,
+          tphi_zero_temperature_us: form.tphiZeroTemperatureUs,
+          readout_resonator_frequency_ghz: form.readoutResonatorFrequencyGhz,
+          readout_resonator_kappa_mhz: form.readoutResonatorKappaMhz,
+          readout_resonator_chi_mhz: form.readoutResonatorChiMhz,
         }
       : form.modelId === TWO_LEVEL_PULSE_MODEL
         ? {
@@ -399,11 +408,14 @@ export function buildTransmonNetworkPayload(
         temperature_mk: form.temperatureMk,
         qubit_frequency_ghz: form.qubitFrequencyGhz,
         t1_zero_temperature_us: form.t1ZeroTemperatureUs,
-        tphi_us: form.tphiUs,
+        tphi_zero_temperature_us: form.tphiZeroTemperatureUs,
+        readout_resonator_frequency_ghz: form.readoutResonatorFrequencyGhz,
+        readout_resonator_kappa_mhz: form.readoutResonatorKappaMhz,
+        readout_resonator_chi_mhz: form.readoutResonatorChiMhz,
         ...(form.networkPerQubitCalibrationEnabled ? {
           per_qubit: Array.from({ length: transmonCount }, (_, index) => ({
             t1_zero_temperature_us: form.networkT1Us[index] ?? form.t1ZeroTemperatureUs,
-            tphi_us: form.networkTphiUs[index] ?? form.tphiUs,
+            tphi_zero_temperature_us: form.networkTphiZeroTemperatureUs[index] ?? form.tphiZeroTemperatureUs,
           })),
         } : {}),
       }

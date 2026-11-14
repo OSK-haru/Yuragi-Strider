@@ -181,7 +181,7 @@ export function PulseEnvironmentPanel({
           </div>
           <h3>量子ビット別校正値</h3>
           <p className="pulse-parameters__model-note">
-            共通の T1（0 K）・Tφ・読み出し誤差を、各トランズモンの値で上書きします。
+            共通の T1（0 K）・Tφ（0 K）・読み出し誤差を、各トランズモンの値で上書きします。
           </p>
           <label className="pulse-parameters__calibration-toggle">
             <span>個別校正</span>
@@ -204,7 +204,7 @@ export function PulseEnvironmentPanel({
                   <strong>q{index}</strong>
                   {([
                     ['networkT1Us', 'T1（0 K）[us]', form.networkT1Us, 0.001, undefined],
-                    ['networkTphiUs', 'Tφ [us]', form.networkTphiUs, 0.001, undefined],
+                    ['networkTphiZeroTemperatureUs', 'Tφ（0 K）[us]', form.networkTphiZeroTemperatureUs, 0.001, undefined],
                     ['networkReadoutP10', 'p10', form.networkReadoutP10, 0, 1],
                     ['networkReadoutP01', 'p01', form.networkReadoutP01, 0, 1],
                   ] as const).map(([field, label, values, min, max]) => (
@@ -227,9 +227,9 @@ export function PulseEnvironmentPanel({
                   ))}
                 </div>
               ))}
-              {errors.networkT1Us || errors.networkTphiUs || errors.networkReadoutP01 ? (
+              {errors.networkT1Us || errors.networkTphiZeroTemperatureUs || errors.networkReadoutP01 ? (
                 <p className="pulse-parameters__error">
-                  {errors.networkT1Us ?? errors.networkTphiUs ?? errors.networkReadoutP01}
+                  {errors.networkT1Us ?? errors.networkTphiZeroTemperatureUs ?? errors.networkReadoutP01}
                 </p>
               ) : null}
             </div>
@@ -386,7 +386,10 @@ export function PulseEnvironmentPanel({
             <NumberField field="temperatureMk" label="温度 [mK]" value={form.temperatureMk} error={errors.temperatureMk} step={1} min={0} disabled={disabled} onChange={setNumber} />
             <NumberField field="qubitFrequencyGhz" label="量子ビット周波数 [GHz]" value={form.qubitFrequencyGhz} error={errors.qubitFrequencyGhz} step={0.1} min={0} disabled={disabled} onChange={setNumber} />
             <NumberField field="t1ZeroTemperatureUs" label="T1（0 K）[us]" value={form.t1ZeroTemperatureUs} error={errors.t1ZeroTemperatureUs} step={1} min={0} disabled={disabled} onChange={setNumber} />
-            <NumberField field="tphiUs" label="Tφ [us]" value={form.tphiUs} error={errors.tphiUs} step={1} min={0} disabled={disabled} onChange={setNumber} />
+            <NumberField field="tphiZeroTemperatureUs" label="Tφ（0 K）[us]" value={form.tphiZeroTemperatureUs} error={errors.tphiZeroTemperatureUs} step={1} min={0} disabled={disabled} onChange={setNumber} />
+            <NumberField field="readoutResonatorFrequencyGhz" label="読み出し共振器の周波数 [GHz]" value={form.readoutResonatorFrequencyGhz} error={errors.readoutResonatorFrequencyGhz} step={0.1} min={0} disabled={disabled} onChange={setNumber} />
+            <NumberField field="readoutResonatorKappaMhz" label="共振器の κ/2π [MHz]" value={form.readoutResonatorKappaMhz} error={errors.readoutResonatorKappaMhz} step={0.1} min={0} disabled={disabled} onChange={setNumber} />
+            <NumberField field="readoutResonatorChiMhz" label="分散結合 χ/2π [MHz]" value={form.readoutResonatorChiMhz} error={errors.readoutResonatorChiMhz} step={0.05} min={0} disabled={disabled} onChange={setNumber} />
           </div>
         ) : (
           <div className="pulse-parameters__grid">

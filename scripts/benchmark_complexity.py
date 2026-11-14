@@ -205,7 +205,7 @@ def _environment() -> EnvironmentConfig:
     return EnvironmentConfig(
         temperature_mk=0.0,
         t1_zero_temperature_us=100.0,
-        tphi_us=100.0,
+        tphi_zero_temperature_us=100.0,
     )
 
 

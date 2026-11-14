@@ -165,7 +165,10 @@ def _bell_request(toolbox: dict[str, object]) -> dict[str, object]:
         },
         "parameters": {
             "t1_zero_temperature_us": 10.98560543306118,
-            "tphi_us": 10.413606568573751,
+            "tphi_zero_temperature_us": 10.413606568573751,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "temperature_mk": 15.0,
             "qubit_frequency_ghz": 5.0,
             "duration_us": 1.0,

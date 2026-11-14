@@ -681,10 +681,13 @@ def _build_rates(
                 environment.per_qubit[0].t1_zero_temperature_us
                 if environment.per_qubit else environment.t1_zero_temperature_us
             ),
-            tphi_us=(
-                environment.per_qubit[0].tphi_us
-                if environment.per_qubit else environment.tphi_us
+            tphi_zero_temperature_us=(
+                environment.per_qubit[0].tphi_zero_temperature_us
+                if environment.per_qubit else environment.tphi_zero_temperature_us
             ),
+            readout_resonator_frequency_ghz=environment.readout_resonator_frequency_ghz,
+            readout_resonator_kappa_mhz=environment.readout_resonator_kappa_mhz,
+            readout_resonator_chi_mhz=environment.readout_resonator_chi_mhz,
             ideal_reference=environment.ideal_reference,
         ),
         request.anharmonicity_mhz,

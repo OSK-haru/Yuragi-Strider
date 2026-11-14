@@ -201,7 +201,7 @@ class PulseOpenSystemTests(unittest.TestCase):
     def test_physical_and_equivalent_direct_rates_match(self) -> None:
         environment = EnvironmentConfig(
             t1_zero_temperature_us=39.810717055349734,
-            tphi_us=28.474724895080143,
+            tphi_zero_temperature_us=28.474724895080143,
             temperature_mk=100.0,
             qubit_frequency_ghz=5.0,
         )

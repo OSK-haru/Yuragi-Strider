@@ -176,12 +176,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     raw = _read_json(args.raw)
     if args.t1_us <= 0.0 or args.t2_us <= 0.0 or args.gate_duration_us <= 0.0:
         raise ValueError("T1, T2, and gate duration must be positive")
-    tphi_us = _tphi_from_t1_t2(args.t1_us, args.t2_us)
+    tphi_zero_temperature_us = _tphi_from_t1_t2(args.t1_us, args.t2_us)
     environment = EnvironmentConfig(
         temperature_mk=args.temperature_mk,
         qubit_frequency_ghz=args.qubit_frequency_ghz,
         t1_zero_temperature_us=args.t1_us,
-        tphi_us=tphi_us,
+        tphi_zero_temperature_us=tphi_zero_temperature_us,
     )
 
     rows: list[dict[str, Any]] = []
@@ -231,7 +231,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "comparison_parameters": {
             "t1_us": args.t1_us,
             "t2_us": args.t2_us,
-            "tphi_derived_us": tphi_us,
+            "tphi_derived_us": tphi_zero_temperature_us,
             "temperature_mk": args.temperature_mk,
             "qubit_frequency_ghz": args.qubit_frequency_ghz,
             "logical_gate_duration_us": args.gate_duration_us,

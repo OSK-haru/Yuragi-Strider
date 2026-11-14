@@ -91,7 +91,7 @@ type SimulateRequestPayload = {
   }
   snapshot_options: SnapshotOptions
   parameters: SimulateRequestParameters & {
-    per_qubit?: Array<{ t1_zero_temperature_us: number; tphi_us: number }>
+    per_qubit?: Array<{ t1_zero_temperature_us: number; tphi_zero_temperature_us: number }>
   }
   toolbox?: Record<string, unknown>
 }
@@ -197,10 +197,28 @@ function validateSimulationParameters(parameters: SimulateRequestParameters): {
     errors.t1_zero_temperature_us = 'T1（0 K）は 0 us より大きい値で入力してください。'
   }
 
-  if (!Number.isFinite(parameters.tphi_us)) {
-    errors.tphi_us = 'Tφ は有限の数値で入力してください。'
-  } else if (parameters.tphi_us <= 0) {
-    errors.tphi_us = 'Tφ は 0 us より大きい値で入力してください。'
+  if (!Number.isFinite(parameters.tphi_zero_temperature_us)) {
+    errors.tphi_zero_temperature_us = 'Tφ（0 K）は有限の数値で入力してください。'
+  } else if (parameters.tphi_zero_temperature_us <= 0) {
+    errors.tphi_zero_temperature_us = 'Tφ（0 K）は 0 us より大きい値で入力してください。'
+  }
+
+  if (!Number.isFinite(parameters.readout_resonator_frequency_ghz)) {
+    errors.readout_resonator_frequency_ghz = '共振器周波数は有限の数値で入力してください。'
+  } else if (parameters.readout_resonator_frequency_ghz <= 0) {
+    errors.readout_resonator_frequency_ghz = '共振器周波数は 0 GHz より大きい値で入力してください。'
+  }
+
+  if (!Number.isFinite(parameters.readout_resonator_kappa_mhz)) {
+    errors.readout_resonator_kappa_mhz = 'κ/2π は有限の数値で入力してください。'
+  } else if (parameters.readout_resonator_kappa_mhz <= 0) {
+    errors.readout_resonator_kappa_mhz = 'κ/2π は 0 MHz より大きい値で入力してください。'
+  }
+
+  if (!Number.isFinite(parameters.readout_resonator_chi_mhz)) {
+    errors.readout_resonator_chi_mhz = 'χ/2π は有限の数値で入力してください。'
+  } else if (parameters.readout_resonator_chi_mhz < 0) {
+    errors.readout_resonator_chi_mhz = 'χ/2π は 0 MHz 以上で入力してください（大きさを入れます）。'
   }
 
   if (!Number.isFinite(parameters.duration_us)) {
@@ -249,7 +267,7 @@ function normalizePerQubitCalibration(
     ...settings,
     values: Array.from({ length: qubitCount }, (_, index) => settings.values[index] ?? ({
       t1_zero_temperature_us: parameters.t1_zero_temperature_us,
-      tphi_us: parameters.tphi_us,
+      tphi_zero_temperature_us: parameters.tphi_zero_temperature_us,
       p10: readoutError.p10,
       p01: readoutError.p01,
     })),
@@ -266,7 +284,7 @@ function validatePerQubitCalibration(
     if (!Number.isFinite(entry.t1_zero_temperature_us) || entry.t1_zero_temperature_us <= 0) {
       return `q${index} の T1（0 K）は0より大きい有限値にしてください。`
     }
-    if (!Number.isFinite(entry.tphi_us) || entry.tphi_us <= 0) {
+    if (!Number.isFinite(entry.tphi_zero_temperature_us) || entry.tphi_zero_temperature_us <= 0) {
       return `q${index} の Tφ は0より大きい有限値にしてください。`
     }
     if (readoutEnabled && (
@@ -603,8 +621,8 @@ export function SimulatePage({
     [updateSettings],
   )
   const toolboxSweepDelays = useMemo(
-    () => resolvedSweepDelays(toolboxSettings, simulationParameters.t1_zero_temperature_us, simulationParameters.tphi_us),
-    [toolboxSettings, simulationParameters.t1_zero_temperature_us, simulationParameters.tphi_us],
+    () => resolvedSweepDelays(toolboxSettings, simulationParameters.t1_zero_temperature_us, simulationParameters.tphi_zero_temperature_us),
+    [toolboxSettings, simulationParameters.t1_zero_temperature_us, simulationParameters.tphi_zero_temperature_us],
   )
   const toolboxCheck = useMemo(
     () => checkToolbox(toolboxSettings, circuitEditorStateToConfig(circuitState), toolboxSweepDelays),
@@ -880,9 +898,9 @@ export function SimulatePage({
         parameters: {
           ...simulationParameters,
           ...(resolvedPerQubitCalibration.enabled ? {
-            per_qubit: resolvedPerQubitCalibration.values.map(({ t1_zero_temperature_us, tphi_us }) => ({
+            per_qubit: resolvedPerQubitCalibration.values.map(({ t1_zero_temperature_us, tphi_zero_temperature_us }) => ({
               t1_zero_temperature_us,
-              tphi_us,
+              tphi_zero_temperature_us,
             })),
           } : {}),
         },

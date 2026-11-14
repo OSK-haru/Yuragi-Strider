@@ -192,7 +192,7 @@ def _environment(
 ) -> EnvironmentConfig:
     return EnvironmentConfig(
         t1_zero_temperature_us=100.0,
-        tphi_us=100.0,
+        tphi_zero_temperature_us=100.0,
         temperature_mk=temperature_mk,
         qubit_frequency_ghz=frequency_ghz,
         ideal_reference=ideal_reference,
@@ -206,7 +206,7 @@ def _assert_finite_nonnegative(test: unittest.TestCase, rates) -> None:
         rates.gamma_up_per_us,
         rates.gamma_phi_per_us,
         rates.t1_zero_temperature_us,
-        rates.tphi_us,
+        rates.tphi_zero_temperature_us,
         rates.t1_effective_us,
         rates.t2_effective_us,
     ]

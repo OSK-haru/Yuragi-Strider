@@ -1,0 +1,74 @@
+{
+  "validation": "thermal_photon_dephasing",
+  "decision": "D90",
+  "commit": "5ca287d84e3d45c6847e62830c313b8d12a04961",
+  "claim": "The production pure-dephasing term Gamma_th = (kappa/2) Re[sqrt((1 + 2i chi/kappa)^2 + 8i chi n/kappa) - 1] equals the long-time decay rate of the qubit coherence obtained by solving the qubit and its thermal readout resonator together (H = chi a^dag a sigma_z).",
+  "reference": "QuTiP mesolve of qubit x resonator, Fock dimension 14, log-linear fit for t > 10/kappa",
+  "scope": "Checks the rate formula only. The assumption that the resonator is at the same temperature as the qubit bath, and that other dephasing sources do not depend on temperature, is not tested here.",
+  "tolerance": {
+    "max_relative_rate_error": 0.0001
+  },
+  "cases": [
+    {
+      "name": "sample_resonator_120mK",
+      "temperature_mk": 120.0,
+      "readout_resonator_frequency_ghz": 7.0,
+      "readout_resonator_kappa_mhz": 1.0,
+      "readout_resonator_chi_mhz": 0.5,
+      "n_th_resonator": 0.06477780043776514,
+      "production_rate_per_us": 0.19730940092996588,
+      "fitted_rate_per_us": 0.19730938435687156,
+      "fit_max_log_residual": 5.971852805597422e-07,
+      "fit_start_us": 1.607464925228143,
+      "fit_end_us": 6.366197723675814,
+      "relative_error": 8.399546212934488e-08,
+      "pass": true
+    },
+    {
+      "name": "sample_resonator_200mK",
+      "temperature_mk": 200.0,
+      "readout_resonator_frequency_ghz": 7.0,
+      "readout_resonator_kappa_mhz": 1.0,
+      "readout_resonator_chi_mhz": 0.5,
+      "n_th_resonator": 0.22914049870566958,
+      "production_rate_per_us": 0.6521728307378729,
+      "fitted_rate_per_us": 0.6521728366704069,
+      "fit_max_log_residual": 1.0907795222614425e-07,
+      "fit_start_us": 1.607464925228143,
+      "fit_end_us": 6.366197723675814,
+      "relative_error": 9.096567259449437e-09,
+      "pass": true
+    },
+    {
+      "name": "weak_dispersive_150mK",
+      "temperature_mk": 150.0,
+      "readout_resonator_frequency_ghz": 6.5,
+      "readout_resonator_kappa_mhz": 2.0,
+      "readout_resonator_chi_mhz": 0.2,
+      "n_th_resonator": 0.14281952283419677,
+      "production_rate_per_us": 0.07660148573184457,
+      "fitted_rate_per_us": 0.07660150298468182,
+      "fit_max_log_residual": 1.915487410908412e-07,
+      "fit_start_us": 0.8037324626140715,
+      "fit_end_us": 3.183098861837907,
+      "relative_error": 2.2522849382401872e-07,
+      "pass": true
+    },
+    {
+      "name": "strong_dispersive_150mK",
+      "temperature_mk": 150.0,
+      "readout_resonator_frequency_ghz": 7.5,
+      "readout_resonator_kappa_mhz": 0.5,
+      "readout_resonator_chi_mhz": 2.0,
+      "n_th_resonator": 0.09981030749537731,
+      "production_rate_per_us": 0.3072721183056695,
+      "fitted_rate_per_us": 0.3072721197116604,
+      "fit_max_log_residual": 4.4071124682965035e-07,
+      "fit_start_us": 3.214929850456286,
+      "fit_end_us": 12.732395447351628,
+      "relative_error": 4.575719211171286e-09,
+      "pass": true
+    }
+  ],
+  "pass": true
+}

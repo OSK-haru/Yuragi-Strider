@@ -40,7 +40,7 @@ def _config(logical_qubits: int) -> SimulationConfig:
             initial_states=["0"] * logical_qubits,
             columns=[],
         ),
-        environment=EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_us=10.0, temperature_mk=0.0),
+        environment=EnvironmentConfig(t1_zero_temperature_us=10.0, tphi_zero_temperature_us=10.0, temperature_mk=0.0),
         duration_us=0.02,
         time_steps=2,
         simulation_backend="python_dense",

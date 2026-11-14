@@ -352,11 +352,27 @@ def validate_simulation_config(config: SimulationConfig) -> list[ValidationIssue
             f"Received qubit_frequency_ghz={environment.qubit_frequency_ghz!r}",
             "Set qubit_frequency_ghz to a positive frequency.",
         ))
+    for name in ("readout_resonator_frequency_ghz", "readout_resonator_kappa_mhz"):
+        value = getattr(environment, name)
+        if not _is_positive_finite(value):
+            issues.append(_error(
+                "INVALID_READOUT_RESONATOR",
+                f"{name} must be greater than 0.",
+                f"Received {name}={value!r}",
+                "Set the readout resonator frequency (GHz) and linewidth kappa/2pi (MHz) to positive values.",
+            ))
+    if not _is_non_negative_finite(environment.readout_resonator_chi_mhz):
+        issues.append(_error(
+            "INVALID_READOUT_RESONATOR",
+            "readout_resonator_chi_mhz must be zero or greater.",
+            f"Received readout_resonator_chi_mhz={environment.readout_resonator_chi_mhz!r}",
+            "Set chi/2pi in MHz (its magnitude; 0 means no dispersive coupling).",
+        ))
     times = [("t1_zero_temperature_us", environment.t1_zero_temperature_us),
-             ("tphi_us", environment.tphi_us)]
+             ("tphi_zero_temperature_us", environment.tphi_zero_temperature_us)]
     for index, entry in enumerate(environment.per_qubit):
         times.extend((f"per_qubit[{index}].{name}", entry[name])
-                     for name in ("t1_zero_temperature_us", "tphi_us"))
+                     for name in ("t1_zero_temperature_us", "tphi_zero_temperature_us"))
     for name, value in times:
         if not _is_positive_time(value):
             issues.append(_error(

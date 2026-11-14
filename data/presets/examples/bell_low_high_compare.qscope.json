@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "3.0",
   "kind": "yuragi_strider.comparison_config",
   "metadata": {
     "name": "Bell low/high comparison"
@@ -43,15 +43,21 @@
   },
   "environment_a": {
     "t1_zero_temperature_us": 60.0,
-    "tphi_us": 45.0,
+    "tphi_zero_temperature_us": 45.0,
     "temperature_mk": 20.0,
-    "qubit_frequency_ghz": 5.0
+    "qubit_frequency_ghz": 5.0,
+    "readout_resonator_frequency_ghz": 7.0,
+    "readout_resonator_kappa_mhz": 1.0,
+    "readout_resonator_chi_mhz": 0.5
   },
   "environment_b": {
     "t1_zero_temperature_us": 2.5,
-    "tphi_us": 2.5,
+    "tphi_zero_temperature_us": 2.5,
     "temperature_mk": 80.0,
-    "qubit_frequency_ghz": 5.0
+    "qubit_frequency_ghz": 5.0,
+    "readout_resonator_frequency_ghz": 7.0,
+    "readout_resonator_kappa_mhz": 1.0,
+    "readout_resonator_chi_mhz": 0.5
   },
   "simulation": {
     "duration_us": 20.0,

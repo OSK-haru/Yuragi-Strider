@@ -697,10 +697,13 @@ def _build_rates(
                     local_calibrations[index].t1_zero_temperature_us
                     if local_calibrations else environment.t1_zero_temperature_us
                 ),
-                tphi_us=(
-                    local_calibrations[index].tphi_us
-                    if local_calibrations else environment.tphi_us
+                tphi_zero_temperature_us=(
+                    local_calibrations[index].tphi_zero_temperature_us
+                    if local_calibrations else environment.tphi_zero_temperature_us
                 ),
+                readout_resonator_frequency_ghz=environment.readout_resonator_frequency_ghz,
+                readout_resonator_kappa_mhz=environment.readout_resonator_kappa_mhz,
+                readout_resonator_chi_mhz=environment.readout_resonator_chi_mhz,
                 ideal_reference=environment.ideal_reference,
             ),
             anharmonicity,

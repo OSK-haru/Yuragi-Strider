@@ -70,7 +70,7 @@ def _config(circuit: CircuitConfig) -> SimulationConfig:
         circuit=circuit,
         environment=EnvironmentConfig(
             t1_zero_temperature_us=100.0,
-            tphi_us=66.66666666666667,
+            tphi_zero_temperature_us=66.66666666666667,
             temperature_mk=10.0,
         ),
         duration_us=0.001,

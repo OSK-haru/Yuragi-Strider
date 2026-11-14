@@ -499,14 +499,17 @@ class ReadoutErrorRequest(BaseModel):
     per_qubit: list[ReadoutErrorQubitRequest] = Field(default_factory=list)
 
 
-REQUIRED_ENVIRONMENT_PARAMETERS = ("temperature_mk", "qubit_frequency_ghz", "t1_zero_temperature_us", "tphi_us")
+REQUIRED_ENVIRONMENT_PARAMETERS = (
+    "temperature_mk", "qubit_frequency_ghz", "t1_zero_temperature_us", "tphi_zero_temperature_us",
+    "readout_resonator_frequency_ghz", "readout_resonator_kappa_mhz", "readout_resonator_chi_mhz",
+)
 
 
 class QubitCoherenceRequest(BaseModel):
     """Per-qubit coherence times overriding the shared values."""
 
     t1_zero_temperature_us: float = Field(gt=0.0)
-    tphi_us: float = Field(gt=0.0)
+    tphi_zero_temperature_us: float = Field(gt=0.0)
 
     @model_validator(mode="before")
     @classmethod
@@ -517,12 +520,15 @@ class QubitCoherenceRequest(BaseModel):
 
 
 class SimulationParametersRequest(BaseModel):
-    """Environment and run parameters. The coherence times are measurable inputs (decision D89)."""
+    """Environment and run parameters. Every environment input is measurable (decisions D89, D90)."""
 
     temperature_mk: float | None = Field(default=None, ge=0.0)
     qubit_frequency_ghz: float | None = Field(default=None, gt=0.0)
     t1_zero_temperature_us: float | None = Field(default=None, gt=0.0)
-    tphi_us: float | None = Field(default=None, gt=0.0)
+    tphi_zero_temperature_us: float | None = Field(default=None, gt=0.0)
+    readout_resonator_frequency_ghz: float | None = Field(default=None, gt=0.0)
+    readout_resonator_kappa_mhz: float | None = Field(default=None, gt=0.0)
+    readout_resonator_chi_mhz: float | None = Field(default=None, ge=0.0)
     per_qubit: list[QubitCoherenceRequest] = Field(default_factory=list, max_length=18)
     ideal_reference: bool = False
     duration_us: float | None = Field(default=None, gt=0.0, le=MAX_API_DURATION_US)
@@ -1307,14 +1313,12 @@ def build_custom_circuit(
 
 
 def environment_from_parameters(parameters: SimulationParametersRequest) -> EnvironmentConfig:
-    """The environment of a request: measurable coherence times, temperature and frequency."""
+    """The environment of a request: coherence times at 0 K, temperature, frequency and readout resonator."""
     return EnvironmentConfig(
-        temperature_mk=_required(parameters.temperature_mk, "temperature_mk"),
-        qubit_frequency_ghz=_required(parameters.qubit_frequency_ghz, "qubit_frequency_ghz"),
-        t1_zero_temperature_us=_required(parameters.t1_zero_temperature_us, "t1_zero_temperature_us"),
-        tphi_us=_required(parameters.tphi_us, "tphi_us"),
+        **{name: _required(getattr(parameters, name), name) for name in REQUIRED_ENVIRONMENT_PARAMETERS},
         per_qubit=[
-            {"t1_zero_temperature_us": entry.t1_zero_temperature_us, "tphi_us": entry.tphi_us}
+            {"t1_zero_temperature_us": entry.t1_zero_temperature_us,
+             "tphi_zero_temperature_us": entry.tphi_zero_temperature_us}
             for entry in parameters.per_qubit
         ],
         ideal_reference=parameters.ideal_reference,

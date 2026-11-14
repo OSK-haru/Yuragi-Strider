@@ -181,7 +181,7 @@ def _run_with_state(
 def _environment() -> EnvironmentConfig:
     return EnvironmentConfig(
         t1_zero_temperature_us=39.810717055349734,
-        tphi_us=33.20178309308936,
+        tphi_zero_temperature_us=33.20178309308936,
         temperature_mk=15.0,
         qubit_frequency_ghz=5.0,
     )

@@ -195,7 +195,12 @@ qubit_frequency ─┘            │
                               ▼
                         γ↓ = γ0(1+n_th)
                         γ↑ = γ0·n_th
-tphi_us ─────────→ γφ = 1/Tφ
+tphi_zero_temperature_us ─→ γφ0 = 1/Tφ(0 K)
+                              │
+temperature_mk  ─→ n_r        │ (Bose-Einstein)
+readout_resonator ─┘ (f_r, κ, χ)
+                              ▼
+                  γφ = γφ0 + Γφ_th(n_r, κ, χ)
                               │
                               ▼
                     L↓ = √γ↓ σ⁻

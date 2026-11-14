@@ -190,7 +190,10 @@ def network_qutip_cases() -> tuple[NetworkQutipCase, ...]:
             "temperature_mk": 40.0,
             "qubit_frequency_ghz": 5.0,
             "t1_zero_temperature_us": 9.50567994816233,
-            "tphi_us": 6.8267674301233905,
+            "tphi_zero_temperature_us": 6.8267674301233905,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
         },
         "total_simulation_time_us": 0.02,
     })

@@ -170,7 +170,7 @@ class GateAwareMeasurementExecutionTests(unittest.TestCase):
         config = _measurement_config("fixed_step_rk4")
         config.environment.ideal_reference = False
         config.environment.t1_zero_temperature_us = 1e12
-        config.environment.tphi_us = 1e12
+        config.environment.tphi_zero_temperature_us = 1e12
         response = simulation_result_to_ui_response(
             run_simulation(config)
         )
@@ -213,7 +213,10 @@ class GateAwareMeasurementApiTests(unittest.TestCase):
                 "temperature_mk": 10.0,
                 "qubit_frequency_ghz": 5.0,
                 "t1_zero_temperature_us": 100.0,
-                "tphi_us": 66.66666666666667,
+                "tphi_zero_temperature_us": 66.66666666666667,
+                "readout_resonator_frequency_ghz": 7.0,
+                "readout_resonator_kappa_mhz": 1.0,
+                "readout_resonator_chi_mhz": 0.5,
                 "duration_us": 2.0,
                 "time_steps": 5,
                 "fidelity_threshold": 0.9,
@@ -384,7 +387,10 @@ def _api_payload(*, shots: int, seed: int) -> dict[str, object]:
             "temperature_mk": 10.0,
             "qubit_frequency_ghz": 5.0,
             "t1_zero_temperature_us": 100.0,
-            "tphi_us": 66.66666666666667,
+            "tphi_zero_temperature_us": 66.66666666666667,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "duration_us": 0.1,
             "time_steps": 11,
             "fidelity_threshold": 0.9,

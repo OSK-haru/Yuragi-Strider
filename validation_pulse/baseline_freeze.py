@@ -278,7 +278,10 @@ def _physical_payload() -> dict[str, Any]:
             "temperature_mk": 20.0,
             "qubit_frequency_ghz": 5.0,
             "t1_zero_temperature_us": 63.09573444801933,
-            "tphi_us": 54.19921423576098,
+            "tphi_zero_temperature_us": 54.19921423576098,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
         },
         "snapshot_options": {
             "uniform_count": 11,

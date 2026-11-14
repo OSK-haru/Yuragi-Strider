@@ -22,7 +22,7 @@ class ConfigIoTest(unittest.TestCase):
             circuit=CircuitConfig.one_qubit_h(),
             environment=EnvironmentConfig(
                 t1_zero_temperature_us=95.49925860214358,
-                tphi_us=64.63587019060685,
+                tphi_zero_temperature_us=64.63587019060685,
                 temperature_mk=11.8,
             ),
             duration_us=20.0,
@@ -52,12 +52,12 @@ class ConfigIoTest(unittest.TestCase):
     def test_config_to_dict_uses_qscope_envelope(self) -> None:
         encoded = config_to_dict(SimulationConfig())
 
-        self.assertEqual(encoded["schema_version"], "2.0")
+        self.assertEqual(encoded["schema_version"], "3.0")
         self.assertEqual(encoded["kind"], "yuragi_strider.config")
         self.assertIn("circuit", encoded)
         self.assertIn("environment", encoded)
         self.assertIn("t1_zero_temperature_us", encoded["environment"])
-        self.assertIn("tphi_us", encoded["environment"])
+        self.assertIn("tphi_zero_temperature_us", encoded["environment"])
         self.assertIn("simulation", encoded)
         json.dumps(encoded)
 

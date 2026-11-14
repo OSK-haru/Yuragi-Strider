@@ -48,7 +48,10 @@ export type PulseLabForm = {
   temperatureMk: number
   qubitFrequencyGhz: number
   t1ZeroTemperatureUs: number
-  tphiUs: number
+  tphiZeroTemperatureUs: number
+  readoutResonatorFrequencyGhz: number
+  readoutResonatorKappaMhz: number
+  readoutResonatorChiMhz: number
   gammaDownPerUs: number
   gammaUpPerUs: number
   gammaPhiPerUs: number
@@ -70,7 +73,7 @@ export type PulseLabForm = {
   networkQuasiStaticQuadratureOrder: 3 | 5
   networkPerQubitCalibrationEnabled: boolean
   networkT1Us: number[]
-  networkTphiUs: number[]
+  networkTphiZeroTemperatureUs: number[]
   networkReadoutP10: number[]
   networkReadoutP01: number[]
   readoutErrorEnabled: boolean

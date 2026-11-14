@@ -414,7 +414,10 @@ def _physical_gaussian_payload() -> dict[str, object]:
         "environment": {
             "input_mode": "physical",
             "t1_zero_temperature_us": 39.810717055349734,
-            "tphi_us": 33.20178309308936,
+            "tphi_zero_temperature_us": 33.20178309308936,
+            "readout_resonator_frequency_ghz": 7.0,
+            "readout_resonator_kappa_mhz": 1.0,
+            "readout_resonator_chi_mhz": 0.5,
             "temperature_mk": 15.0,
             "qubit_frequency_ghz": 5.0,
         },

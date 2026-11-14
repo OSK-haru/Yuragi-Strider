@@ -53,7 +53,7 @@ class RateVariableNamingRefactorTest(unittest.TestCase):
         self.assertEqual(rates.gamma_down_per_us, 0.0)
         self.assertEqual(rates.gamma_up_per_us, 0.0)
         self.assertTrue(math.isinf(rates.t1_effective_us))
-        self.assertTrue(math.isinf(rates.tphi_us))
+        self.assertTrue(math.isinf(rates.tphi_zero_temperature_us))
 
     def test_legacy_aliases_are_gone(self) -> None:
         rates = compute_environment_rates(_environment(temperature_mk=200.0))
@@ -67,7 +67,7 @@ class RateVariableNamingRefactorTest(unittest.TestCase):
 def _environment(*, temperature_mk: float, ideal_reference: bool = False) -> EnvironmentConfig:
     return EnvironmentConfig(
         t1_zero_temperature_us=100.0,
-        tphi_us=100.0,
+        tphi_zero_temperature_us=100.0,
         temperature_mk=temperature_mk,
         qubit_frequency_ghz=5.0,
         ideal_reference=ideal_reference,

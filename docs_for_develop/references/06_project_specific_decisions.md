@@ -71,7 +71,9 @@ MEASURE: 0.0 us
 `MODEL BASIS`（弱結合のGKSL）。入力の値そのものは利用者が与える。
 
 入力は、実機で測れる量だけにした: 0 KでのT1（`t1_zero_temperature_us`、$1/\gamma_0$）、
-純粋位相緩和の時間（`tphi_us`、$1/\gamma_\phi$）、温度、量子ビット周波数。
+純粋位相緩和の時間（D90で`tphi_zero_temperature_us`、0 Kでの$1/\gamma_\phi^{(0)}$に変更）、温度、量子ビット周波数、
+（D90から）読み出し共振器の周波数・$\kappa$・$\chi$。$\gamma_\phi=\gamma_\phi^{(0)}+\Gamma_\phi^\mathrm{th}$で、
+$\Gamma_\phi^\mathrm{th}$は共振器の熱光子による位相緩和（Clerk & Utami 2007）。
 $\gamma_\downarrow=\gamma_0(n_\mathrm{th}+1)$、$\gamma_\uparrow=\gamma_0 n_\mathrm{th}$、
 $1/T_1=\gamma_\downarrow+\gamma_\uparrow$。
 

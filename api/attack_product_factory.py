@@ -55,7 +55,11 @@ from core.experimental_isolation_physics.imperfect_reset import ImperfectResetSp
 from core.experimental_isolation_physics.reset_model import (
     PerQubitPhenomenologicalResetModel, PhenomenologicalResetModel, ResetModelRegistry,
 )
-from core.physical_environment import UNIFIED_ENVIRONMENT_MODEL, compute_environment_rates_per_qubit
+from core.physical_environment import (
+    READOUT_RESONATOR_FIELDS,
+    UNIFIED_ENVIRONMENT_MODEL,
+    compute_environment_rates_per_qubit,
+)
 from core.results import EnvironmentConfig
 
 
@@ -337,7 +341,7 @@ class ProductEnvironmentFactory:
                         required.add(f"qpu_service.idle_dynamics.qubits.{qubit_id}.{field}")
             elif idle.get("input_mode") == IDLE_INPUT_PHYSICAL and isinstance(idle.get("physical_inputs"), Mapping):
                 for field in ("environment_model", "temperature_mk", "qubit_frequency_ghz",
-                              "t1_zero_temperature_us", "tphi_us"):
+                              "t1_zero_temperature_us", "tphi_zero_temperature_us", *READOUT_RESONATOR_FIELDS):
                     required.add(f"qpu_service.idle_dynamics.physical_inputs.{field}")
                 overrides = idle["physical_inputs"].get("per_qubit")
                 if isinstance(overrides, Mapping):
@@ -846,7 +850,7 @@ def _build_idle_model(
         values = raw["physical_inputs"]
         fields = {
             "environment_model", "temperature_mk", "qubit_frequency_ghz",
-            "t1_zero_temperature_us", "tphi_us", "per_qubit",
+            "t1_zero_temperature_us", "tphi_zero_temperature_us", "per_qubit", *READOUT_RESONATOR_FIELDS,
         }
         if not isinstance(values, Mapping) or set(values) != fields:
             raise ValueError("physical mode requires explicit environment parameters and per-qubit overrides")
@@ -857,7 +861,18 @@ def _build_idle_model(
                                    minimum=0.0, strict_minimum=True)
         t1 = _finite_number(values["t1_zero_temperature_us"], "t1_zero_temperature_us", minimum=0.0,
                             strict_minimum=True)
-        tphi = _finite_number(values["tphi_us"], "tphi_us", minimum=0.0, strict_minimum=True)
+        tphi = _finite_number(values["tphi_zero_temperature_us"], "tphi_zero_temperature_us", minimum=0.0,
+                              strict_minimum=True)
+        resonator = {
+            "readout_resonator_frequency_ghz": _finite_number(
+                values["readout_resonator_frequency_ghz"], "readout_resonator_frequency_ghz",
+                minimum=0.0, strict_minimum=True),
+            "readout_resonator_kappa_mhz": _finite_number(
+                values["readout_resonator_kappa_mhz"], "readout_resonator_kappa_mhz",
+                minimum=0.0, strict_minimum=True),
+            "readout_resonator_chi_mhz": _finite_number(
+                values["readout_resonator_chi_mhz"], "readout_resonator_chi_mhz", minimum=0.0),
+        }
         per_qubit = values["per_qubit"]
         if not isinstance(per_qubit, Mapping) or set(per_qubit) - qubit_names:
             raise ValueError("per-qubit physical overrides must use retained physical qubit IDs")
@@ -865,8 +880,8 @@ def _build_idle_model(
         has_overrides = bool(per_qubit)
         for qubit_id in physical_qubit_ids:
             entry = per_qubit.get(str(qubit_id), {})
-            if not isinstance(entry, Mapping) or set(entry) - {"t1_zero_temperature_us", "tphi_us"}:
-                raise ValueError("per-qubit overrides may contain only t1_zero_temperature_us and tphi_us")
+            if not isinstance(entry, Mapping) or set(entry) - {"t1_zero_temperature_us", "tphi_zero_temperature_us"}:
+                raise ValueError("per-qubit overrides may contain only t1_zero_temperature_us and tphi_zero_temperature_us")
             normalized_overrides.append({
                 key: _finite_number(entry[key], f"qubit {qubit_id} {key}", minimum=0.0,
                                     strict_minimum=True)
@@ -874,7 +889,7 @@ def _build_idle_model(
             })
         # EnvironmentConfig is the same input envelope the simulator uses.
         rates_input = EnvironmentConfig(
-            t1_zero_temperature_us=t1, tphi_us=tphi, temperature_mk=temperature,
+            t1_zero_temperature_us=t1, tphi_zero_temperature_us=tphi, temperature_mk=temperature, **resonator,
             qubit_frequency_ghz=frequency, ideal_reference=False,
             per_qubit=normalized_overrides if has_overrides else [],
         )

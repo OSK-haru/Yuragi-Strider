@@ -183,12 +183,12 @@ export function processSimulationCount(settings: ToolboxSettings, qubitCount: nu
 export function resolvedSweepDelays(
   settings: ToolboxSettings,
   t1ZeroTemperatureUs: number,
-  tphiUs: number,
+  tphiZeroTemperatureUs: number,
 ): { t1: number; ramsey: number } {
   const auto = (base: number) => Math.min(10_000, Math.max(10, base * 3))
   return {
     t1: settings.t1MaximumDelayUs ?? auto(t1ZeroTemperatureUs),
-    ramsey: settings.ramseyMaximumDelayUs ?? auto(tphiUs),
+    ramsey: settings.ramseyMaximumDelayUs ?? auto(tphiZeroTemperatureUs),
   }
 }
 

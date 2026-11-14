@@ -21,11 +21,11 @@ from tests.physics_test_helpers import (
 class PhysicsInvariantsTest(unittest.TestCase):
     def test_representative_simulations_preserve_quantum_state_invariants(self) -> None:
         configs = [
-            make_one_qubit_h_config(make_physical_environment(t1_zero_temperature_us=1000000.0, tphi_us=1000000.0, temperature_mk=0.0)),
-            make_one_qubit_h_config(make_physical_environment(t1_zero_temperature_us=10.0, tphi_us=8.88419549416626, temperature_mk=37.0)),
+            make_one_qubit_h_config(make_physical_environment(t1_zero_temperature_us=1000000.0, tphi_zero_temperature_us=1000000.0, temperature_mk=0.0)),
+            make_one_qubit_h_config(make_physical_environment(t1_zero_temperature_us=10.0, tphi_zero_temperature_us=8.88419549416626, temperature_mk=37.0)),
             make_bell_config(make_physical_environment(
                 t1_zero_temperature_us=39.810717055349734,
-                tphi_us=19.952567035697975,
+                tphi_zero_temperature_us=19.952567035697975,
                 temperature_mk=80.0,
             )),
         ]

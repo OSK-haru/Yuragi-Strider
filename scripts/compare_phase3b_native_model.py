@@ -92,7 +92,7 @@ def main() -> int:
     t1_us = float(qubit["T1"]["value"])
     t2_us = float(qubit["T2"]["value"])
     tphi_inverse = 1.0 / t2_us - 1.0 / (2.0 * t1_us)
-    tphi_us = 1.0 / tphi_inverse if tphi_inverse > 0.0 else t2_us
+    tphi_zero_temperature_us = 1.0 / tphi_inverse if tphi_inverse > 0.0 else t2_us
     sx_length_us = next(
         item["parameters"]["gate_length"]["value"] * 1e-3
         for item in calibration["single_qubit_gate_properties"]
@@ -102,7 +102,7 @@ def main() -> int:
         temperature_mk=15.0,
         qubit_frequency_ghz=5.0,
         t1_zero_temperature_us=t1_us,
-        tphi_us=tphi_us,
+        tphi_zero_temperature_us=tphi_zero_temperature_us,
     )
     rates = compute_environment_rates(environment)
     collapse_ops = prepare_collapse_operators(

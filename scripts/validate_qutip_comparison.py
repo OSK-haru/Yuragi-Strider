@@ -117,7 +117,7 @@ def _piecewise_case(name, description, columns, n_qubits, down, up, phi, toleran
 
 
 def _physical_input_case(quanta_step_us):
-    environment = EnvironmentConfig(temperature_mk=100.0, qubit_frequency_ghz=5.0, t1_zero_temperature_us=100.0, tphi_us=100.0)
+    environment = EnvironmentConfig(temperature_mk=100.0, qubit_frequency_ghz=5.0, t1_zero_temperature_us=100.0, tphi_zero_temperature_us=100.0)
     rates = compute_environment_rates(environment)
     case = _idle_case("V7-6", "physical-input-derived rates", "+", rates.gamma_down_per_us, rates.gamma_up_per_us, rates.gamma_phi_per_us, 1e-7, quanta_step_us)
     case["environment_rates"] = {key: getattr(rates, key) for key in ("n_th", "gamma_down_per_us", "gamma_up_per_us", "gamma_phi_per_us")}
