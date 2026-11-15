@@ -10,7 +10,7 @@ from scipy.linalg import expm
 from core.attack_simulation.circuit_program import LocalCircuitCompiler
 from core.attack_simulation.concurrent_lanes import ConcurrentRegions
 from core.attack_simulation.coupled_regions import (
-    CoupledRegionWorld, RegionSide, ResidualZZSettings, WorldJob,
+    CoupledRegionWorld, CoupledTransmonSettings, RegionSide, ResidualZZSettings, WorldJob,
 )
 from core.attack_simulation.declared_execution import DeclaredQpuExecutor, JobExecutionWindow
 from core.attack_simulation.jobs import JobCommand, JobStatus
@@ -23,6 +23,8 @@ from core.experimental_isolation_physics.coherent_crosstalk import DriveCrosstal
 from core.experimental_isolation_physics.idle_evolution import IdleQubitSpec, IndependentIdleModel
 from core.experimental_isolation_physics.imperfect_reset import ImperfectResetSpec
 from core.experimental_isolation_physics.reset_model import PhenomenologicalResetModel, ResetModelRegistry
+from core.experimental_isolation_physics.transmon_cluster import TransmonCluster, TransmonSpec
+from core.pulse_transmon_network import TransmonExchangeCoupling
 from tests.test_concurrent_regions import pos, run_in_order
 from tests.test_local_program_runtime import program_json
 from tests.test_regional_state_bank import regional_store
@@ -55,7 +57,7 @@ def registry(success=1.0):
 
 
 def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.0, region_access=None,
-          durations=(1.0, 1.0), readout_dephasing=None):
+          durations=(1.0, 1.0), readout_dephasing=None, transmons=None):
     model, reg = registry(reset_success)
     idle = IndependentIdleModel((IdleQubitSpec(t1, tphi, 0.0),) * 2, 2)
     runtime = SharedQpuRuntime(
@@ -69,7 +71,8 @@ def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.
         regional_service_durations={(0, 1): durations, (2, 3): durations}, region_access=region_access)
     executor = DeclaredQpuExecutor(
         runtime=runtime, clock_domain="world", max_jobs=16, max_events_per_job=64, max_unresolved=16,
-        idle_model=idle, concurrent_regions=ConcurrentRegions(tuple(transfers), residual_zz=zz))
+        idle_model=idle,
+        concurrent_regions=ConcurrentRegions(tuple(transfers), residual_zz=zz, transmons=transmons))
     executor.frontier.set_target(pos(1000, 99))
     executor.frontier.seal_ingress(pos(1000, 99))
     return runtime, executor
@@ -151,10 +154,11 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(outcomes[1], {"01": 1})
 
 
-def dense_reference(jobs, sides, couplings, until_us):
+def dense_reference(jobs, sides, couplings, until_us, energies=None):
     """Union-register Lindblad evolution between instantaneous gates, independent of the world's machinery.
 
-    Gates have zero duration here, so every qubit relaxes all the time and ZZ acts throughout.
+    Gates have zero duration here, so every qubit relaxes all the time and ZZ acts throughout. ``energies``
+    adds a diagonal Hamiltonian given as one energy per basis state of the union register.
     """
     sizes = [len(side.region) for side in sides]
     n = sum(sizes)
@@ -171,6 +175,8 @@ def dense_reference(jobs, sides, couplings, until_us):
     hamiltonian = np.zeros((dim, dim), dtype=complex)
     for (sa, qa), (sb, qb), zeta in couplings:
         hamiltonian += zeta * single(number, offset[sa] + qa) @ single(number, offset[sb] + qb)
+    if energies is not None:
+        hamiltonian += np.diag(energies)
     collapse = []
     for s, side in enumerate(sides):
         for q, spec in enumerate(side.idle_model.qubits):
@@ -642,6 +648,83 @@ class WorldTests(unittest.TestCase):
         error = np.linalg.norm(self.joint(approx) - self.joint(exact))
         self.assertLessEqual(error, approx.stats.dropped_norm + 1e-12)
         self.assertLess(error, 5e-2)
+
+
+TWO_PI = 2.0 * math.pi
+DEVICES = {1: TransmonSpec(5.10, -330.0), 2: TransmonSpec(5.00, -310.0), 3: TransmonSpec(5.21, -320.0)}
+
+
+class DeviceValueTests(unittest.TestCase):
+    """The coupling declared by device values (frequency, anharmonicity, exchange J), not a measured ZZ (D91)."""
+
+    sides, scenario, joint, run_world = (WorldTests.sides, WorldTests.scenario, WorldTests.joint,
+                                         WorldTests.run_world)
+
+    def test_a_pair_from_device_values_is_the_world_of_its_zz(self):
+        size, until = 2, 2.35
+        strength = TWO_PI * 6.0
+        zeta = TransmonCluster((DEVICES[1], DEVICES[2]),
+                               (TransmonExchangeCoupling(0, 1, strength),)).zz_rad_per_us(0, 1)
+        self.assertGreater(abs(zeta) * until, 1.0)             # strong enough to matter in this scenario
+        devices = CoupledTransmonSettings(((1, DEVICES[1]), (2, DEVICES[2])), ((1, 2, strength),), model="exact")
+        measured = ResidualZZSettings((ResidualZZCoupling(1, 2, zeta),), model="exact")
+        from_devices, _, _ = self.run_world(size, devices, until)
+        from_zz, _, _ = self.run_world(size, measured, until)
+        np.testing.assert_allclose(self.joint(from_devices), self.joint(from_zz), atol=1e-10)
+
+    def test_a_three_qubit_cluster_matches_an_independent_reference(self):
+        # 1 -- 2 joins the regions and 2 -- 3 lies inside the second one: one cluster of three qubits.
+        size, until = 2, 2.35
+        exchange = ((1, 2, TWO_PI * 6.0), (2, 3, TWO_PI * 5.0))
+        settings = CoupledTransmonSettings(tuple(DEVICES.items()), exchange, model="exact")
+        world, sides, jobs = self.run_world(size, settings, until)
+        cluster = TransmonCluster(
+            tuple(DEVICES[q] for q in (1, 2, 3)),
+            (TransmonExchangeCoupling(0, 1, TWO_PI * 6.0), TransmonExchangeCoupling(1, 2, TWO_PI * 5.0)))
+        shift = {bits: cluster.frame_energies[cluster.label_index(bits)]
+                 for bits in ((a, b, c) for a in (0, 1) for b in (0, 1) for c in (0, 1))}
+        # The shift of |111> is not the sum of its pairs: the reference must carry the whole diagonal.
+        pairs = shift[(1, 1, 0)] + shift[(0, 1, 1)] + shift[(1, 0, 1)]
+        self.assertGreater(abs(shift[(1, 1, 1)] - pairs), 1e-3)
+        energies = [shift[((state >> 2) & 1, (state >> 1) & 1, state & 1)] for state in range(16)]
+        reference = dense_reference(jobs, sides, [], until, energies)
+        np.testing.assert_allclose(self.joint(world), reference, atol=1e-10)
+
+    def test_the_executor_reads_the_neighbor_through_an_exchange_coupling(self):
+        strength = TWO_PI * 2.0
+        zeta = TransmonCluster((DEVICES[1], DEVICES[2]),
+                               (TransmonExchangeCoupling(0, 1, strength),)).zz_rad_per_us(0, 1)
+        wait = math.pi / abs(zeta) - SX_US
+        outcomes = {}
+        for neighbor in (0, 1):
+            settings = CoupledTransmonSettings(((1, DEVICES[1]), (2, DEVICES[2])), ((1, 2, strength),),
+                                               model="exact")
+            runtime, executor = build(transmons=settings)
+            attacker_columns = ([[{"type": "X", "targets": [0]}]] if neighbor else []) + [
+                [{"type": "I", "targets": [0], "params": {"duration_us": wait + 10.0}}]]
+            attacker = submit(runtime, "attacker", attacker_columns, "a")
+            victim = submit(runtime, "victim", ramsey(wait), "v")
+            register(executor, attacker, 1.0, 0)
+            register(executor, victim, 3.0, 4)
+            run_in_order(executor)
+            outcomes[neighbor] = runtime.scheduler.get(victim.job_id).result["counts"]
+        self.assertEqual(outcomes[0], {"00": 1})
+        self.assertEqual(outcomes[1], {"01": 1})
+
+    def test_the_declaration_is_checked(self):
+        pair = ((1, DEVICES[1]), (2, DEVICES[2]))
+        with self.assertRaises(ValueError):                    # an undeclared transmon
+            CoupledTransmonSettings(pair, ((1, 3, 1.0),))
+        with self.assertRaises(ValueError):                    # the same pair twice
+            CoupledTransmonSettings(pair, ((1, 2, 1.0), (2, 1, 1.0)))
+        with self.assertRaises(ValueError):                    # not both descriptions of one coupling
+            ConcurrentRegions(residual_zz=ResidualZZSettings((ResidualZZCoupling(1, 2, 1.0),)),
+                              transmons=CoupledTransmonSettings(pair, ((1, 2, 1.0),)))
+        inside = CoupledTransmonSettings(((2, DEVICES[2]), (3, DEVICES[3])), ((2, 3, 1.0),), model="exact")
+        zero = np.zeros((4, 4), dtype=complex)
+        zero[0, 0] = 1.0
+        with self.assertRaises(ValueError):                    # a cluster inside one region
+            CoupledRegionWorld(self.sides(2, 30.0, 50.0), inside, (zero, zero), repetition_delay_us=0.0)
 
 
 if __name__ == "__main__":

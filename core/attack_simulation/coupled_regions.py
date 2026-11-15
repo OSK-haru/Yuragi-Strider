@@ -1,8 +1,12 @@
-"""Joint simulation of two concurrent regions coupled by residual ZZ (D85).
+"""Joint simulation of two concurrent regions coupled by residual ZZ (D85) or by exchange (D91).
 
-Residual ZZ between qubits of two tenants' regions entangles the regions, so the regions can no longer be
+A coupling between qubits of two tenants' regions entangles the regions, so the regions can no longer be
 advanced one job at a time from separate states (D81). Coupled regions are instead advanced together, in
 time order, on one joint state.
+
+The coupling is declared either as measured ZZ shifts (``ResidualZZSettings``) or as device values
+(``CoupledTransmonSettings``: frequency, anharmonicity and exchange ``J``), from which the static shifts of
+every coupled cluster follow (``TransmonCluster``). Both give each cluster one energy per basis state.
 
 The joint state is kept as a sum of products ``rho = sum_k A_k (x) B_k`` (operator Schmidt form). Local
 operations act on each factor; only the coupling raises the number of terms, and a compression after each
@@ -12,7 +16,9 @@ smallest terms (D79), and the dropped Hilbert-Schmidt norm is accumulated as the
 Physics in this module:
 
 * ZZ is ``H = sum zeta n_i n_j`` over the declared cross-region pairs (the conditional-shift convention of
-  ``ResidualZZCoupling``): qubit ``j`` runs ``zeta`` faster in angle while qubit ``i`` is in |1>.
+  ``ResidualZZCoupling``): qubit ``j`` runs ``zeta`` faster in angle while qubit ``i`` is in |1>. From device
+  values the cluster's Hamiltonian is the dressed frame's diagonal on the qubit labels: the same pair shifts,
+  plus the shifts that only appear with three or more qubits excited.
 * The coupled qubits (the "exposed" ones) evolve under ZZ together with their idle relaxation, with the
   exact superoperator of each interval (no splitting error). A qubit inside an instruction is busy: it does
   not relax, but ZZ keeps acting on it. Instructions themselves are instantaneous at their start time.
@@ -44,11 +50,15 @@ from core.cptp_liouvillian import dense_matrix_exponential, gksl_liouvillian_sup
 from core.experimental_isolation_physics.coherent_crosstalk import ResidualZZCoupling
 from core.experimental_isolation_physics.idle_evolution import IndependentIdleModel, relax_axes_in_place
 from core.experimental_isolation_physics.reset_model import ResetModelRegistry, ResetModelRequest
+from core.experimental_isolation_physics.transmon_cluster import TransmonCluster, TransmonSpec
+from core.pulse_transmon_network import TransmonExchangeCoupling
 from core.register_operations import (
     apply_local_replacement, apply_reset_with_feedback_kick, freeze_register, nonselective_measurement,
 )
 
 ZZ_MODELS = ("low_rank", "exact")
+TRANSMON_SOLVERS = ("effective",)   # how a cluster declared by device values is advanced (D91)
+MAX_CLUSTER_QUBITS = 4
 EXACT_MAX_UNION_QUBITS = 8          # the dense-computation limit; ``exact`` is only offered up to it (D79)
 _ROUND_OFF = 1e-14                  # relative singular value treated as zero, also in ``exact``
 _TIME_TOLERANCE = 1e-9              # us; absolute float coordinates of a window end differ by round-off
@@ -75,6 +85,50 @@ class ResidualZZSettings:
         object.__setattr__(self, "couplings", couplings)
         if self.model not in ZZ_MODELS:
             raise ValueError("unknown residual-ZZ model")
+        if type(self.max_rank) is not int or self.max_rank < 1:
+            raise ValueError("max_rank must be a positive integer")
+        truncation = float(self.truncation)
+        if not math.isfinite(truncation) or truncation < 0.0:
+            raise ValueError("truncation must be finite and nonnegative")
+        object.__setattr__(self, "truncation", truncation)
+
+
+@dataclass(frozen=True)
+class CoupledTransmonSettings:
+    """Frozen device values of the coupled qubits and of their exchange couplings (D91).
+
+    ``transmons`` gives every coupled physical qubit its measured frequency and anharmonicity; ``exchange``
+    is ``(physical qubit, physical qubit, J in rad/us)`` per coupled pair. A pair may lie inside one region,
+    but every cluster of coupled qubits must reach both regions. ``solver="effective"`` advances a cluster
+    with the static shifts of its dressed frame, computed with the declared levels and used on the qubit
+    levels; the rest is the approximation model of ``ResidualZZSettings``.
+    """
+
+    transmons: tuple[tuple[int, TransmonSpec], ...]
+    exchange: tuple[tuple[int, int, float], ...]
+    solver: str = "effective"
+    model: str = "low_rank"
+    max_rank: int = 32
+    truncation: float = 1e-6
+
+    def __post_init__(self) -> None:
+        transmons = tuple((qubit, spec) for qubit, spec in self.transmons)
+        qubits = [qubit for qubit, _ in transmons]
+        if (not transmons or any(type(qubit) is not int or qubit < 0 or type(spec) is not TransmonSpec
+                                 for qubit, spec in transmons) or len(set(qubits)) != len(qubits)):
+            raise ValueError("transmons must give each coupled physical qubit one TransmonSpec")
+        object.__setattr__(self, "transmons", transmons)
+        exchange = tuple((left, right, float(strength)) for left, right, strength in self.exchange)
+        pairs = [frozenset((left, right)) for left, right, _ in exchange]
+        if (not exchange or len(set(pairs)) != len(pairs)
+                or any(len(pair) != 2 or not pair <= set(qubits) for pair in pairs)
+                or any(not math.isfinite(strength) or strength < 0.0 for _, _, strength in exchange)):
+            raise ValueError("exchange couplings join two declared transmons, once each, with J >= 0")
+        object.__setattr__(self, "exchange", exchange)
+        if self.solver not in TRANSMON_SOLVERS:
+            raise ValueError("unknown coupled-transmon solver")
+        if self.model not in ZZ_MODELS:
+            raise ValueError("unknown approximation model")
         if type(self.max_rank) is not int or self.max_rank < 1:
             raise ValueError("max_rank must be a positive integer")
         truncation = float(self.truncation)
@@ -154,7 +208,8 @@ class WorldStats:
 class CoupledRegionWorld:
     """Two regions advanced together on one joint state. Copy before advancing a candidate."""
 
-    def __init__(self, sides: tuple[RegionSide, RegionSide], settings: ResidualZZSettings,
+    def __init__(self, sides: tuple[RegionSide, RegionSide],
+                 settings: ResidualZZSettings | CoupledTransmonSettings,
                  initial_states: tuple[np.ndarray, np.ndarray], *, repetition_delay_us: float) -> None:
         if len(sides) != 2 or set(sides[0].region) & set(sides[1].region):
             raise ValueError("coupled regions must be two disjoint regions")
@@ -165,14 +220,27 @@ class CoupledRegionWorld:
         if settings.model == "exact" and sum(sizes) > EXACT_MAX_UNION_QUBITS:
             raise ValueError("the exact residual-ZZ model is limited to two regions of at most 8 qubits together")
         location = {q: (s, side.region.index(q)) for s, side in enumerate(sides) for q in side.region}
-        edges = []
-        for coupling in settings.couplings:
-            ends = (location.get(coupling.left), location.get(coupling.right))
-            if None in ends or ends[0][0] == ends[1][0]:
-                raise ValueError("a residual-ZZ pair must join the two regions")
-            a, b = sorted(ends)
-            edges.append((a[1], b[1], float(coupling.conditional_shift_rad_per_us)))
-        self._components = _components(edges)
+        if type(settings) is ResidualZZSettings:
+            edges = []
+            for coupling in settings.couplings:
+                ends = (location.get(coupling.left), location.get(coupling.right))
+                if None in ends or ends[0][0] == ends[1][0]:
+                    raise ValueError("a residual-ZZ pair must join the two regions")
+                edges.append((*sorted(ends), float(coupling.conditional_shift_rad_per_us)))
+            self._components = tuple((slots_a, slots_b, _pair_shift_energies(slots_a, slots_b, group))
+                                     for slots_a, slots_b, group in _clusters(edges))
+        elif type(settings) is CoupledTransmonSettings:
+            specs = dict(settings.transmons)
+            if any(qubit not in location for qubit in specs):
+                raise ValueError("a coupled transmon lies outside the two regions")
+            edges = [(*sorted((location[left], location[right])), strength)
+                     for left, right, strength in settings.exchange]
+            physical = {place: qubit for qubit, place in location.items()}
+            self._components = tuple(
+                (slots_a, slots_b, _device_energies(slots_a, slots_b, group, lambda place: specs[physical[place]]))
+                for slots_a, slots_b, group in _clusters(edges))
+        else:
+            raise TypeError("coupled regions need ResidualZZSettings or CoupledTransmonSettings")
         self.exposed = (frozenset(q for comp in self._components for q in comp[0]),
                         frozenset(q for comp in self._components for q in comp[1]))
         self.factors = tuple(np.asarray(state, dtype=complex).reshape(1, *np.shape(state)).copy()
@@ -489,7 +557,7 @@ class CoupledRegionWorld:
         self.zz_time = time_us
 
     def _apply_component(self, component, elapsed: float, idle) -> None:
-        slots_a, slots_b, edges = component
+        slots_a, slots_b, _ = component
         mask = tuple((0, s) in idle for s in slots_a) + tuple((1, s) in idle for s in slots_b)
         key = (id(component), elapsed, mask)
         factors = self._cache.get(key)
@@ -689,20 +757,54 @@ class CoupledRegionWorld:
 # ----- helpers ---------------------------------------------------------------------------------------------
 
 
-def _components(edges):
-    """Group coupled pairs that share a qubit: ``((A slots), (B slots), ((a, b, zeta), ...))`` each."""
-    groups: list[tuple[set, set, list]] = []
-    for a, b, zeta in edges:
-        hits = [g for g in groups if a in g[0] or b in g[1]]
-        merged = (set().union(*(g[0] for g in hits), {a}), set().union(*(g[1] for g in hits), {b}),
-                  [e for g in hits for e in g[2]] + [(a, b, zeta)])
+def _clusters(edges):
+    """Group coupled pairs that share a qubit: ``((A slots), (B slots), (((side, slot), (side, slot), strength), ...))``.
+
+    Every cluster must reach both regions; a cluster inside one region would be that tenant's own coupling,
+    which the gate calibration already contains.
+    """
+    groups: list[tuple[set, list]] = []
+    for left, right, strength in edges:
+        hits = [g for g in groups if left in g[0] or right in g[0]]
+        merged = (set().union(*(g[0] for g in hits), {left, right}),
+                  [e for g in hits for e in g[1]] + [(left, right, strength)])
         groups = [g for g in groups if g not in hits] + [merged]
     result = []
-    for slots_a, slots_b, group_edges in groups:
-        if len(slots_a) + len(slots_b) > 4:
-            raise ValueError("a residual-ZZ cluster may join at most four qubits")
-        result.append((tuple(sorted(slots_a)), tuple(sorted(slots_b)), tuple(group_edges)))
+    for nodes, group_edges in groups:
+        slots_a = tuple(sorted(slot for side, slot in nodes if side == 0))
+        slots_b = tuple(sorted(slot for side, slot in nodes if side == 1))
+        if not slots_a or not slots_b:
+            raise ValueError("a coupled cluster must join the two regions")
+        if len(nodes) > MAX_CLUSTER_QUBITS:
+            raise ValueError(f"a coupled cluster may join at most {MAX_CLUSTER_QUBITS} qubits")
+        result.append((slots_a, slots_b, tuple(group_edges)))
     return tuple(result)
+
+
+def _pair_shift_energies(slots_a, slots_b, edges) -> np.ndarray:
+    """Energy of each basis state of the cluster under ``sum zeta n_i n_j`` (A slots most significant)."""
+    qubits = [(0, s) for s in slots_a] + [(1, s) for s in slots_b]
+    count = len(qubits)
+    position = {qubit: index for index, qubit in enumerate(qubits)}
+    energies = np.zeros(1 << count)
+    for left, right, zeta in edges:
+        i, j = position[left], position[right]
+        for state in range(1 << count):
+            if (state >> (count - 1 - i)) & 1 and (state >> (count - 1 - j)) & 1:
+                energies[state] += zeta
+    return energies
+
+
+def _device_energies(slots_a, slots_b, edges, spec_of) -> np.ndarray:
+    """The dressed frame's energy of each qubit label of the cluster, from its device values (D91)."""
+    qubits = [(0, s) for s in slots_a] + [(1, s) for s in slots_b]
+    count = len(qubits)
+    position = {qubit: index for index, qubit in enumerate(qubits)}
+    cluster = TransmonCluster(
+        tuple(spec_of(qubit) for qubit in qubits),
+        tuple(TransmonExchangeCoupling(position[left], position[right], strength) for left, right, strength in edges))
+    return np.array([cluster.frame_energies[cluster.label_index(
+        tuple((state >> (count - 1 - index)) & 1 for index in range(count)))] for state in range(1 << count)])
 
 
 _SIGMA_MINUS = np.array([[0, 1], [0, 0]], dtype=complex)   # |0><1|
@@ -711,17 +813,9 @@ _SIGMA_Z = np.array([[1, 0], [0, -1]], dtype=complex)
 
 def _component_factors(component, elapsed: float, mask, sides):
     """``exp(L t)`` on the cluster split as ``sum_m X_m (x) Y_m`` (A-side and B-side superoperators on blocks)."""
-    slots_a, slots_b, edges = component
+    slots_a, slots_b, energies = component
     qubits = [(0, s) for s in slots_a] + [(1, s) for s in slots_b]
     count = len(qubits)
-    dimension = 1 << count
-    position = {qubit: index for index, qubit in enumerate(qubits)}
-    energies = np.zeros(dimension)
-    for a, b, zeta in edges:
-        i, j = position[(0, a)], position[(1, b)]
-        for state in range(dimension):
-            if (state >> (count - 1 - i)) & 1 and (state >> (count - 1 - j)) & 1:
-                energies[state] += zeta
     collapse = []
     for index, ((side, slot), idle) in enumerate(zip(qubits, mask)):
         if not idle:

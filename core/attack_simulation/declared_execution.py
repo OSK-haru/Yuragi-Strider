@@ -163,14 +163,15 @@ class DeclaredQpuExecutor:
                 store.bind_transaction_lock(gate)
             self._lanes = {region: RegionLane(region, store) for region, store in stores.items()}
             runtime.scheduler.bind_lanes(runtime.region_of)
-        # Residual ZZ entangles the two regions: they then share one joint world, advanced in time order (D85).
+        # A coupling (measured ZZ, or exchange from device values) entangles the two regions: they then share
+        # one joint world, advanced in time order (D85, D91).
         self._world = None
         self._world_side: dict[tuple[int, ...], int] = {}
-        if concurrent_regions is not None and concurrent_regions.residual_zz is not None:
+        if concurrent_regions is not None and concurrent_regions.coupling is not None:
             regions = tuple(self._lanes)
             durations = runtime.regional_service_durations
             if any(runtime.regional_idle_models.get(region) is None for region in regions):
-                raise ValueError("residual ZZ needs an explicit idle model for both regions")
+                raise ValueError("coupled regions need an explicit idle model for both regions")
             sides = tuple(RegionSide(region, runtime.regional_idle_models[region], runtime.regional_reset_models[region],
                                      runtime.config.reset_model_id, *durations[region],
                                      handover_reset_count=runtime.config.reset_count,
@@ -179,7 +180,7 @@ class DeclaredQpuExecutor:
                                      readout_dephasing_per_us=runtime.config.readout_dephasing_per_us)
                           for region in regions)
             self._world = CoupledRegionWorld(
-                sides, concurrent_regions.residual_zz,
+                sides, concurrent_regions.coupling,
                 tuple(np.asarray(self._lanes[region].store.read().density_matrix, dtype=complex)
                       for region in regions),
                 repetition_delay_us=runtime.config.repetition_delay_us)

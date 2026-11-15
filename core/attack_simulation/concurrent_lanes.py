@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
-from core.attack_simulation.coupled_regions import ResidualZZSettings
+from core.attack_simulation.coupled_regions import CoupledTransmonSettings, ResidualZZSettings
 from core.attack_simulation.concurrent_windows import (
     DriveSchedule, ExecutionWindow, gap_before, gap_leaks, leaks_into,
 )
@@ -33,10 +33,21 @@ class ConcurrentRegions:
     pulse_shape: PulseShape = SQUARE_SHAPE
     # Cross-region residual ZZ; when present the two regions share one joint world (D85).
     residual_zz: ResidualZZSettings | None = None
+    # The same coupling declared by device values instead (frequency, anharmonicity, exchange J; D91).
+    transmons: CoupledTransmonSettings | None = None
+
+    @property
+    def coupling(self) -> ResidualZZSettings | CoupledTransmonSettings | None:
+        """What couples the two regions' states, if anything; with it they share one joint world."""
+        return self.residual_zz if self.residual_zz is not None else self.transmons
 
     def __post_init__(self) -> None:
         if self.residual_zz is not None and type(self.residual_zz) is not ResidualZZSettings:
             raise TypeError("residual_zz must be ResidualZZSettings")
+        if self.transmons is not None and type(self.transmons) is not CoupledTransmonSettings:
+            raise TypeError("transmons must be CoupledTransmonSettings")
+        if self.residual_zz is not None and self.transmons is not None:
+            raise ValueError("declare the coupling once: measured ZZ or device values, not both")
         transfers = tuple(self.transfers)
         if any(type(item) is not DriveCrosstalkTransfer for item in transfers):
             raise TypeError("transfers must contain DriveCrosstalkTransfer values")

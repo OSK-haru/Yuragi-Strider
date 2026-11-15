@@ -47,6 +47,13 @@ class PulseShape:
         norm = sigma * math.sqrt(2.0 * math.pi) * math.erf(self.truncation_sigma / math.sqrt(2.0))
         return np.where(inside, np.exp(-0.5 * ((u - 0.5) / sigma) ** 2) / norm, 0.0)
 
+    def slope(self, u: np.ndarray) -> np.ndarray:
+        """Derivative of ``density`` inside ``[0, 1]`` (the steps at the two ends are not included)."""
+        u = np.asarray(u, dtype=float)
+        if self.kind == "square":
+            return np.zeros_like(u)
+        return -(u - 0.5) / self._sigma ** 2 * self.density(u)
+
     def cumulative(self, u: np.ndarray) -> np.ndarray:
         """Fraction of the area before ``u``, clipped to ``[0, 1]``."""
         u = np.clip(np.asarray(u, dtype=float), 0.0, 1.0)
