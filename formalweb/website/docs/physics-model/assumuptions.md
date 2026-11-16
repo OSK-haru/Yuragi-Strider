@@ -69,7 +69,7 @@ $$
 | モンテカルロ軌跡(quantum trajectory) | **未実装**。API上は `trajectory_available: false` を返す |
 | 有効ハミルトニアン / no-jump発展 | 未実装 |
 | 実機校正に基づく予測 | 未実装 |
-| クロストーク・伝達関数 | 未実装 |
+| クロストーク・伝達関数 | 本体のシミュレーターでは未実装。[攻撃シミュレーター](/docs/limitations/attack-simulator)の同時共有では、駆動クロストークと領域間の残留ZZ・交換結合を扱う（伝達関数は未実装） |
 | Gate-awareモデルとPulse-levelモデルの連携 | 未実装(Pulse Labは単発パルスのみで、回路を消費しない) |
 
 ### 規模の上限

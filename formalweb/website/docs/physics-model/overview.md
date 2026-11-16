@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # 物理モデルの概要
 
-Yuragi-Striderでは、ユーザーが設定した量子回路と、0 Kでの $T_1$・$T_\phi$・温度・量子ビット周波数という環境パラメータから、制御項と散逸項を構成します。
+Yuragi-Striderでは、ユーザーが設定した量子回路と、0 Kでの $T_1$・$T_\phi$、温度、量子ビット周波数、読み出し共振器（周波数・κ・χ）という環境パラメータから、制御項と散逸項を構成します。
 
 制御モデルとして **Gate-awareモデル** または **Pulse-levelモデル** を選択し、各時間区間のハミルトニアンを決定します。さらに環境パラメータから緩和・熱励起・位相緩和のレートと崩壊演算子を導出し、Lindblad型(GKSL型)の時間発展方程式を構成します。
 
@@ -17,7 +17,7 @@ Yuragi-Striderでは、ユーザーが設定した量子回路と、0 Kでの $T
 
 ```text
 [1] 入力          量子回路 (H, CNOT, Rz, 測定 …)
-                  環境パラメータ (T, S_Φ(ω), ω_q/2π, T₁, T₂ …)
+                  環境パラメータ (T, ω_q/2π, T₁(0 K), T_φ(0 K), 読み出し共振器 f_r・κ・χ)
                         │
 [2] モデル構成    制御モデル  Gate-aware または Pulse-level  →  H(t)
                   散逸モデル  緩和 T₁ / 熱励起 n_th / 位相緩和 T_φ  →  {L_k}
@@ -58,7 +58,7 @@ $$
 
 ```text
 evolution_mode:   gate_aware_hamiltonian_lindblad_v1
-environment:      generic_superconducting_open_system_v1
+environment:      generic_superconducting_open_system_v3
 hamiltonian_mode: effective_unitary_spectral_generator_v2
 native_gate_set:  gate_aware_hxyzst_rz_cnot_v3
 ```
