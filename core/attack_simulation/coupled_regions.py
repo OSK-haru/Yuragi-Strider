@@ -253,10 +253,9 @@ class _Progress:
     first_shot_us: float = 0.0
     handover: tuple | None = None   # (reduced state, duration) of the handover service reset
     pulses: tuple = ()              # the pulses of cluster qubits, absolute times (reference solver)
-    research_stats: dict = field(default_factory=lambda: {
-        "compressions": 0, "max_rank": 1, "dropped_norm": 0.0,
-        "dropped_correlation": 0.0, "clipped_eigenvalue": 0.0, "late_kicks": 0,
-    })
+    # Research channel (D93), never part of the job's result: what concerns this job alone ...
+    research_stats: dict = field(default_factory=lambda: {"clipped_eigenvalue": 0.0, "late_kicks": 0})
+    research_world: dict | None = None  # ... and the shared world's cumulative WorldStats at its last commit
     research_measurements: list = field(default_factory=list)
     current_shot: int = 0
 
@@ -266,7 +265,8 @@ class _Progress:
         return _Progress(self.actions, self.layout, self.pointer, self.last_seq, self.last_time, Counter(self.applied), generator,
                          dict(self.counts), list(self.records), dict(self.assignment), self.duration,
                          list(self.classical), self.first_shot_us, self.handover, self.pulses,
-                         dict(self.research_stats), list(self.research_measurements), self.current_shot)
+                         dict(self.research_stats), None if self.research_world is None else dict(self.research_world),
+                         list(self.research_measurements), self.current_shot)
 
     @property
     def done(self) -> bool:
@@ -394,7 +394,6 @@ class CoupledRegionWorld:
         self.zz_time = 0.0
         self.progress: dict[str, _Progress] = {}
         self.stats = WorldStats()
-        self._active_progress: _Progress | None = None
         self._cache: dict = {}
 
     # ----- lifecycle -------------------------------------------------------------------------------------
@@ -413,7 +412,6 @@ class CoupledRegionWorld:
         other.zz_time = self.zz_time
         other.progress = {job_id: item.copy() for job_id, item in self.progress.items()}
         other.stats = WorldStats(**vars(self.stats))
-        other._active_progress = None
         return other
 
     def advance_to(self, time_us: float, jobs: Sequence[WorldJob]) -> None:
@@ -445,24 +443,7 @@ class CoupledRegionWorld:
                 break
             _, actual, seq, kind, payload = pending[index]
             progress = self.progress[job.job_id]
-            # Attribute counter increments to the job action that advances the shared world to this event.
-            before = WorldStats(**vars(self.stats))
-            self._active_progress = progress
-            try:
-                self._do(job, progress, kind, payload, when, actual)
-            finally:
-                self._active_progress = None
-            after = self.stats
-            progress.research_stats["compressions"] += after.compressions - before.compressions
-            progress.research_stats["dropped_norm"] += after.dropped_norm - before.dropped_norm
-            progress.research_stats["dropped_correlation"] += after.dropped_correlation - before.dropped_correlation
-            if after.clipped_eigenvalue < before.clipped_eigenvalue:
-                progress.research_stats["clipped_eigenvalue"] = min(
-                    progress.research_stats["clipped_eigenvalue"], after.clipped_eigenvalue)
-            rank_now = len(self.factors[0])
-            if after.max_rank > before.max_rank:
-                rank_now = max(rank_now, after.max_rank)
-            progress.research_stats["max_rank"] = max(progress.research_stats["max_rank"], rank_now)
+            self._do(job, progress, kind, payload, when, actual)
             progress.last_seq, progress.last_time = seq, when
             if kind != "kick":
                 progress.pointer += 1
@@ -504,15 +485,26 @@ class CoupledRegionWorld:
         return progress.records, progress.counts
 
     def research_diagnostics(self, job_id: str) -> dict:
-        """Return research data separately from results.
+        """Research data kept apart from the job's result (D93).
 
-        Cumulative counter increments are attributed to the action that advances the shared world;
-        consequently a concurrent job's evolution can be included in that action's interval.
+        ``job``: the leaks of this job that became known late, and the most negative eigenvalue clipped from
+        this job's recorded states. ``world``: the shared world's cumulative ``WorldStats`` at the job's last
+        commit. ``measurements``: per measurement, the level probabilities of the measured qubits just before
+        the draw (before the readout assignment error the counts include), with the world's cumulative
+        dropped norms at that moment.
+
+        The dropped norms are not split between jobs: a term dropped while the world advanced for the other
+        tenant changes this tenant's state as much as one dropped for its own job, so only the world total up
+        to a measurement speaks for that measurement. They are Hilbert-Schmidt sums and not a rigorous bound
+        on a probability (a non-unital map can enlarge the Hilbert-Schmidt norm of an error, and conditioning
+        on an earlier outcome divides it by that outcome's probability); check a result by running again with
+        ``truncation=0`` (or a larger ``max_rank``) and comparing.
         """
         progress = self.progress[job_id]
         if not progress.done:
             raise ValueError("the job has not been simulated through its finish")
-        return {"world_stats": dict(progress.research_stats),
+        return {"job": dict(progress.research_stats),
+                "world": None if progress.research_world is None else dict(progress.research_world),
                 "measurements": [dict(item) for item in progress.research_measurements]}
 
     def handover_record(self, job_id: str) -> tuple | None:
@@ -861,6 +853,7 @@ class CoupledRegionWorld:
         if kind == "commit":
             self.settle(side_index, when)
             progress.records.append((self.reduced_state(side_index, progress), progress.duration))
+            progress.research_world = dict(vars(self.stats))
             return
         raise ValueError("unknown world action")
 
@@ -1027,9 +1020,6 @@ class CoupledRegionWorld:
             self.stats.dropped_norm += dropped
         self.stats.compressions += 1
         self.stats.max_rank = max(self.stats.max_rank, keep)
-        if self._active_progress is not None:
-            self._active_progress.research_stats["max_rank"] = max(
-                self._active_progress.research_stats["max_rank"], keep)
         return q_left @ (u[:, :keep] * singular[:keep]), q_right @ vh[:keep].T
 
     # ----- local operations -------------------------------------------------------------------------------
@@ -1252,8 +1242,10 @@ class CoupledRegionWorld:
             research_probability = marginal / float(marginal.sum())
             progress.research_measurements.append({
                 "shot": int(progress.current_shot), "slots": tuple(slots),
+                "world_dropped_norm": float(self.stats.dropped_norm),
+                "world_dropped_correlation": float(self.stats.dropped_correlation),
                 "dimensions": tuple(dims[slot] for slot in slots),
-                "probabilities": tuple(float(value) for value in research_probability),
+                "level_probabilities": tuple(float(value) for value in research_probability),
             })
         draw = generator.random() * float(marginal.sum())
         outcome = min(int(np.searchsorted(np.cumsum(marginal), draw, side="right")), len(marginal) - 1)

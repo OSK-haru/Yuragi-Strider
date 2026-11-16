@@ -669,13 +669,35 @@ class ProductModelTests(unittest.TestCase):
             result = runtime.scheduler.get(job.job_id).result
             self.assertEqual(set(result), {"shots", "counts"})
             diagnostic = executor.research_diagnostics(job.job_id)
-            self.assertEqual(diagnostic["world_stats"]["dropped_norm"], 0.0)
-            self.assertEqual(diagnostic["world_stats"]["dropped_correlation"], 0.0)
+            self.assertEqual(diagnostic["world"]["dropped_norm"], 0.0)
+            self.assertEqual(diagnostic["world"]["dropped_correlation"], 0.0)
             measurement, = diagnostic["measurements"]
             self.assertEqual(measurement["shot"], 0)
-            self.assertEqual(sum(measurement["probabilities"]), 1.0)
-            results.append(measurement["probabilities"])
+            self.assertEqual(measurement["world_dropped_norm"], 0.0)
+            self.assertAlmostEqual(sum(measurement["level_probabilities"]), 1.0, places=12)
+            results.append(measurement["level_probabilities"])
         np.testing.assert_allclose(results[0], results[1], atol=1e-12)
+
+    def test_each_measurement_carries_the_world_total_dropped_up_to_it(self):
+        """Terms dropped while the world advanced for either tenant count for every later measurement."""
+        sides = WorldTests.sides(self, 3, 30.0, 50.0)
+        zero = np.zeros((8, 8), dtype=complex)
+        zero[0, 0] = 1.0
+        settings = ResidualZZSettings((ResidualZZCoupling(2, 3, 2.0),), model="low_rank", max_rank=4,
+                                      truncation=1e-3)
+        world = CoupledRegionWorld(sides, settings, (zero, zero), repetition_delay_us=0.0)
+        jobs = self.scenario(3)
+        world.advance_to(10.0, jobs)
+        self.assertGreater(world.stats.dropped_norm, 0.0)
+        for job in jobs:
+            diagnostic = world.research_diagnostics(job.job_id)
+            totals = [item["world_dropped_norm"] for item in diagnostic["measurements"]]
+            self.assertEqual(totals, sorted(totals))
+            self.assertLessEqual(totals[-1], diagnostic["world"]["dropped_norm"])
+            self.assertLessEqual(diagnostic["world"]["dropped_norm"], world.stats.dropped_norm)
+        # The job measured last sees what was dropped for the other one too.
+        last = max(jobs, key=lambda job: world.research_diagnostics(job.job_id)["measurements"][-1]["world_dropped_norm"])
+        self.assertGreater(world.research_diagnostics(last.job_id)["measurements"][-1]["world_dropped_norm"], 0.0)
 
     def wait(self, initial_b, model, step=0.01, zeta=2.0, until=math.pi / 2.0, t1=math.inf):
         """One qubit per region, A in |+>, ZZ for ``until``; returns A's state and the world."""
