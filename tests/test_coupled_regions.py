@@ -651,6 +651,75 @@ class WorldTests(unittest.TestCase):
         self.assertLess(error, 5e-2)
 
 
+class ProductModelTests(unittest.TestCase):
+    """``product``: no joint state; the coupling acts on each region through the other's state (D92)."""
+
+    sides, scenario, joint, run_world = (WorldTests.sides, WorldTests.scenario, WorldTests.joint,
+                                         WorldTests.run_world)
+
+    def wait(self, initial_b, model, step=0.01, zeta=2.0, until=math.pi / 2.0, t1=math.inf):
+        """One qubit per region, A in |+>, ZZ for ``until``; returns A's state and the world."""
+        sides = self.sides(1, t1, math.inf)
+        plus = np.full((2, 2), 0.5, dtype=complex)
+        settings = ResidualZZSettings((ResidualZZCoupling(0, 1, zeta),), model=model, product_phase_step_rad=step)
+        world = CoupledRegionWorld(sides, settings, (plus, np.asarray(initial_b, dtype=complex)),
+                                   repetition_delay_us=0.0)
+        world.advance_to(until, [])
+        world.settle(0, until)
+        world.settle(1, until)
+        return world.reduced_state(0), world
+
+    def test_the_neighbour_in_superposition_dephases_exactly_but_only_shifts_the_phase_in_product(self):
+        plus = np.full((2, 2), 0.5)
+        zeta, until = 2.0, math.pi / 2.0
+        exact, _ = self.wait(plus, "exact")
+        # Exact: A's coherence is (1/2)(1 + e^{i zeta t})/2 in magnitude |cos(zeta t / 2)| / 2 = 0 at zeta t = pi.
+        self.assertLess(abs(exact[0, 1]), 1e-12)
+        product, world = self.wait(plus, "product")
+        # Mean field: A turns at zeta <n_B> = zeta / 2 and keeps its full coherence; without relaxation the
+        # populations do not move, so one piece is exact.
+        self.assertLess(abs(product[0, 1] - 0.5 * np.exp(1j * zeta * until / 2.0)), 1e-12)
+        self.assertLess(world.stats.dropped_correlation, 1e-12)
+
+    def test_with_relaxation_the_mean_field_follows_the_neighbours_decaying_population(self):
+        """A's phase is zeta * integral <n_B> dt = zeta n0 T1 (1 - e^{-t/T1}); its magnitude is the uncoupled one."""
+        plus = np.full((2, 2), 0.5)
+        zeta, until, t1 = 2.0, 3.0, 1.0
+        uncoupled, _ = self.wait(plus, "product", zeta=0.0, until=until, t1=t1)
+        expected = uncoupled[0, 1] * np.exp(1j * zeta * 0.5 * t1 * (1.0 - math.exp(-until / t1)))
+        errors = []
+        for step in (4e-4, 1e-4):
+            state, _ = self.wait(plus, "product", step, zeta=zeta, until=until, t1=t1)
+            errors.append(abs(state[0, 1] - expected))
+        self.assertLess(errors[1], 1e-4 * abs(expected))
+        self.assertAlmostEqual(errors[0] / errors[1], 4.0, delta=0.6)    # the error scales with the step setting
+
+    def test_product_is_exact_when_the_coupling_builds_no_correlation(self):
+        one = np.diag([0.0, 1.0])
+        exact, _ = self.wait(one, "exact")
+        product, world = self.wait(one, "product")
+        np.testing.assert_allclose(product, exact, atol=1e-12)
+        self.assertLess(world.stats.dropped_correlation, 1e-12)
+
+    def test_product_has_no_union_size_limit(self):
+        sides = self.sides(6, 30.0, 50.0)
+        plus = np.full((64, 64), 1.0 / 64.0, dtype=complex)
+        settings = ResidualZZSettings((ResidualZZCoupling(5, 6, 1.3),), model="exact")
+        with self.assertRaises(ValueError):
+            CoupledRegionWorld(sides, settings, (plus, plus), repetition_delay_us=0.0)
+        world = CoupledRegionWorld(sides, replace(settings, model="product"), (plus, plus), repetition_delay_us=0.0)
+        world.advance_to(2.35, [])
+        world.settle(0, 2.35)
+        world.settle(1, 2.35)
+        for side in (0, 1):
+            self.assertEqual(world.factors[side].shape[0], 1)
+            self.assertAlmostEqual(float(np.trace(world.reduced_state(side)).real), 1.0, places=12)
+
+    def test_the_step_is_checked(self):
+        with self.assertRaises(ValueError):
+            ResidualZZSettings((ResidualZZCoupling(0, 1, 1.0),), model="product", product_phase_step_rad=0.0)
+
+
 TWO_PI = 2.0 * math.pi
 DEVICES = {1: TransmonSpec(5.10, -330.0), 2: TransmonSpec(5.00, -310.0), 3: TransmonSpec(5.21, -320.0)}
 

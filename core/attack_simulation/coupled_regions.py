@@ -77,7 +77,9 @@ from core.register_operations import (
     embed_qubit_operator, freeze_register, level_digits, level_outcomes, nonselective_measurement,
 )
 
-ZZ_MODELS = ("low_rank", "exact")
+# ``product`` keeps no joint state: each region keeps its own state and the coupling acts through the other
+# region's state only (time-dependent mean field). The correlation it drops is recorded (``dropped_correlation``).
+ZZ_MODELS = ("low_rank", "exact", "product")
 TRANSMON_SOLVERS = ("effective", "reference")   # how a cluster declared by device values is advanced (D91)
 MAX_CLUSTER_QUBITS = 4
 EXACT_MAX_UNION_QUBITS = 8          # the dense-computation limit; ``exact`` is only offered up to it (D79)
@@ -86,6 +88,14 @@ _ROUND_OFF = 1e-14                  # relative singular value treated as zero, a
 _TIME_TOLERANCE = 1e-9              # us; absolute float coordinates of a window end differ by round-off
 _NEGATIVE_TOLERANCE = 1e-6          # truncation may leave tiny negative eigenvalues; larger ones are an error
 _FACTOR_CACHE_LIMIT = 4096
+DEFAULT_PRODUCT_PHASE_STEP_RAD = 0.01   # ``product``: largest correlating phase one step may build (see _steps)
+
+
+def _product_step(value) -> float:
+    step = float(value)
+    if not math.isfinite(step) or step <= 0.0:
+        raise ValueError("product_phase_step_rad must be finite and positive")
+    return step
 
 
 @dataclass(frozen=True)
@@ -96,6 +106,7 @@ class ResidualZZSettings:
     model: str = "low_rank"
     max_rank: int = 32
     truncation: float = 1e-6        # largest Hilbert-Schmidt norm one compression may drop (low_rank)
+    product_phase_step_rad: float = DEFAULT_PRODUCT_PHASE_STEP_RAD
 
     def __post_init__(self) -> None:
         couplings = tuple(self.couplings)
@@ -113,6 +124,7 @@ class ResidualZZSettings:
         if not math.isfinite(truncation) or truncation < 0.0:
             raise ValueError("truncation must be finite and nonnegative")
         object.__setattr__(self, "truncation", truncation)
+        object.__setattr__(self, "product_phase_step_rad", _product_step(self.product_phase_step_rad))
 
 
 @dataclass(frozen=True)
@@ -140,6 +152,7 @@ class CoupledTransmonSettings:
     model: str = "low_rank"
     max_rank: int = 32
     truncation: float = 1e-6
+    product_phase_step_rad: float = DEFAULT_PRODUCT_PHASE_STEP_RAD
 
     def __post_init__(self) -> None:
         transmons = tuple((qubit, spec) for qubit, spec in self.transmons)
@@ -165,6 +178,7 @@ class CoupledTransmonSettings:
         if not math.isfinite(truncation) or truncation < 0.0:
             raise ValueError("truncation must be finite and nonnegative")
         object.__setattr__(self, "truncation", truncation)
+        object.__setattr__(self, "product_phase_step_rad", _product_step(self.product_phase_step_rad))
 
 
 @dataclass(frozen=True)
@@ -178,6 +192,7 @@ class UncoupledSettings:
     model: str = "low_rank"
     max_rank: int = 32
     truncation: float = 1e-6
+    product_phase_step_rad: float = DEFAULT_PRODUCT_PHASE_STEP_RAD
 
     def __post_init__(self) -> None:
         if self.model not in ZZ_MODELS:
@@ -188,6 +203,7 @@ class UncoupledSettings:
         if not math.isfinite(truncation) or truncation < 0.0:
             raise ValueError("truncation must be finite and nonnegative")
         object.__setattr__(self, "truncation", truncation)
+        object.__setattr__(self, "product_phase_step_rad", _product_step(self.product_phase_step_rad))
 
 
 @dataclass(frozen=True)
@@ -274,6 +290,7 @@ class WorldStats:
     compressions: int = 0
     max_rank: int = 1
     dropped_norm: float = 0.0       # sum of the Hilbert-Schmidt norms dropped by truncation (error bound)
+    dropped_correlation: float = 0.0  # ``product``: sum of the Hilbert-Schmidt norms of rho - rho_A (x) rho_B removed
     clipped_eigenvalue: float = 0.0  # most negative reduced-state eigenvalue removed before a record
     late_kicks: int = 0             # leaks that became known after their place had been simulated
 
@@ -329,6 +346,15 @@ class CoupledRegionWorld:
             self._components = ()
         else:
             raise TypeError("coupled regions need ResidualZZSettings, CoupledTransmonSettings or UncoupledSettings")
+        # ``product``: how fast each cluster correlates the regions (rad/us): the spread of the part of its static
+        # energies that is not a sum of an A and a B part, and the exchange J inside it (``_steps``).
+        exchange = ([(location[left], location[right], strength) for left, right, strength in settings.exchange]
+                    if type(settings) is CoupledTransmonSettings else [])
+        self._correlating_rates = tuple(
+            (_correlating_rate(energies, math.prod(self.dims[0][s] for s in slots_a)),
+             sum(strength for left, right, strength in exchange
+                 if {left, right} <= {(0, s) for s in slots_a} | {(1, s) for s in slots_b}))
+            for slots_a, slots_b, energies in self._components)
         readers: dict = {}
         for item in readout_crosstalk:
             if type(item) is not ReadoutCrosstalk:
@@ -372,6 +398,7 @@ class CoupledRegionWorld:
         other._reference, other._cluster_of, other._calibrations = self._reference, self._cluster_of, self._calibrations
         other.pulse_shape, other.frames = self.pulse_shape, dict(self.frames)
         other._components, other.exposed, other._cache = self._components, self.exposed, self._cache
+        other._correlating_rates = self._correlating_rates
         other._readers, other.exposures = self._readers, [list(entry) for entry in self.exposures]
         other.factors = tuple(np.array(factor) for factor in self.factors)
         other.free = tuple(list(values) for values in self.free)
@@ -427,7 +454,7 @@ class CoupledRegionWorld:
         """The region's own state, ``Tr_other(rho)``; tiny negative eigenvalues from truncation are clipped."""
         state = self._reduced(side)
         state = 0.5 * (state + state.conj().T)
-        if self.settings.model == "exact":
+        if self.settings.model != "low_rank":
             return state
         values, vectors = np.linalg.eigh(state)
         lowest = float(values[0])
@@ -823,10 +850,16 @@ class CoupledRegionWorld:
             for index, component in enumerate(self._components):
                 active = [pulse for pulse in pulses if pulse.start_us <= middle < pulse.end_us
                           and self._cluster_of.get((pulse.side, pulse.slot)) == index]
-                if active:
-                    self._apply_driven(index, begin, end, idle, active)
-                else:
-                    self._apply_component(component, end - begin, idle)
+                steps = self._steps(index, end - begin, idle, bool(active))
+                for step in range(steps):
+                    if active:
+                        self._apply_driven(index, begin + (end - begin) * step / steps,
+                                           end if step == steps - 1 else begin + (end - begin) * (step + 1) / steps,
+                                           idle, active)
+                    elif self.settings.model == "product":
+                        self._mean_field_step(component, (end - begin) / steps, idle)
+                    else:
+                        self._apply_component(component, end - begin, idle)
             for side, slot in idle:
                 self.free[side][slot] = end
         self.zz_time = time_us
@@ -858,6 +891,81 @@ class CoupledRegionWorld:
             _from_blocks(b_vectors.T.reshape(-1, b_coef.shape[1], b_coef.shape[2]) @ b_basis.T,
                          slots_b, self.dims[1]),
         )
+        self._project()
+
+    def _steps(self, component: int, elapsed: float, idle, driven: bool) -> int:
+        """Pieces one coupled interval is cut into: one, except in ``product``.
+
+        Without a pulse the cluster's Hamiltonian is diagonal, so it moves no population: the mean field each
+        region feels changes only as relaxation moves the other's populations (``_mean_field_step``, midpoint
+        rule). With the correlating rate ``r`` and the fastest population rate ``g`` of the idle cluster qubits,
+        the phase error over ``elapsed`` in ``n`` pieces is about ``r g^2 elapsed^3 / n^2``; ``n`` keeps it under
+        ``product_phase_step_rad``. Without relaxation one piece is exact.
+
+        During a pulse the exchange moves populations between the regions; the piece is advanced jointly and
+        then replaced by the product of its reduced states (``_project``), which tends to the mean field as the
+        pieces shrink. The correlation one piece builds grows with ``(r + J) * piece``, capped at
+        ``product_phase_step_rad``; the error of this first-order rule is about the cap times the total
+        correlating phase of the pulse.
+        """
+        if self.settings.model != "product":
+            return 1
+        diagonal, exchange = self._correlating_rates[component]
+        step = self.settings.product_phase_step_rad
+        if driven:
+            return max(1, math.ceil((diagonal + exchange) * elapsed / step))
+        slots_a, slots_b, _ = self._components[component]
+        rate = max([_population_rate(self.sides[side].idle_model.qubits[slot])
+                    for side, slots in ((0, slots_a), (1, slots_b)) for slot in slots if (side, slot) in idle],
+                   default=0.0)
+        return max(1, math.ceil(elapsed * math.sqrt(diagonal * rate * rate * elapsed / step)))
+
+    def _mean_field_step(self, component, elapsed: float, idle) -> None:
+        """``product`` without a pulse: each region turns under the cluster energy averaged over the other's
+        populations (taken at the middle of the piece), with its own idle relaxation; no correlation is built."""
+        slots_a, slots_b, energies = component
+        populations = []
+        for side, slots in ((0, slots_a), (1, slots_b)):
+            dims = self.dims[side]
+            outcomes, count = level_outcomes(dims, slots)
+            weights = np.maximum(np.diag(self._reduced(side)).real, 0.0)
+            marginal = np.bincount(outcomes, weights=weights, minlength=count)
+            marginal = marginal / marginal.sum()
+            # Relaxation alone moves populations (the diagonal Hamiltonian does not): advance half a piece.
+            shape = tuple(dims[slot] for slot in slots)
+            tensor = marginal.reshape(shape)
+            for axis, slot in enumerate(slots):
+                if (side, slot) in idle:
+                    transfer = dense_matrix_exponential(
+                        _population_generator(self.sides[side].idle_model.qubits[slot]) * (0.5 * elapsed)).real
+                    tensor = np.moveaxis(np.tensordot(transfer, tensor, axes=([1], [axis])), 0, axis)
+            populations.append(tensor.reshape(-1))
+        matrix = np.asarray(energies, dtype=float).reshape(len(populations[0]), len(populations[1]))
+        separable = (matrix @ populations[1])[:, None] + (populations[0] @ matrix)[None, :]
+        mask = tuple((0, s) in idle for s in slots_a) + tuple((1, s) in idle for s in slots_b)
+        self._apply_factors(_component_factors((slots_a, slots_b, separable.reshape(-1)), elapsed, mask, self.sides),
+                            slots_a, slots_b)
+
+    def _project(self) -> None:
+        """``product``: replace ``rho = sum_k A_k (x) B_k`` by ``rho_A (x) rho_B / Tr rho``, recording what goes."""
+        if self.settings.model != "product":
+            return
+        a, b = self.factors
+        if a.shape[0] == 1:
+            return
+        trace_a, trace_b = np.trace(a, axis1=1, axis2=2), np.trace(b, axis1=1, axis2=2)
+        total = complex(trace_a @ trace_b)
+        if abs(total) == 0.0:
+            raise ValueError("the joint state vanished")
+        rho_a, rho_b = np.tensordot(trace_b, a, axes=1), np.tensordot(trace_a, b, axes=1) / total
+        # ||rho - rho_a (x) rho_b||^2 from the Gram matrices of the terms, without forming rho.
+        gram_a = np.einsum("kij,lij->kl", a.conj(), a)
+        gram_b = np.einsum("kij,lij->kl", b.conj(), b)
+        overlap = np.einsum("kij,ij->k", a.conj(), rho_a) @ np.einsum("kij,ij->k", b.conj(), rho_b)
+        squared = (float(np.sum(gram_a * gram_b).real) - 2.0 * overlap.real
+                   + float(np.vdot(rho_a, rho_a).real) * float(np.vdot(rho_b, rho_b).real))
+        self.stats.dropped_correlation += math.sqrt(max(squared, 0.0))
+        self.factors = (np.ascontiguousarray(rho_a[None]), np.ascontiguousarray(rho_b[None]))
 
     def _compress(self, left: np.ndarray, right: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Best rank of ``sum_j left[:, j] right[:, j]^T`` within the model's limits."""
@@ -946,6 +1054,7 @@ class CoupledRegionWorld:
         a_vectors, b_vectors = self._compress(a_new.T, b_new.T)
         self.factors = (np.ascontiguousarray(a_vectors.T.reshape(-1, a.shape[1], a.shape[2])),
                         np.ascontiguousarray(b_vectors.T.reshape(-1, b.shape[1], b.shape[2])))
+        self._project()
 
     def _relax_to(self, side: int, slots, time_us: float) -> None:
         slots = tuple(slots)
@@ -1134,6 +1243,32 @@ def _clusters(edges):
             raise ValueError(f"a coupled cluster may join at most {MAX_CLUSTER_QUBITS} qubits")
         result.append((slots_a, slots_b, tuple(group_edges)))
     return tuple(result)
+
+
+def _population_generator(spec) -> np.ndarray:
+    """Rate matrix ``G[j, i]`` (i -> j) of the populations under the idle model's collapse operators."""
+    generator = np.zeros((spec.levels, spec.levels))
+    for operator in ladder_relaxation_operators(spec):
+        weights = np.abs(np.asarray(operator)) ** 2
+        generator += weights - np.diag(weights.sum(axis=0))
+    return generator
+
+
+def _population_rate(spec) -> float:
+    """The fastest rate at which relaxation empties a level of this qubit (1/us)."""
+    return float(np.max(-np.diag(_population_generator(spec))))
+
+
+def _correlating_rate(energies: np.ndarray, size_a: int) -> float:
+    """Spread (rad/us) of the part of a cluster's energies that is not a sum of an A part and a B part.
+
+    ``E(a, b) = e_A(a) + e_B(b) + C(a, b)``; only ``C`` builds correlation between the regions, so the spread of
+    ``C`` (doubly centred ``E``, A labels most significant) is the rate at which the regions' phases come to
+    depend on each other.
+    """
+    matrix = np.asarray(energies, dtype=float).reshape(size_a, -1)
+    centred = matrix - matrix.mean(axis=1, keepdims=True) - matrix.mean(axis=0, keepdims=True) + matrix.mean()
+    return float(centred.max() - centred.min())
 
 
 def _pair_shift_energies(slots_a, slots_b, edges) -> np.ndarray:

@@ -740,7 +740,7 @@ def _assumptions(snapshot: DeviceSnapshot, region: tuple[int, ...], mode: str,
         _record("qpu_service.runtime_execution.residual_zz_strength_khz", AssumptionBasis.SIMULATOR_CHOICE,
                 "Always-on residual ZZ between the two regions, zeta/2pi in kHz, one value for every coupling edge that joins them; it acts while jobs overlap and while the qubits wait. The calibration snapshot gives no ZZ. The default is 0 (off) because the joint simulation of two six-qubit regions is much slower; 0.9 kHz is the suggested sample, the median over ibm_kingston couplers reported by Farokhi et al. (arXiv:2609.34411), not a measurement of these qubits."),
         _record("qpu_service.runtime_execution.residual_zz_model", AssumptionBasis.SIMULATOR_CHOICE,
-                "How the joint state of the two coupled regions is kept. exact keeps every term and is offered only up to 8 qubits in the two regions together. low_rank keeps the largest terms of the sum of products and accumulates the dropped Hilbert-Schmidt norm as its error bound (D79)."),
+                "How the joint state of the two coupled regions is kept. exact keeps every term and is offered only up to 8 qubits in the two regions together. low_rank keeps the largest terms of the sum of products and accumulates the dropped Hilbert-Schmidt norm as its error bound (D79). product keeps no joint state: each region keeps its own state and the coupling acts through the other region's state only (time-dependent mean field); it is a physical approximation that drops the correlation between the regions. While no pulse plays the correlation never forms; during cluster pulses and readout crosstalk the dropped Hilbert-Schmidt norm is recorded (D92)."),
         _record("qpu_service.runtime_execution.residual_zz_max_rank", AssumptionBasis.SIMULATOR_CHOICE,
                 "A simulation accuracy setting, not a property of the service: the most product terms the low-rank joint state keeps."),
         _record("qpu_service.runtime_execution.residual_zz_truncation", AssumptionBasis.SIMULATOR_CHOICE,
@@ -1024,8 +1024,10 @@ def _fields(region: tuple[int, ...], mode: str, calibrations: Mapping[int, objec
             "qpu_service.runtime_execution.residual_zz_model", "残留ZZの計算方法", "choice",
             "残留ZZでつながった2つの領域の、共同の状態の持ち方です。",
             "low_rank: 共同の状態を積の和で持ち、小さい項を切ります。切った大きさは誤差の上限として記録します。"
-            "exact: 項を切りません。2つの領域の合計が8 qubit以下のときだけ選べます。",
-            choices=("low_rank", "exact"),
+            "exact: 項を切りません。2つの領域の合計が8 qubit以下のときだけ選べます。"
+            "product: 共同の状態を持たず、領域ごとの状態だけを持ちます。結合は相手の領域の状態の平均としてだけ働きます（平均場近似）。"
+            "領域の間の相関（もつれを含む）を捨てる物理の近似です。",
+            choices=("low_rank", "exact", "product"),
         ),
         _integer("qpu_service.runtime_execution.residual_zz_max_rank", "残留ZZ: 積の和の項数の上限", 1, 256,
                  "low_rankで残す項の数の上限です。大きいほど正確で、計算に時間がかかります。サービスの性質ではありません。"),
