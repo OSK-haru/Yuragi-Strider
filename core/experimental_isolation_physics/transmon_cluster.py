@@ -42,14 +42,14 @@ by |20> and |02>), but the shifts of states that hold a |2> miss the push from |
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import product
 import math
 
 import numpy as np
 
 from core.cptp_liouvillian import dense_matrix_exponential
-from core.experimental_isolation_physics.idle_evolution import IdleQubitSpec
+from core.experimental_isolation_physics.idle_evolution import IdleQubitSpec, ladder_relaxation_operators
 from core.pulse_transmon_network import TransmonExchangeCoupling
 
 MIN_LEVELS, MAX_LEVELS = 2, 4
@@ -448,30 +448,6 @@ def _turn(angles: np.ndarray) -> np.ndarray:
 
 def _local_collapse(transmon: TransmonSpec, spec: IdleQubitSpec) -> list[np.ndarray]:
     """One transmon's Lindblad operators from its measured T1, T_phi and |1> population."""
-    levels = transmon.levels
-    operators = []
-    if math.isfinite(spec.t1_us):
-        excited = spec.equilibrium_excited_population
-        down, up = (1.0 - excited) / spec.t1_us, excited / spec.t1_us
-        rates = [(down, up)]
-        if levels > 2:
-            if excited >= 0.5:
-                raise ValueError("levels above |1> need a thermal |1> population (below one half)")
-            cold = down - up                                 # the zero-temperature 1 -> 0 rate
-            boltzmann = up / down                            # exp(-h f01 / k T)
-            for level in range(2, levels):
-                ratio = (transmon.frequency_ghz + 1e-3 * (level - 1) * transmon.anharmonicity_mhz) \
-                    / transmon.frequency_ghz
-                factor = boltzmann ** ratio if boltzmann > 0.0 else 0.0
-                thermal = factor / (1.0 - factor)
-                rates.append((level * cold * (thermal + 1.0), level * cold * thermal))
-        for level, (falling, rising) in enumerate(rates, start=1):
-            step = np.zeros((levels, levels), dtype=complex)
-            step[level - 1, level] = 1.0
-            if falling > 0.0:
-                operators.append(math.sqrt(falling) * step)
-            if rising > 0.0:
-                operators.append(math.sqrt(rising) * step.T)
-    if math.isfinite(spec.tphi_us):
-        operators.append(math.sqrt(2.0 / spec.tphi_us) * np.diag(np.arange(levels, dtype=float)).astype(complex))
-    return operators
+    return ladder_relaxation_operators(replace(
+        spec, levels=transmon.levels, frequency_ghz=transmon.frequency_ghz,
+        anharmonicity_mhz=transmon.anharmonicity_mhz))
