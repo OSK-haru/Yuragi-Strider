@@ -49,6 +49,28 @@ class ConcurrentRegions:
         return self.residual_zz if self.residual_zz is not None else self.transmons
 
     @property
+    def kick_transfers(self) -> tuple[DriveCrosstalkTransfer, ...]:
+        """The transfers whose leaks become kicks.
+
+        All of them, except those between two qubits of one cluster that the reference solver advances at pulse
+        level: the cluster's own propagator carries those leaks (D91).
+        """
+        if self.transmons is None or self.transmons.solver != "reference":
+            return self.transfers
+        group: dict[int, int] = {qubit: qubit for qubit, _ in self.transmons.transmons}
+
+        def root(qubit: int) -> int:
+            while group[qubit] != qubit:
+                qubit = group[qubit]
+            return qubit
+
+        for left, right, _ in self.transmons.exchange:
+            group[root(left)] = root(right)
+        return tuple(item for item in self.transfers
+                     if not (item.source in group and item.target in group
+                             and root(item.source) == root(item.target)))
+
+    @property
     def world_settings(self) -> ResidualZZSettings | CoupledTransmonSettings | UncoupledSettings | None:
         """How the regions' joint world is advanced, or None when nothing joins their states."""
         if self.coupling is not None:
@@ -153,10 +175,11 @@ def kicks_for(target: ExecutionWindow, previous: ExecutionWindow | None,
     ``others`` are the windows of the other regions; the caller must hold all of them that can touch
     ``[previous.finish, target.finish)`` (sealed ingress guarantees that none can still arrive).
     """
-    if not config.transfers or not others:
+    transfers = config.kick_transfers
+    if not transfers or not others:
         return EMPTY_PLAN
-    leaks = leaks_into(target, others, config.transfers)
-    leaks += gap_leaks(others, target.physical_qubits, *gap_before(target, previous), config.transfers)
+    leaks = leaks_into(target, others, transfers)
+    leaks += gap_leaks(others, target.physical_qubits, *gap_before(target, previous), transfers)
     if not leaks:
         return EMPTY_PLAN
     return place_kicks(leaks, operation, target.schedule, window_start_us=target.start.time_us,

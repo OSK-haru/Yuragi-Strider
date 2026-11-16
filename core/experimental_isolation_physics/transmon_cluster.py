@@ -329,7 +329,7 @@ class TransmonCluster:
         total = identity
         for low, high in zip(edges, edges[1:]):
             middle = 0.5 * (low + high)
-            active = [drive for drive in drives if drive.start_us <= middle < drive.end_us]
+            active = _active(drives, middle)
             total = self._piece(base, dissipator, low, high, active, step_angle_rad, exact_relaxation) @ total
         return total
 
@@ -339,9 +339,8 @@ class TransmonCluster:
             return dense_matrix_exponential(base * (high - low))
         # Work in the frame that turns every transmon at the first drive's frequency: a drive at that
         # frequency then has no carrier left, only its envelope.
-        offsets = np.array(self.offsets_rad_per_us)
-        carrier = [offsets[drive.line] + drive.frequency_offset_rad_per_us for drive in active]
-        shift = self._occupation @ (carrier[0] - offsets)                    # K = diag(shift)
+        length = high - low
+        carrier, shift, energies, slices = self._slicing(active, length, step_angle)
         static = base - _commutator(np.diag(shift).astype(complex))
 
         def generator(time_us: float) -> np.ndarray:
@@ -352,20 +351,9 @@ class TransmonCluster:
                 result += 0.5 * (np.conj(rate) * lower + rate * raise_)
             return result
 
-        length = high - low
-        if all(drive.constant for drive in active) and all(frequency == carrier[0] for frequency in carrier):
+        if slices is None:
             inner = dense_matrix_exponential(generator(0.5 * (low + high)) * length)
         else:
-            # The fastest thing a slice must resolve: a transition's detuning from the frame, a second
-            # drive's carrier, or the envelope itself.
-            energies = self.frame_energies - shift
-            detuning = max((abs(energies[row] - energies[column])
-                            for drive in active
-                            for row, column in zip(*np.nonzero(
-                                np.abs(self.line_operators[drive.line]) > _ELEMENT_FLOOR))), default=0.0)
-            envelope = max((0.0 if drive.constant else 8.0 / drive.duration_us) for drive in active)
-            beat = max(abs(frequency - carrier[0]) for frequency in carrier)
-            slices = max(1, math.ceil(length * (detuning + beat + envelope) / step_angle))
             step = length / slices
             if exact_relaxation:
                 inner = np.eye(self.dimension ** 2, dtype=complex)
@@ -381,15 +369,8 @@ class TransmonCluster:
         # rho_frame = exp(i K t) rho exp(-i K t): leave that frame at ``high``, enter it at ``low``.
         return _turn(-shift * high)[:, None] * inner * _turn(shift * low)[None, :]
 
-    def _split_slices(self, dissipator: np.ndarray | None, energies: np.ndarray, active, carrier,
-                      low: float, step: float, slices: int) -> np.ndarray:
-        """The sliced map with the Hamiltonian in Hilbert space and the relaxation split off symmetrically.
-
-        Each slice is ``exp(D h/2) U exp(D h/2)`` with ``U`` the slice's fourth-order Magnus unitary. ``D`` does
-        not change with the frame (it is built from ladder and number operators), and it nearly commutes with
-        the static Hamiltonian (they differ by the ZZ-sized spread of a transition's frequency), so what the
-        splitting leaves is set by the drive: about ``h Omega gamma T`` (1e-8 for a 50 ns pulse at T1 = 100 us).
-        """
+    def _drive_hamiltonian(self, energies: np.ndarray, active, carrier):
+        """``H(t)`` in the frame of the first drive's carrier (``energies`` already in that frame)."""
         static = np.diag(energies).astype(complex)
 
         def hamiltonian(time_us: float) -> np.ndarray:
@@ -400,6 +381,12 @@ class TransmonCluster:
                 result += 0.5 * (np.conj(rate) * operator + rate * operator.conj().T)
             return result
 
+        return hamiltonian
+
+    def _slice_unitaries(self, energies: np.ndarray, active, carrier, low: float, step: float,
+                         slices: int) -> np.ndarray:
+        """The fourth-order Magnus unitary of every slice, shape (slices, dimension, dimension)."""
+        hamiltonian = self._drive_hamiltonian(energies, active, carrier)
         exponents = []
         for index in range(slices):
             begin = low + index * step
@@ -407,10 +394,74 @@ class TransmonCluster:
             second = hamiltonian(begin + (0.5 + _NODE) * step)
             exponents.append(step * (_WEIGHT_NEAR * first + _WEIGHT_FAR * second))   # applied first
             exponents.append(step * (_WEIGHT_FAR * first + _WEIGHT_NEAR * second))
-        # Each exponent is Hermitian, so exp(-i X) = V exp(-i lambda) V^+ exactly, all slices at once.
-        values, vectors = np.linalg.eigh(np.stack(exponents))
-        steps = (vectors * np.exp(-1j * values)[:, None, :]) @ vectors.conj().transpose(0, 2, 1)
-        unitaries = steps[1::2] @ steps[0::2]                                   # one per slice
+        steps = _hermitian_exponentials(np.stack(exponents))
+        return steps[1::2] @ steps[0::2]
+
+    def _slicing(self, active, length: float, step_angle: float):
+        """The carrier frame of a driven piece and how finely it must be cut.
+
+        Returns ``(carrier, shift, energies, slices)``; ``slices`` is None when one exponential is exact
+        (constant envelopes on one carrier).
+        """
+        offsets = np.array(self.offsets_rad_per_us)
+        carrier = [offsets[drive.line] + drive.frequency_offset_rad_per_us for drive in active]
+        shift = self._occupation @ (carrier[0] - offsets)                    # K = diag(shift)
+        energies = self.frame_energies - shift
+        if all(drive.constant for drive in active) and all(frequency == carrier[0] for frequency in carrier):
+            return carrier, shift, energies, None
+        # The fastest thing a slice must resolve: a transition's detuning from the frame, a second drive's
+        # carrier, or the envelope itself.
+        detuning = max((abs(energies[row] - energies[column])
+                        for drive in active
+                        for row, column in zip(*np.nonzero(
+                            np.abs(self.line_operators[drive.line]) > _ELEMENT_FLOOR))), default=0.0)
+        envelope = max((0.0 if drive.constant else 8.0 / drive.duration_us) for drive in active)
+        beat = max(abs(frequency - carrier[0]) for frequency in carrier)
+        return carrier, shift, energies, max(1, math.ceil(length * (detuning + beat + envelope) / step_angle))
+
+    def unitary(self, start_us: float, end_us: float, drives: Sequence[ClusterDrive] = (), *,
+                step_angle_rad: float = STEP_ANGLE_RAD) -> np.ndarray:
+        """The cluster's unitary over ``[start_us, end_us)`` without relaxation, in the dressed frame.
+
+        The same slicing as ``propagator``; ``kron(U.conj(), U)`` is its map when nothing relaxes.
+        """
+        start, end = float(start_us), float(end_us)
+        if not (math.isfinite(start) and math.isfinite(end)) or end < start:
+            raise ValueError("a propagation interval must be finite and ordered")
+        for drive in drives:
+            if type(drive) is not ClusterDrive or drive.line >= len(self.levels):
+                raise ValueError("drives must be ClusterDrive values on a transmon of the cluster")
+        edges = sorted({start, end} | {edge for drive in drives for edge in (drive.start_us, drive.end_us)
+                                       if start < edge < end})
+        total = np.eye(self.dimension, dtype=complex)
+        for low, high in zip(edges, edges[1:]):
+            middle = 0.5 * (low + high)
+            active = _active(drives, middle)
+            length = high - low
+            if not active:
+                total = np.exp(-1j * self.frame_energies * length)[:, None] * total
+                continue
+            carrier, shift, energies, slices = self._slicing(active, length, step_angle_rad)
+            if slices is None:
+                hamiltonian = self._drive_hamiltonian(energies, active, carrier)(middle)
+                inner = _hermitian_exponentials((hamiltonian * length)[None])[0]
+            else:
+                inner = _ordered_product(self._slice_unitaries(energies, active, carrier, low, length / slices,
+                                                               slices))
+            # psi_frame = exp(i K t) psi: leave that frame at ``high``, enter it at ``low``.
+            total = (np.exp(-1j * shift * high)[:, None] * inner * np.exp(1j * shift * low)[None, :]) @ total
+        return total
+
+    def _split_slices(self, dissipator: np.ndarray | None, energies: np.ndarray, active, carrier,
+                      low: float, step: float, slices: int) -> np.ndarray:
+        """The sliced map with the Hamiltonian in Hilbert space and the relaxation split off symmetrically.
+
+        Each slice is ``exp(D h/2) U exp(D h/2)`` with ``U`` the slice's fourth-order Magnus unitary. ``D`` does
+        not change with the frame (it is built from ladder and number operators), and it nearly commutes with
+        the static Hamiltonian (they differ by the ZZ-sized spread of a transition's frequency), so what the
+        splitting leaves is set by the drive: about ``h Omega gamma T`` (1e-8 for a 50 ns pulse at T1 = 100 us).
+        """
+        unitaries = self._slice_unitaries(energies, active, carrier, low, step, slices)
         dimension = self.dimension
         if dissipator is None:
             total = _ordered_product(unitaries)
@@ -425,8 +476,6 @@ class TransmonCluster:
             state = blocks.transpose(0, 2, 1).reshape(len(blocks), -1).T
             state = (half if index == len(unitaries) - 1 else full) @ state
         return state
-        # rho_frame = exp(i K t) rho exp(-i K t): leave that frame at ``high``, enter it at ``low``.
-        return _turn(-shift * high)[:, None] * inner * _turn(shift * low)[None, :]
 
 
 def exchange_from_zz(transmons: Sequence[TransmonSpec], zz_khz: float) -> float:
@@ -469,6 +518,20 @@ def exchange_from_zz(transmons: Sequence[TransmonSpec], zz_khz: float) -> float:
 
 
 # ----- helpers ---------------------------------------------------------------------------------------------
+
+
+def _active(drives, time_us: float) -> list:
+    """The drives on at ``time_us``, in a fixed order: the first sets the piece's frame and so its slicing, and
+    the result must not depend on the order a caller lists the drives in."""
+    on = [drive for drive in drives if drive.start_us <= time_us < drive.end_us]
+    return sorted(on, key=lambda drive: (drive.line, drive.start_us, drive.duration_us,
+                                         drive.frequency_offset_rad_per_us, drive.phase_rad, drive.angle_rad))
+
+
+def _hermitian_exponentials(exponents: np.ndarray) -> np.ndarray:
+    """``exp(-i X)`` of every Hermitian ``X`` in a stack, exactly, by eigendecomposition."""
+    values, vectors = np.linalg.eigh(exponents)
+    return (vectors * np.exp(-1j * values)[:, None, :]) @ vectors.conj().transpose(0, 2, 1)
 
 
 def _ordered_product(factors: np.ndarray) -> np.ndarray:

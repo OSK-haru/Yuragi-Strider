@@ -52,6 +52,7 @@ import random
 import numpy as np
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
+from core.attack_simulation.pulse_shape import SQUARE_SHAPE, PulseShape
 from core.attack_simulation.kick_application import (
     EMPTY_PLAN, KickPlan, PlacedKick, apply_readout_decisions, kick_unitary,
 )
@@ -60,13 +61,16 @@ from core.attack_simulation.register_readout import (
 )
 from core.attack_simulation.shot_activity import instruction_starts
 from core.cptp_liouvillian import dense_matrix_exponential, gksl_liouvillian_superoperator
-from core.experimental_isolation_physics.coherent_crosstalk import ResidualZZCoupling
+from core.experimental_isolation_physics.coherent_crosstalk import DriveCrosstalkTransfer, ResidualZZCoupling
+from core.experimental_isolation_physics.pulse_calibration import (
+    CalibratedPulse, calibrate_pulse, relaxation_error, residual_survival,
+)
 from core.experimental_isolation_physics.idle_evolution import (
     IndependentIdleModel, ladder_relaxation_operators, relax_axes_in_place,
 )
 from core.experimental_isolation_physics.readout_crosstalk import ReadoutCrosstalk
 from core.experimental_isolation_physics.reset_model import ResetModelRegistry, ResetModelRequest
-from core.experimental_isolation_physics.transmon_cluster import TransmonCluster, TransmonSpec
+from core.experimental_isolation_physics.transmon_cluster import ClusterDrive, TransmonCluster, TransmonSpec, _turn
 from core.pulse_transmon_network import TransmonExchangeCoupling
 from core.register_operations import (
     apply_local_depolarizing_replacement, apply_local_replacement, apply_reset_with_feedback_kick,
@@ -74,7 +78,7 @@ from core.register_operations import (
 )
 
 ZZ_MODELS = ("low_rank", "exact")
-TRANSMON_SOLVERS = ("effective",)   # how a cluster declared by device values is advanced (D91)
+TRANSMON_SOLVERS = ("effective", "reference")   # how a cluster declared by device values is advanced (D91)
 MAX_CLUSTER_QUBITS = 4
 EXACT_MAX_UNION_QUBITS = 8          # the dense-computation limit; ``exact`` is only offered up to it (D79)
 EXACT_MAX_UNION_DIMENSION = 1 << EXACT_MAX_UNION_QUBITS   # the same limit for subsystems with more levels
@@ -120,6 +124,14 @@ class CoupledTransmonSettings:
     but every cluster of coupled qubits must reach both regions. ``solver="effective"`` advances a cluster
     with the static shifts of its dressed frame, computed with the declared levels and used on the qubit
     levels; the rest is the approximation model of ``ResidualZZSettings``.
+
+    ``solver="reference"`` advances the cluster at pulse level while one of its qubits plays a pulse
+    (``TransmonCluster.propagator``): the drive reaches the neighbours through the exchange (cross-resonance)
+    and through the declared classical leaks between the cluster's lines, it can leave the qubit levels, and
+    relaxation acts during it. A calibrated gate plays the pulse calibrated on the model
+    (``calibrate_pulse``); a pulse the tenant plays directly is played as stated. The calibrated gate error is
+    then added only for the part relaxation does not explain (``residual_survival``). The world must hold every
+    cluster qubit with the levels its ``TransmonSpec`` declares.
     """
 
     transmons: tuple[tuple[int, TransmonSpec], ...]
@@ -224,17 +236,37 @@ class _Progress:
     classical: list = field(default_factory=list)
     first_shot_us: float = 0.0
     handover: tuple | None = None   # (reduced state, duration) of the handover service reset
+    pulses: tuple = ()              # the pulses of cluster qubits, absolute times (reference solver)
 
     def copy(self) -> "_Progress":
         generator = random.Random()
         generator.setstate(self.generator.getstate())
         return _Progress(self.actions, self.layout, self.pointer, self.last_seq, self.last_time, Counter(self.applied), generator,
                          dict(self.counts), list(self.records), dict(self.assignment), self.duration,
-                         list(self.classical), self.first_shot_us, self.handover)
+                         list(self.classical), self.first_shot_us, self.handover, self.pulses)
 
     @property
     def done(self) -> bool:
         return self.pointer >= len(self.actions)
+
+
+@dataclass(frozen=True)
+class _ClusterPulse:
+    """One pulse on a cluster qubit's line, in world time. ``phase_rad`` is the hardware carrier phase at start."""
+
+    side: int
+    slot: int
+    start_us: float
+    duration_us: float              # as declared (``end_us - start_us`` may differ from it by round-off)
+    angle_rad: float
+    phase_rad: float
+    shape: PulseShape
+    frequency_offset_rad_per_us: float
+    calibrated: bool
+
+    @property
+    def end_us(self) -> float:
+        return self.start_us + self.duration_us
 
 
 @dataclass
@@ -252,12 +284,14 @@ class CoupledRegionWorld:
     def __init__(self, sides: tuple[RegionSide, RegionSide],
                  settings: ResidualZZSettings | CoupledTransmonSettings | UncoupledSettings,
                  initial_states: tuple[np.ndarray, np.ndarray], *, repetition_delay_us: float,
-                 readout_crosstalk: Sequence[ReadoutCrosstalk] = ()) -> None:
+                 readout_crosstalk: Sequence[ReadoutCrosstalk] = (),
+                 transfers: Sequence[DriveCrosstalkTransfer] = (), pulse_shape: PulseShape = SQUARE_SHAPE) -> None:
         if len(sides) != 2 or set(sides[0].region) & set(sides[1].region):
             raise ValueError("coupled regions must be two disjoint regions")
         self.sides = tuple(sides)
         self.settings = settings
         self.repetition_delay_us = float(repetition_delay_us)
+        self._reference: tuple = ()              # per component: (TransmonCluster, its (side, slot) qubits)
         sizes = tuple(len(side.region) for side in sides)
         self.dims = tuple(side.idle_model.dims for side in sides)
         if any(len(dims) != size for dims, size in zip(self.dims, sizes)):
@@ -283,10 +317,14 @@ class CoupledRegionWorld:
             edges = [(*sorted((location[left], location[right])), strength)
                      for left, right, strength in settings.exchange]
             physical = {place: qubit for qubit, place in location.items()}
+            groups = _clusters(edges)
             self._components = tuple(
                 (slots_a, slots_b, _device_energies(slots_a, slots_b, group, lambda place: specs[physical[place]],
                                                     self.dims))
-                for slots_a, slots_b, group in _clusters(edges))
+                for slots_a, slots_b, group in groups)
+            if settings.solver == "reference":
+                self._reference = tuple(self._reference_cluster(slots_a, slots_b, group, specs, physical, transfers)
+                                        for slots_a, slots_b, group in groups)
         elif type(settings) is UncoupledSettings:
             self._components = ()
         else:
@@ -308,6 +346,12 @@ class CoupledRegionWorld:
         self.exposures: list[list] = []
         self.exposed = (frozenset(q for comp in self._components for q in comp[0]),
                         frozenset(q for comp in self._components for q in comp[1]))
+        if type(pulse_shape) is not PulseShape:
+            raise TypeError("a PulseShape is required")
+        self.pulse_shape = pulse_shape
+        self._cluster_of = {qubit: index for index, (_, qubits) in enumerate(self._reference) for qubit in qubits}
+        self.frames: dict[tuple[int, int], float] = {}       # virtual-Z frame of each cluster qubit in its shot
+        self._calibrations: dict = {}
         self.factors = tuple(np.asarray(state, dtype=complex).reshape(1, *np.shape(state)).copy()
                              for state in initial_states)
         for factor, dims in zip(self.factors, self.dims):
@@ -325,6 +369,8 @@ class CoupledRegionWorld:
         other = object.__new__(CoupledRegionWorld)
         other.sides, other.settings, other.repetition_delay_us = self.sides, self.settings, self.repetition_delay_us
         other.dims = self.dims
+        other._reference, other._cluster_of, other._calibrations = self._reference, self._cluster_of, self._calibrations
+        other.pulse_shape, other.frames = self.pulse_shape, dict(self.frames)
         other._components, other.exposed, other._cache = self._components, self.exposed, self._cache
         other._readers, other.exposures = self._readers, [list(entry) for entry in self.exposures]
         other.factors = tuple(np.array(factor) for factor in self.factors)
@@ -430,13 +476,122 @@ class CoupledRegionWorld:
                     actions.append((begin + start, (shot, index, 1, 0), "reset", (shot, index, "begin")))
                     actions.append((begin + start + side.reset_us, (shot, index, 1, 1), "reset",
                                     (shot, index, "end")))
+                elif self._pulse_level(job, instruction):
+                    actions.append((begin + start, (shot, index, 1, 0), "gate", (shot, index)))
+                    cursor = start
+                    for order, step in enumerate(instruction.natives):
+                        if step.is_virtual:
+                            actions.append((begin + cursor, (shot, index, 1, 1 + order), "frame",
+                                            (job.slots[instruction.qubits[0]], step.angle_rad)))
+                        else:
+                            cursor += step.duration_us
                 elif instruction.kind != "measure":
                     actions.append((begin + start, (shot, index, 1, 0), "instruction", (shot, index)))
             actions.append((begin + measure_start, (shot, count, 2, 0), "measure", shot))
             actions.append((begin + shot_length, (shot, count + 1, 1, 0), "commit", shot))
+        pulses = self._job_pulses(job, starts, first, shot_length) if self._reference else ()
         return _Progress(actions, (starts, measure_start, shot_length),
                          generator=random.Random(operation.sampling_seed),
-                         counts={"0": 0, "1": 0} if operation.classical_bits == 1 else {}, first_shot_us=first)
+                         counts={"0": 0, "1": 0} if operation.classical_bits == 1 else {}, first_shot_us=first,
+                         pulses=pulses)
+
+    # ----- pulse level (reference solver) ----------------------------------------------------------------
+
+    def _reference_cluster(self, slots_a, slots_b, group, specs, physical, transfers):
+        qubits = [(0, s) for s in slots_a] + [(1, s) for s in slots_b]
+        position = {qubit: index for index, qubit in enumerate(qubits)}
+        cluster_specs = tuple(specs[physical[qubit]] for qubit in qubits)
+        for (side, slot), spec in zip(qubits, cluster_specs):
+            if self.dims[side][slot] != spec.levels:
+                raise ValueError("the reference solver needs the world to hold every level a coupled transmon has")
+            idle = self.sides[side].idle_model.qubits[slot]
+            if (spec.levels > 2 and idle.equilibrium_excited_population > 0.0 and math.isfinite(idle.t1_us)
+                    and (idle.frequency_ghz != spec.frequency_ghz or idle.anharmonicity_mhz != spec.anharmonicity_mhz)):
+                raise ValueError("a coupled transmon's idle model must state the same frequency and anharmonicity")
+        by_physical = {physical[qubit]: index for qubit, index in position.items()}
+        line_transfers = tuple((by_physical[item.source], by_physical[item.target], item.coefficient)
+                               for item in transfers
+                               if item.source in by_physical and item.target in by_physical and item.coefficient != 0.0)
+        cluster = TransmonCluster(
+            cluster_specs,
+            tuple(TransmonExchangeCoupling(position[left], position[right], strength) for left, right, strength in group),
+            line_transfers)
+        return cluster, tuple(qubits)
+
+    def _pulse_level(self, job: WorldJob, instruction) -> bool:
+        """A single-qubit gate of a cluster qubit, which the reference solver plays as pulses."""
+        if not self._reference or instruction.kind != "unitary" or len(instruction.qubits) != 1:
+            return False
+        if (job.side, job.slots[instruction.qubits[0]]) not in self._cluster_of:
+            return False
+        if not instruction.natives:
+            raise ValueError("the reference solver plays a cluster qubit's gates as pulses: they need native steps")
+        return True
+
+    def _job_pulses(self, job: WorldJob, starts, first: float, shot_length: float) -> tuple:
+        """Every pulse the job plays on cluster qubits, for every shot, at world times."""
+        relative = []
+        frames: dict[int, float] = {}
+        for instruction, start in zip(job.operation.instructions, starts):
+            if instruction.kind != "unitary" or len(instruction.qubits) != 1 or not instruction.natives:
+                continue
+            qubit = instruction.qubits[0]
+            slot = job.slots[qubit]
+            cursor = start
+            for step in instruction.natives:
+                if step.is_virtual:
+                    frames[qubit] = frames.get(qubit, 0.0) + step.angle_rad
+                    continue
+                if (job.side, slot) in self._cluster_of:
+                    relative.append((slot, cursor, step.duration_us, step.angle_rad, -frames.get(qubit, 0.0),
+                                     self.pulse_shape if step.shape is None else step.shape,
+                                     step.frequency_offset_rad_per_us, step.shape is None))
+                cursor += step.duration_us
+        pulses = []
+        for shot in range(job.operation.shots):
+            begin = first + shot * (shot_length + self.repetition_delay_us)
+            pulses.extend(_ClusterPulse(job.side, slot, begin + low, length, angle, phase, shape, offset, calibrated)
+                          for slot, low, length, angle, phase, shape, offset, calibrated in relative)
+        return tuple(pulses)
+
+    def _calibration(self, component: int, line: int, angle: float, duration: float,
+                     shape: PulseShape) -> CalibratedPulse:
+        key = (component, line, angle, duration, shape)
+        if key not in self._calibrations:
+            self._calibrations[key] = calibrate_pulse(self._reference[component][0], line, angle, duration, shape)
+        return self._calibrations[key]
+
+    def _drives(self, component: int, pulses) -> tuple[ClusterDrive, ...]:
+        cluster, qubits = self._reference[component]
+        drives = []
+        for pulse in pulses:
+            line = qubits.index((pulse.side, pulse.slot))
+            duration = pulse.duration_us
+            angle, drag = pulse.angle_rad, 0.0
+            if pulse.calibrated:
+                calibration = self._calibration(component, line, pulse.angle_rad, duration, pulse.shape)
+                angle, drag = calibration.amplitude_scale * pulse.angle_rad, calibration.drag_us
+            # The carrier's phase is counted from the pulse's start (``direct_pulse``); the cluster's from time 0.
+            offset = pulse.frequency_offset_rad_per_us
+            drives.append(ClusterDrive(line, pulse.start_us, duration, angle, pulse.shape,
+                                       phase_rad=pulse.phase_rad + offset * pulse.start_us,
+                                       frequency_offset_rad_per_us=offset, drag_us=drag))
+        return tuple(drives)
+
+    def _apply_driven(self, component: int, begin: float, end: float, idle, pulses) -> None:
+        """The cluster's map over a piece in which some of its qubits play pulses, in the simulator's frame."""
+        cluster, qubits = self._reference[component]
+        relaxation = tuple(self.sides[side].idle_model.qubits[slot] if (side, slot) in idle else None
+                           for side, slot in qubits)
+        propagator = cluster.propagator(begin, end, self._drives(component, pulses), relaxation)
+        # The world's state is turned by each qubit's virtual-Z frame: rho_sim = F rho_hw F^+, F = exp(i theta n).
+        angles = np.array(cluster.labels, dtype=float) @ np.array([self.frames.get(qubit, 0.0) for qubit in qubits])
+        turn = _turn(angles)
+        propagator = turn[:, None] * propagator * np.conj(turn)[None, :]
+        slots_a, slots_b, _ = self._components[component]
+        dims = tuple(cluster.levels)
+        self._apply_factors(_split_superoperator(propagator, math.prod(dims[:len(slots_a)]),
+                                                 math.prod(dims[len(slots_a):])), slots_a, slots_b)
 
     def _pending(self, job: WorldJob, progress: _Progress) -> list:
         """Remaining actions with the kicks known now, in program order, each with a non-decreasing time."""
@@ -532,10 +687,38 @@ class CoupledRegionWorld:
                 progress.handover = (self.reduced_state(side_index), side.reset_us)
             progress.assignment = {}
             progress.duration = self.repetition_delay_us if payload else 0.0
+            for slot in job.slots:                  # the hardware frame starts each shot at zero
+                self.frames.pop((side_index, slot), None)
             if operation.initialization == "inherit":
                 errors = register_assignment_errors(side.reset_models.get(side.reset_model_id),
                                                     subsystem_count=len(side.region), targets=job.slots)
                 progress.assignment.update(enumerate(errors))
+            return
+        if kind == "gate":
+            # A cluster qubit's gate, played as pulses by the flush; here only the error the pulses do not
+            # explain, and the bookkeeping. The qubit is not busy: relaxation acts during its pulses.
+            _, index = payload
+            instruction = operation.instructions[index]
+            slot = job.slots[instruction.qubits[0]]
+            self._touch(side_index, (slot,), when)
+            self._relax_to(side_index, (slot,), actual)
+            if instruction.depolarizing_probability:
+                played = sum(step.duration_us for step in instruction.natives if not step.is_virtual)
+                residual = residual_survival(instruction.depolarizing_probability,
+                                             relaxation_error(side.idle_model.qubits[slot], played))
+                if residual > 0.0:
+                    self._depolarize(side_index, (slot,), residual)
+            progress.duration += instruction.duration_us
+            return
+        if kind == "frame":
+            slot, angle = payload
+            self._touch(side_index, (slot,), when)
+            self._relax_to(side_index, (slot,), actual)
+            levels = self.dims[side_index][slot]
+            self._set(side_index, _apply_stack(self.factors[side_index],
+                                               np.diag(np.exp(1j * angle * np.arange(levels))), (slot,),
+                                               self.dims[side_index]))
+            self.frames[(side_index, slot)] = self.frames.get((side_index, slot), 0.0) + angle
             return
         if kind == "kick":
             _, kick = payload
@@ -628,12 +811,22 @@ class CoupledRegionWorld:
         if time_us <= self.zz_time:
             return
         exposed = [(side, slot) for side in (0, 1) for slot in sorted(self.exposed[side])]
+        pulses = ([pulse for progress in self.progress.values() for pulse in progress.pulses
+                   if pulse.end_us > self.zz_time and pulse.start_us < time_us] if self._reference else [])
         cuts = sorted({self.free[side][slot] for side, slot in exposed
-                       if self.zz_time < self.free[side][slot] < time_us} | {self.zz_time, time_us})
+                       if self.zz_time < self.free[side][slot] < time_us} | {self.zz_time, time_us}
+                      | {edge for pulse in pulses for edge in (pulse.start_us, pulse.end_us)
+                         if self.zz_time < edge < time_us})
         for begin, end in zip(cuts, cuts[1:]):
             idle = {(side, slot) for side, slot in exposed if self.free[side][slot] <= begin}
-            for component in self._components:
-                self._apply_component(component, end - begin, idle)
+            middle = 0.5 * (begin + end)
+            for index, component in enumerate(self._components):
+                active = [pulse for pulse in pulses if pulse.start_us <= middle < pulse.end_us
+                          and self._cluster_of.get((pulse.side, pulse.slot)) == index]
+                if active:
+                    self._apply_driven(index, begin, end, idle, active)
+                else:
+                    self._apply_component(component, end - begin, idle)
             for side, slot in idle:
                 self.free[side][slot] = end
         self.zz_time = time_us
@@ -648,6 +841,10 @@ class CoupledRegionWorld:
             if len(self._cache) >= _FACTOR_CACHE_LIMIT:
                 self._cache.clear()
             self._cache[key] = factors
+        self._apply_factors(factors, slots_a, slots_b)
+
+    def _apply_factors(self, factors, slots_a, slots_b) -> None:
+        """Apply a cluster map given as ``sum_m X_m (x) Y_m`` (A-side and B-side superoperators on blocks)."""
         x_factors, y_factors = factors
         a_coef, a_basis = _block_coefficients(self.factors[0], slots_a, self.dims[0])
         b_coef, b_basis = _block_coefficients(self.factors[1], slots_b, self.dims[1])
@@ -983,8 +1180,13 @@ def _component_factors(component, elapsed: float, mask, sides):
                 for operator in ladder_relaxation_operators(spec)]
     generator = np.asarray(gksl_liouvillian_superoperator(np.diag(energies).astype(complex), collapse))
     propagator = dense_matrix_exponential(generator * elapsed)
+    return _split_superoperator(propagator, math.prod(cluster_dims[:len(slots_a)]),
+                                math.prod(cluster_dims[len(slots_a):]))
+
+
+def _split_superoperator(propagator: np.ndarray, da: int, db: int):
+    """A cluster superoperator (A labels most significant) as ``sum_m X_m (x) Y_m`` on the two regions' blocks."""
     # column-major vectorization: index = column * D + row. Split rows/columns into (A part, B part).
-    da, db = math.prod(cluster_dims[:len(slots_a)]), math.prod(cluster_dims[len(slots_a):])
     tensor = propagator.reshape(da, db, da, db, da, db, da, db)  # out col(A,B), out row(A,B), in col, in row
     # -> out row A, out col A, in row A, in col A | out row B, out col B, in row B, in col B
     tensor = tensor.transpose(2, 0, 6, 4, 3, 1, 7, 5).reshape(da ** 4, db ** 4)

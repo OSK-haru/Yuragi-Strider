@@ -185,7 +185,8 @@ class DeclaredQpuExecutor:
                 tuple(np.asarray(self._lanes[region].store.read().density_matrix, dtype=complex)
                       for region in regions),
                 repetition_delay_us=runtime.config.repetition_delay_us,
-                readout_crosstalk=concurrent_regions.readout_crosstalk)
+                readout_crosstalk=concurrent_regions.readout_crosstalk,
+                transfers=concurrent_regions.transfers, pulse_shape=concurrent_regions.pulse_shape)
             self._world_side = {region: index for index, region in enumerate(regions)}
         runtime._declared_executor = self
         runtime._declared_event_limit = max_events_per_job
