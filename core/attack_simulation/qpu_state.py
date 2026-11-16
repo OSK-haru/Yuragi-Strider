@@ -13,6 +13,26 @@ from core.gates import Matrix
 from core.attack_simulation.qpu_topology import RetainedRegionBinding
 
 MAX_DENSE_LOCAL_QUBITS = 10  # 16 MiB raw complex128 matrix, excluding copies/tuple overhead.
+MAX_DENSE_DIMENSION = 1 << MAX_DENSE_LOCAL_QUBITS   # the same budget for subsystems with more levels
+MIN_LEVELS, MAX_LEVELS = 2, 4
+
+
+def _levels(value, count: int) -> int | tuple[int, ...]:
+    """A region's level counts: one int when every subsystem has it, else one per subsystem (D91)."""
+    if type(value) in (tuple, list):
+        dims = tuple(value)
+        if len(dims) != count or any(type(level) is not int or not MIN_LEVELS <= level <= MAX_LEVELS
+                                     for level in dims):
+            raise ValueError("local_dimension must give every physical qubit two to four levels")
+        return dims[0] if len(set(dims)) == 1 else dims
+    level = int(value)
+    if level != value or not MIN_LEVELS <= level <= MAX_LEVELS:
+        raise ValueError("local_dimension must be two to four levels")
+    return level
+
+
+def _dims(value: int | tuple[int, ...], count: int) -> tuple[int, ...]:
+    return value if type(value) is tuple else (value,) * count
 
 
 class RevisionConflictError(RuntimeError):
@@ -28,7 +48,7 @@ class QpuStateSnapshot:
     revision: int
     device_time_us: float
     physical_qubit_ids: tuple[int, ...]
-    local_dimension: int
+    local_dimension: int | tuple[int, ...]   # levels of every qubit, or one per qubit in region order (D91)
     density_matrix: Matrix
     device_config_version: str
     owner_tenant_id: str | None = None
@@ -50,12 +70,11 @@ class QpuStateSnapshot:
         if not qubits or len(set(qubits)) != len(qubits) or any(value < 0 for value in qubits):
             raise ValueError("physical_qubit_ids must be unique and non-negative")
         object.__setattr__(self, "physical_qubit_ids", qubits)
-        dimension = int(self.local_dimension)
-        if dimension not in (2, 3):
-            raise ValueError("local_dimension must be two or three")
-        object.__setattr__(self, "local_dimension", dimension)
+        object.__setattr__(self, "local_dimension", _levels(self.local_dimension, len(qubits)))
+        if self.dimension > MAX_DENSE_DIMENSION:
+            raise ValueError("the region exceeds the dense adapter's capacity")
         matrix = _immutable_density_matrix(self.density_matrix)
-        _validate_density_matrix(matrix, dimension ** len(qubits))
+        _validate_density_matrix(matrix, self.dimension)
         object.__setattr__(self, "density_matrix", matrix)
         if self.owner_tenant_id is not None:
             _identifier(self.owner_tenant_id, "owner_tenant_id")
@@ -63,6 +82,15 @@ class QpuStateSnapshot:
             _identifier(self.last_event_id, "last_event_id")
         if self.last_job_id is not None:
             _identifier(self.last_job_id, "last_job_id")
+
+    @property
+    def dims(self) -> tuple[int, ...]:
+        """The level count of every physical qubit, in region order."""
+        return _dims(self.local_dimension, len(self.physical_qubit_ids))
+
+    @property
+    def dimension(self) -> int:
+        return math.prod(self.dims)
 
 
 @dataclass(frozen=True)
@@ -123,20 +151,26 @@ class InactiveRegionState:
     density_matrix: Matrix
     owner_tenant_id: str | None
     updated_at_us: float
+    local_dimension: int | tuple[int, ...] = 2
 
     def __post_init__(self) -> None:
         ids = self.physical_qubit_ids
         if (type(ids) is not tuple or not ids or len(set(ids)) != len(ids)
                 or any(type(qid) is not int or qid < 0 for qid in ids)):
             raise ValueError("inactive region requires unique physical qubit IDs")
+        object.__setattr__(self, "local_dimension", _levels(self.local_dimension, len(ids)))
         matrix = _immutable_density_matrix(self.density_matrix)
-        _validate_density_matrix(matrix, 2 ** len(ids))
+        _validate_density_matrix(matrix, math.prod(self.dims))
         object.__setattr__(self, "density_matrix", matrix)
         if self.owner_tenant_id is not None:
             _identifier(self.owner_tenant_id, "owner_tenant_id")
         if (type(self.updated_at_us) not in (int, float)
                 or not math.isfinite(self.updated_at_us) or self.updated_at_us < 0):
             raise ValueError("inactive region update time must be finite and non-negative")
+
+    @property
+    def dims(self) -> tuple[int, ...]:
+        return _dims(self.local_dimension, len(self.physical_qubit_ids))
 
 
 @dataclass(frozen=True, eq=False)
@@ -237,9 +271,17 @@ class QpuStateStore:
 
         # Reconstruct rather than trusting a supplied dataclass's validation.
         # Neither this eigensolve nor event-chain validation holds the live lock.
-        metadata = ("schema_version", "qpu_id", "local_dimension", "device_config_version")
+        metadata = ("schema_version", "qpu_id", "device_config_version")
         if any(getattr(final_snapshot, name) != getattr(expected_snapshot, name) for name in metadata):
             raise ValueError("batch cannot change QPU metadata or topology")
+        # Each region keeps its own levels; a regional batch may end on the other region.
+        levels = {expected_snapshot.physical_qubit_ids: expected_snapshot.dims}
+        if self._inactive_region is not None:
+            levels[self._inactive_region.physical_qubit_ids] = self._inactive_region.dims
+        if (levels.get(final_snapshot.physical_qubit_ids) != final_snapshot.dims
+                or (final_inactive_region is not None
+                    and levels.get(final_inactive_region.physical_qubit_ids) != final_inactive_region.dims)):
+            raise ValueError("batch cannot change a region's levels")
         if self._inactive_region is None and final_inactive_region is not None:
             raise ValueError("a single-region store cannot acquire an inactive region")
         if self._inactive_region is not None:
@@ -457,9 +499,7 @@ class QpuStateStore:
         """Check a candidate result before a multi-event service operation begins."""
 
         with self._lock:
-            dimension = self._snapshot.local_dimension ** len(
-                self._snapshot.physical_qubit_ids
-            )
+            dimension = self._snapshot.dimension
         _validate_density_matrix(matrix, dimension)
 
     def commit(
@@ -490,8 +530,7 @@ class QpuStateStore:
                         or transition.next_owner_tenant_id != self._inactive_region.owner_tenant_id):
                     raise ValueError("tenant assignment requires the other retained region")
             elif next_qubits != current.physical_qubit_ids:
-                _validate_density_matrix(transition.next_density_matrix,
-                                         current.local_dimension ** len(current.physical_qubit_ids))
+                _validate_density_matrix(transition.next_density_matrix, current.dimension)
                 assigned = np.asarray(transition.next_density_matrix, dtype=complex)
                 if (abs(assigned[0, 0] - 1.0) > 1e-10
                         or np.any(np.abs(assigned[0, 1:]) > 1e-10)
@@ -505,7 +544,10 @@ class QpuStateStore:
                 revision=current.revision + 1,
                 device_time_us=current.device_time_us + transition.duration_us,
                 physical_qubit_ids=next_qubits,
-                local_dimension=current.local_dimension,
+                # The other retained region brings its own levels; an isolated assignment keeps the shape.
+                local_dimension=(self._inactive_region.local_dimension
+                                 if transition.event_kind == "tenant_region_assignment"
+                                 else current.local_dimension),
                 density_matrix=transition.next_density_matrix,
                 device_config_version=current.device_config_version,
                 owner_tenant_id=transition.next_owner_tenant_id,
@@ -533,7 +575,7 @@ class QpuStateStore:
             if transition.event_kind == "tenant_region_assignment":
                 self._inactive_region = InactiveRegionState(
                     current.physical_qubit_ids, current.density_matrix,
-                    current.owner_tenant_id, current.device_time_us,
+                    current.owner_tenant_id, current.device_time_us, current.local_dimension,
                 )
             self._events.append(record)
             self._event_ids.add(transition.event_id)
@@ -553,10 +595,14 @@ def single_qubit_zero_snapshot(
 
 def local_zero_snapshot(
     *, qpu_id: str, physical_qubit_ids: tuple[int, ...], device_config_version: str,
+    local_dimension: int | tuple[int, ...] = 2,
 ) -> QpuStateSnapshot:
     if not 1 <= len(physical_qubit_ids) <= MAX_DENSE_LOCAL_QUBITS:
         raise ValueError("initial local region exceeds the dense adapter's capacity")
-    dimension = 1 << len(physical_qubit_ids)
+    local_dimension = _levels(local_dimension, len(physical_qubit_ids))
+    dimension = math.prod(_dims(local_dimension, len(physical_qubit_ids)))
+    if dimension > MAX_DENSE_DIMENSION:
+        raise ValueError("initial local region exceeds the dense adapter's capacity")
     state = np.zeros((dimension, dimension), dtype=complex)
     state[0, 0] = 1.0
     return QpuStateSnapshot(
@@ -565,7 +611,7 @@ def local_zero_snapshot(
         revision=0,
         device_time_us=0.0,
         physical_qubit_ids=physical_qubit_ids,
-        local_dimension=2,
+        local_dimension=local_dimension,
         density_matrix=tuple(tuple(row) for row in state.tolist()),
         device_config_version=device_config_version,
     )

@@ -30,7 +30,7 @@ from core.attack_simulation.kick_application import (
 )
 from core.attack_simulation.shot_activity import instruction_starts
 from core.attack_simulation.program_request import STATE_INHERIT_OPERATION_ID, interleave_operation_id
-from core.attack_simulation.register_readout import register_assignment_errors
+from core.attack_simulation.register_readout import assign_bit, register_assignment_errors
 from core.attack_simulation.request_receipts import RequestReceipt
 from core.attack_simulation.job_authorization import (
     ATTACKER_ROLE, VICTIM_ROLE, JobAuthorizationPolicy,
@@ -53,7 +53,8 @@ from core.experimental_isolation_physics.idle_evolution import IndependentIdleMo
 from core.gates import Matrix, density_from_ket
 from core.register_operations import (
     apply_local_depolarizing_replacement, apply_local_replacement, apply_operand_operator,
-    apply_reset_with_feedback_kick, freeze_register, nonselective_measurement, sample_measurement,
+    apply_reset_with_feedback_kick, embed_qubit_operator, freeze_register, nonselective_measurement,
+    sample_measurement,
 )
 
 HANDOVER_RESET_SCOPES = ("layout", "region")
@@ -271,8 +272,19 @@ class SharedQpuRuntime:
         region_access: Mapping[str, Sequence[tuple[int, ...]]] | None = None,
     ) -> None:
         snapshot = state_store.read()
-        if snapshot.local_dimension != 2 or len(snapshot.physical_qubit_ids) > config.max_local_qubits:
+        if len(snapshot.physical_qubit_ids) > config.max_local_qubits:
             raise ValueError("local register exceeds the configured dense runtime capacity")
+        # Levels above |1> (D91) are a property of the physical qubits; the idle model must describe the same.
+        parked = state_store.inactive_region()
+        levels = {snapshot.physical_qubit_ids: snapshot.dims}
+        if parked is not None:
+            levels[parked.physical_qubit_ids] = parked.dims
+        for region, model in [*(regional_idle_models or {}).items(), (snapshot.physical_qubit_ids, idle_model)]:
+            if model is not None and region in levels and model.dims != levels[region]:
+                raise ValueError("the idle model's levels differ from the region's state")
+        if snapshot.dims != (2,) * len(snapshot.physical_qubit_ids) and (
+                config.placement_policy is PlacementPolicy.ISOLATED_PHYSICAL_RESOURCE):
+            raise ValueError("isolated placement works on two-level qubits")
         if (config.placement_policy is PlacementPolicy.ISOLATED_PHYSICAL_RESOURCE
                 and len(snapshot.physical_qubit_ids) != 1):
             raise ValueError("isolated placement currently requires a one-qubit local region")
@@ -527,6 +539,8 @@ class SharedQpuRuntime:
     def _dispatch(self, job, operation, snapshot, reset_outcome, kicks: KickPlan = EMPTY_PLAN) -> dict[str, object]:
         if isinstance(operation, CircuitExecutionOperation):
             return self._execute_circuit(job, operation, kicks)
+        if snapshot.dims != (2,):
+            raise ValueError("the one-qubit victim and attacker operations work on a two-level qubit")
         if isinstance(operation, VictimPrepareOperation):
             next_state = density_from_ket(
                 (1.0 + 0.0j, 0.0j)
@@ -627,19 +641,19 @@ class SharedQpuRuntime:
             # Sample its joint distribution once.
             # A leak during a qubit's readout (strong measurement, quantum Zeno) acts on the collapsed state; the
             # thresholded result is the state at the window's middle (``kick_application``).
+            dims = self.state_store.read().dims
             state = apply_readout_decisions(state, readout_kicks, self._slot_of, self.config.readout_dephasing_per_us)
-            state, bits = sample_measurement(state, measured_slots, generator)
+            state, levels = sample_measurement(state, measured_slots, generator, dims)
             for placed in readout_kicks:
                 if placed.readout == "after":
                     state = self._apply_kick(state, placed)
             # Qubits outside the measurement idle while it runs (D85). Local channels on other qubits
             # commute with the projective measurement, so relaxing after the draw is exact.
             if measurement_duration > 0.0 and self._active_idle_model() is not None:
-                unmeasured = tuple(s for s in range(state.shape[0].bit_length() - 1) if s not in measured_slots)
+                unmeasured = tuple(s for s in range(len(dims)) if s not in measured_slots)
                 state = self._relax(state, {s: measurement_duration for s in unmeasured})
-            for q, bit, target in zip(measured_qubits, bits, classical_targets):
-                p10, p01 = assignment[q]
-                classical[target] = int(generator.random() < p10) if bit == 0 else int(generator.random() >= p01)
+            for q, level, target in zip(measured_qubits, levels, classical_targets):
+                classical[target] = assign_bit(assignment[q], level, generator.random())
             duration += measurement_duration
             if shot_index == operation.shots - 1:
                 for placed in kicks.trailing:
@@ -682,7 +696,8 @@ class SharedQpuRuntime:
                 state = np.asarray(self._active_idle_model().evolve(
                     state, elapsed_us=self.config.repetition_delay_us - elapsed), dtype=complex)
             duration += self.config.repetition_delay_us
-        assignment: dict[int, tuple[float, float]] = {}
+        assignment: dict[int, tuple[float, ...]] = {}
+        dims = snapshot.dims
         if operation.initialization == "inherit":
             errors = register_assignment_errors(
                 self._active_reset_models().get(self.config.reset_model_id),
@@ -730,7 +745,7 @@ class SharedQpuRuntime:
             if instruction.kind in {"initialize", "reset"}:
                 readout = self._active_reset_models().run_register(self.config.reset_model_id, ResetModelRequest(
                     input_state=freeze_register(state), reset_count=1, victim_measurement=False,
-                    subsystem_count=len(snapshot.physical_qubit_ids), targets=operands,
+                    subsystem_count=len(snapshot.physical_qubit_ids), targets=operands, dims=dims,
                 ))
                 self.state_store.validate_state(readout.post_reset_state)
                 state = (np.asarray(readout.post_reset_state, dtype=complex) if not feedback
@@ -740,10 +755,12 @@ class SharedQpuRuntime:
             elif instruction.kind == "unitary":
                 if instruction.unitary is None:
                     raise ValueError("compiled unitary is missing")
-                state = apply_operand_operator(state, instruction.unitary, operands)
+                # A gate acts on the qubit levels of its operands; a leaked state is left alone.
+                state = apply_operand_operator(
+                    state, embed_qubit_operator(instruction.unitary, tuple(dims[s] for s in operands)), operands, dims)
                 if instruction.depolarizing_probability:
                     state = apply_local_depolarizing_replacement(
-                        state, operands, instruction.depolarizing_probability,
+                        state, operands, instruction.depolarizing_probability, dims,
                     )
                 duration += instruction.duration_us
             elif instruction.kind == "delay":
@@ -773,9 +790,10 @@ class SharedQpuRuntime:
         model = self._active_reset_models().get(self.config.reset_model_id)
         if not callable(getattr(model, "local_spec", None)):
             raise ValueError("leaks inside a reset need a reset model with one-qubit channels")
+        dims = self.state_store.read().dims
         result = np.array(state, dtype=complex)
         if measure_input:
-            result = nonselective_measurement(result, targets)
+            result = nonselective_measurement(result, targets, dims)
         by_slot: dict[int, np.ndarray] = {}
         for placed in feedback:
             slot = self._slot_of(placed.qubit)
@@ -788,23 +806,32 @@ class SharedQpuRuntime:
                 spec = model.local_spec(slot)
                 if spec.local_dimension != 2:
                     raise ValueError("leaks inside a reset need two-level reset channels")
-                if attempt == 0 and slot in by_slot:
-                    result = apply_reset_with_feedback_kick(result, slot, spec.success_probability,
-                                                            spec.target_populations, by_slot[slot])
+                if (attempt == 0 and slot in by_slot) or dims[slot] > 2:
+                    # On more levels the measurement-based form is the reset itself (a leaked level passes).
+                    result = apply_reset_with_feedback_kick(
+                        result, slot, spec.success_probability, spec.target_populations,
+                        by_slot.get(slot, np.eye(2, dtype=complex)) if attempt == 0 else np.eye(2, dtype=complex),
+                        dims)
                 else:
-                    result = apply_local_replacement(result, slot, spec.success_probability, spec.target_populations)
+                    result = apply_local_replacement(result, slot, spec.success_probability, spec.target_populations,
+                                                     dims)
         return result
 
     def _apply_kick(self, state: np.ndarray, placed: PlacedKick) -> np.ndarray:
         """A leaked rotation from another job's drive; it takes no time of its own."""
-        slot = self.state_store.read().physical_qubit_ids.index(placed.qubit)
-        return apply_operand_operator(state, kick_unitary(placed), (slot,))
+        snapshot = self.state_store.read()
+        slot = snapshot.physical_qubit_ids.index(placed.qubit)
+        # The kick is a rotation of the qubit levels (the leaked drive is resonant with 0-1); it leaves a
+        # leaked level alone. What it does to 1-2 is the pulse-level path's to compute (D91).
+        unitary = embed_qubit_operator(kick_unitary(placed), (snapshot.dims[slot],))
+        return apply_operand_operator(state, unitary, (slot,), snapshot.dims)
 
     def _relax(self, state: np.ndarray, elapsed_by_slot: Mapping[int, float]) -> np.ndarray:
         """Relax each named register slot for its own idle time; the other qubits are left untouched."""
         model = self._active_idle_model()
         result = np.array(state, dtype=complex, copy=True, order="C")
-        relax_axes_in_place(result, tuple((s, model.qubits[s], t) for s, t in sorted(elapsed_by_slot.items())))
+        relax_axes_in_place(result, tuple((s, model.qubits[s], t) for s, t in sorted(elapsed_by_slot.items())),
+                            model.dims)
         return result
 
     def _slot_of(self, physical_qubit: int) -> int:
@@ -866,7 +893,7 @@ class SharedQpuRuntime:
             outcome = self._active_reset_models().run_register(self.config.reset_model_id, ResetModelRequest(
                 input_state=input_state, reset_count=self.config.reset_count,
                 victim_measurement=self.config.measure_input_state_before_transition,
-                subsystem_count=len(snapshot.physical_qubit_ids), targets=targets,
+                subsystem_count=len(snapshot.physical_qubit_ids), targets=targets, dims=snapshot.dims,
             ))
             self.state_store.validate_state(outcome.post_reset_state)
             duration = self._active_service_durations()[0]
@@ -958,7 +985,7 @@ class SharedQpuRuntime:
                         self.config.reset_model_id),
                     subsystem_count=len(snapshot.physical_qubit_ids), targets=targets,
                 )
-            cells = 4 ** len(snapshot.physical_qubit_ids)
+            cells = snapshot.dimension ** 2
             def _weight(instructions):
                 return sum((12 * len(item.qubits) if item.kind in {"initialize", "reset", "delay"}
                             else 4 * len(item.qubits) if item.kind == "measure"
