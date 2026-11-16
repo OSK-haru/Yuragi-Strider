@@ -27,6 +27,8 @@ from collections.abc import Mapping
 
 import numpy as np
 
+from core.attack_simulation.pulse_shape import PulseShape
+
 DEFAULT_PULSE_ANGLES = {"sx": math.pi / 2.0, "x": math.pi}
 PULSE_ANGLES = DEFAULT_PULSE_ANGLES  # Compatibility export for callers using the Kingston default.
 _TOLERANCE = 1e-9
@@ -44,12 +46,21 @@ class NativeStep:
     angle_rad: float
     duration_us: float
     is_virtual: bool = False
+    # A calibrated gate's pulse sits on the qubit's frequency and has the envelope declared for the whole
+    # window (None). A pulse the tenant plays directly states both itself (``direct_pulse``).
+    frequency_offset_rad_per_us: float = 0.0
+    shape: PulseShape | None = None
 
     def __post_init__(self) -> None:
         if type(self.name) is not str or not self.name or type(self.is_virtual) is not bool:
             raise ValueError("unknown native step")
         if not (math.isfinite(self.angle_rad) and math.isfinite(self.duration_us)) or self.duration_us < 0.0:
             raise ValueError("native step values must be finite and the duration nonnegative")
+        if not math.isfinite(self.frequency_offset_rad_per_us) or (
+                self.shape is not None and type(self.shape) is not PulseShape):
+            raise ValueError("a native step's carrier offset must be finite and its envelope a PulseShape")
+        if self.is_virtual and (self.frequency_offset_rad_per_us != 0.0 or self.shape is not None):
+            raise ValueError("a virtual step plays no pulse")
 
 
 def _virtual_z_matrix(angle: float) -> np.ndarray:

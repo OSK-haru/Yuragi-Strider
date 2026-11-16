@@ -15,6 +15,7 @@ from typing import Any
 from core.attack_simulation.config_limits import check_json_bounds
 from core.circuit_model import CircuitConfig
 from core.circuit_validation import validate_circuit_config
+from core.gate_specs import DIRECT_PULSE_GATE, SUPPORTED_GATE_NAMES
 
 
 CIRCUIT_FILE_KIND = "quantscope_circuit_config"
@@ -85,7 +86,8 @@ class CircuitProgram:
         _check_editor_shape(payload)
         try:
             circuit = CircuitConfig.from_dict(payload)
-            issues = validate_circuit_config(circuit)
+            # A program may name a direct pulse; whether the service accepts it is the compiler's policy.
+            issues = validate_circuit_config(circuit, SUPPORTED_GATE_NAMES | {DIRECT_PULSE_GATE})
         except (KeyError, TypeError, ValueError) as error:
             raise ProgramRequestError("invalid circuit configuration") from error
         if issues:

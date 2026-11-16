@@ -16,7 +16,11 @@ class GateSpec:
     duration_us: float | None
     backend_native: bool = False
     program_supported: bool = True
+    # False: the gate-aware circuit simulator has no matrix for it (it exists only for submitted programs).
+    gate_aware: bool = True
 
+
+DIRECT_PULSE_GATE = "PULSE"
 
 _SPECS = (
     GateSpec("I", 1, 1, 0, 0, 0.0), GateSpec("H", 1, 1, 0, 0, 0.02),
@@ -31,9 +35,12 @@ _SPECS = (
     GateSpec("SWAP", 2, 2, 0, 0, 0.20), GateSpec("QFT", 1, None, 0, 0, None),
     GateSpec("ORACLE", 1, None, 0, 0, None), GateSpec("MEASURE", 1, 1, 0, 0, 0.0),
     GateSpec("MESSAGE", 1, 1, 0, 0, 0.04, program_supported=False),
+    # A pulse played directly on a qubit's drive line (attack simulator, D91). It is outside the default
+    # program vocabulary: a compiler accepts it only under an explicit provider policy.
+    GateSpec(DIRECT_PULSE_GATE, 1, 1, 0, 0, None, program_supported=False, gate_aware=False),
 )
 GATE_SPECS = MappingProxyType({spec.name: spec for spec in _SPECS})
-SUPPORTED_GATE_NAMES = frozenset(GATE_SPECS)
+SUPPORTED_GATE_NAMES = frozenset(name for name, spec in GATE_SPECS.items() if spec.gate_aware)
 BACKEND_NATIVE_GATE_NAMES = frozenset(
     name for name, spec in GATE_SPECS.items() if spec.backend_native
 )

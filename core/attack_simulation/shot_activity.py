@@ -28,7 +28,8 @@ class ActivityInterval:
     """One qubit doing one thing over ``[start_us, end_us)``; a ``frame`` shift is instantaneous.
 
     * ``drive``: a microwave pulse of rotation ``angle_rad`` at hardware carrier phase ``phase_rad``
-      (a virtual Z of ``a`` shifts the later pulses of that qubit by ``-a``).
+      (a virtual Z of ``a`` shifts the later pulses of that qubit by ``-a``). A pulse the tenant plays
+      directly may sit ``frequency_offset_rad_per_us`` away from the qubit and have its own envelope.
     * ``frame``: a virtual Z; ``angle_rad`` is the shift.
     * ``two_qubit``: a two-qubit gate acting on this qubit.
     * ``idle``: a declared wait. ``reset`` and ``measure``: service operations on the register.
@@ -41,13 +42,18 @@ class ActivityInterval:
     angle_rad: float = 0.0
     phase_rad: float = 0.0
     shape: PulseShape = SQUARE_SHAPE        # how a ``drive`` is spread over its duration
+    # A ``drive``'s carrier minus the qubit's own frequency; the carrier's phase is ``phase_rad`` at the
+    # start of the pulse. Zero for a calibrated gate.
+    frequency_offset_rad_per_us: float = 0.0
 
     def __post_init__(self) -> None:
         if self.kind not in ACTIVITY_KINDS:
             raise ValueError("unknown activity kind")
         if type(self.qubit) is not int or self.qubit < 0:
             raise ValueError("activity qubit must be a nonnegative index")
-        values = (self.start_us, self.end_us, self.angle_rad, self.phase_rad)
+        if self.kind != "drive" and self.frequency_offset_rad_per_us != 0.0:
+            raise ValueError("only a drive has a carrier")
+        values = (self.start_us, self.end_us, self.angle_rad, self.phase_rad, self.frequency_offset_rad_per_us)
         if not all(math.isfinite(value) for value in values) or self.start_us < 0.0 or self.end_us < self.start_us:
             raise ValueError("activity times must be finite with 0 <= start <= end")
         if self.kind == "frame" and self.end_us != self.start_us:
@@ -148,7 +154,9 @@ def shot_activity(operation: CircuitExecutionOperation, *, reset_duration_us: fl
                 else:
                     intervals.append(ActivityInterval(
                         qubit, "drive", cursor, cursor + step.duration_us,
-                        angle_rad=step.angle_rad, phase_rad=-frames.get(qubit, 0.0), shape=pulse_shape))
+                        angle_rad=step.angle_rad, phase_rad=-frames.get(qubit, 0.0),
+                        shape=pulse_shape if step.shape is None else step.shape,
+                        frequency_offset_rad_per_us=step.frequency_offset_rad_per_us))
                     cursor += step.duration_us
         elif len(item.qubits) == 2 and item.intrinsic_us > 0.0:
             intervals.extend(ActivityInterval(q, "two_qubit", start, start + item.intrinsic_us) for q in item.qubits)

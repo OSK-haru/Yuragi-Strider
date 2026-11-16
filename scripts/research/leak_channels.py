@@ -45,7 +45,8 @@ FREQUENCY_GHZ = (5.10, 5.00)          # measured 0-1 frequencies of physical 1 a
 ANHARMONICITY_MHZ = (-330.0, -310.0)  # measured f12 - f01 of physical 1 and 2
 CROSSTALK = 0.05           # drive-crosstalk transfer 1 -> 2, real part (leaked drive along the same axis)
 CROSSTALK_IMAG = 0.0       # imaginary part (leaked drive turned by 90 degrees); |real + i imag| <= 1
-CROSSTALK_DETUNING_MHZ = 0.0   # 0 = resonant leak; the product default is 100 MHz
+CROSSTALK_DETUNING_MHZ = 0.0   # 0 = resonant leak; the product default is 100 MHz. Used when J_MHZ is None:
+                               # with device values the detuning is their frequency difference (2 minus 1)
 RESET_SUCCESS = 0.9        # success probability of one reset when the residue channel is on (off = 1.0)
 RESET_US = 1.0             # duration of one reset (initializing and handover)
 READOUT_DEPHASING_PER_US = None   # measurement-induced dephasing in a readout (1/us); None = strong-measurement
@@ -70,6 +71,11 @@ def device_specs():
                  for frequency, anharmonicity in zip(FREQUENCY_GHZ, ANHARMONICITY_MHZ))
 
 
+def leak_detuning_mhz():
+    """The receiver's frequency minus the source's: declared without device values, their difference with."""
+    return CROSSTALK_DETUNING_MHZ if J_MHZ is None else 1e3 * (FREQUENCY_GHZ[1] - FREQUENCY_GHZ[0])
+
+
 def device_summary():
     """What the device values imply: the ZZ, and how strongly 1's control line drives 2 through J alone."""
     cluster = TransmonCluster(device_specs(), (TransmonExchangeCoupling(0, 1, 2 * math.pi * J_MHZ),))
@@ -91,7 +97,7 @@ def one_run(use_zz, use_xt, use_residue, secret, seed):
     elif use_zz:
         transmons = CoupledTransmonSettings(tuple(zip((1, 2), device_specs())), ((1, 2, 2 * math.pi * J_MHZ),),
                                             model="exact")
-    transfers = ([DriveCrosstalkTransfer(1, 2, CROSSTALK, CROSSTALK_IMAG, 2 * math.pi * CROSSTALK_DETUNING_MHZ)]
+    transfers = ([DriveCrosstalkTransfer(1, 2, CROSSTALK, CROSSTALK_IMAG, 2 * math.pi * leak_detuning_mhz())]
                  if use_xt else [])
     runtime, executor = build(transfers=transfers, zz=zz, t1=T1_US, tphi=TPHI_US,
                               reset_success=RESET_SUCCESS if use_residue else 1.0,
@@ -120,7 +126,7 @@ def one_run(use_zz, use_xt, use_residue, secret, seed):
 def main():
     if J_MHZ is not None:
         print(device_summary())
-    print(f"ZZ={'from J' if J_MHZ is not None else ZZ_KHZ} kHz  crosstalk={CROSSTALK}{CROSSTALK_IMAG:+}i (detuning {CROSSTALK_DETUNING_MHZ} MHz)  "
+    print(f"ZZ={'from J' if J_MHZ is not None else ZZ_KHZ} kHz  crosstalk={CROSSTALK}{CROSSTALK_IMAG:+}i (detuning {leak_detuning_mhz():g} MHz)  "
           f"reset success={RESET_SUCCESS}  T1={T1_US} Tphi={TPHI_US}  wait={WAIT_US} us  shots={SHOTS}")
     print(f"{'ZZ':<4}{'xt':<4}{'res':<5}| {'probe P(1|0)':>12}{'P(1|1)':>8}{'diff':>8} | "
           f"{'takeover P(1|0)':>15}{'P(1|1)':>8}{'diff':>8} | sd")

@@ -19,6 +19,8 @@ How a leak becomes a kick, in the simulator's frame (virtual Z applied to the st
   target's rotation. The integral is taken in the gate's interaction picture, ``n(t)`` rotated back by
   everything the gate has done up to ``t``, and the kick goes *before* the gate. A single kick at the
   gate's start with the plain axis would get the effect of a concurrent pi pulse wrong by order one.
+  A calibrated pulse turns the target about x by the area played so far; a pulse the target's tenant
+  plays off the qubit's frequency follows the path ``direct_pulse`` computes for it.
 * A reset (an initializing reset, a mid-circuit reset, the tenant handover) is, on IBM hardware, a
   measurement followed by an X conditioned on the outcome. Its interval is the measurement (the first
   ``measurement_duration_us``) and then the feedback. A leak during the measurement is placed *before*
@@ -52,6 +54,7 @@ import numpy as np
 
 from core.attack_simulation.concurrent_windows import DriveLeak, DriveSchedule
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
+from core.attack_simulation.direct_pulse import pulse_rotations
 from core.attack_simulation.shot_activity import instruction_starts
 from core.register_operations import apply_local_bloch_map, driven_dephasing_bloch
 
@@ -217,7 +220,7 @@ class _Gate:
     start: float
     end: float
     frame_before: float
-    steps: tuple[tuple, ...]            # ("frame", angle) or ("pulse", start, end, angle)
+    steps: tuple[tuple, ...]            # ("frame", angle) or ("pulse", start, end, angle, carrier offset, shape)
 
 
 class _Timeline:
@@ -236,7 +239,8 @@ class _Timeline:
                     if step.is_virtual:
                         steps.append(("frame", step.angle_rad))
                     else:
-                        steps.append(("pulse", cursor, cursor + step.duration_us, step.angle_rad))
+                        steps.append(("pulse", cursor, cursor + step.duration_us, step.angle_rad,
+                                      step.frequency_offset_rad_per_us, step.shape))
                         cursor += step.duration_us
                 if cursor > starts[index]:
                     gates.append(_Gate(index, starts[index], cursor, frame, tuple(steps)))
@@ -319,16 +323,26 @@ def place_kicks(leaks: Sequence[DriveLeak], operation: CircuitExecutionOperation
             if step[0] == "frame":
                 rotation, frame = _rotation_z(step[1]) @ rotation, frame + step[1]
                 continue
-            _, pulse_start, pulse_end, angle = step
+            _, pulse_start, pulse_end, angle, offset, own_shape = step
+            shape = target_shape if own_shape is None else own_shape
+            length = pulse_end - pulse_start
             low, high = max(begin, pulse_start), min(end, pulse_end)
             if high > low:
-                local, w = _slices(low, high, _slice_count(leak.detuning_rad_per_us, high - low, angle))
+                turning = abs(angle) + abs(offset) * (high - low)
+                local, w = _slices(low, high, _slice_count(leak.detuning_rad_per_us, high - low, turning))
                 v = leak.rate(base + local) * np.exp(1j * frame)
-                psi = angle * target_shape.cumulative((local - pulse_start) / (pulse_end - pulse_start))
-                c, s = np.cos(psi), np.sin(psi)
-                pieces.append(np.stack([np.sum(w * v.real, axis=1), np.sum(w * c * v.imag, axis=1),
-                                        np.sum(-w * s * v.imag, axis=1)], axis=1) @ rotation)
-            rotation = _rotation_x(angle) @ rotation
+                if offset == 0.0:                      # the target turns about x by the area played so far
+                    psi = angle * shape.cumulative((local - pulse_start) / length)
+                    c, s = np.cos(psi), np.sin(psi)
+                    pieces.append(np.stack([np.sum(w * v.real, axis=1), np.sum(w * c * v.imag, axis=1),
+                                            np.sum(-w * s * v.imag, axis=1)], axis=1) @ rotation)
+                else:                                  # a pulse off the target's frequency: its computed path
+                    own = pulse_rotations(angle, length, offset, shape,
+                                          (local - pulse_start) / length).reshape(local.shape + (3, 3))
+                    axis = np.stack([v.real, v.imag, np.zeros(v.shape)], axis=-1)
+                    pieces.append(np.einsum("cn,cnji,cnj->ci", w, own, axis) @ rotation)
+            rotation = (_rotation_x(angle) if offset == 0.0
+                        else pulse_rotations(angle, length, offset, shape, (1.0,))[0]) @ rotation
         return _magnus(np.concatenate(pieces)) if pieces else np.zeros(3)
 
     def between(shot: int, base: float, begin: float, end: float, leak: DriveLeak, frames) -> None:

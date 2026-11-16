@@ -67,7 +67,8 @@ class DriveSchedule:
             for item in self.shot.intervals:
                 if kind is None or item.kind == kind:
                     yield ActivityInterval(item.qubit, item.kind, item.start_us + shift, item.end_us + shift,
-                                           item.angle_rad, item.phase_rad, item.shape)
+                                           item.angle_rad, item.phase_rad, item.shape,
+                                           item.frequency_offset_rad_per_us)
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,11 @@ class DriveLeak:
     ``coefficient`` (and ``detuning_rad_per_us``) it turns the receiver at the complex rate
     ``rate(t) = coefficient * Omega(t) * exp(i (phase + detuning * t))``: its modulus is the leak's rotation
     rate in rad/us and its argument the hardware phase of the rotation axis at time ``t``.
+
+    ``detuning_rad_per_us`` is the receiver's frequency minus the drive's carrier. For a calibrated gate the
+    carrier is the source qubit's frequency and this is the declared transfer's detuning. A pulse played
+    ``offset`` away from the source's frequency, with its carrier phase counted from the pulse's start,
+    is the same expression with ``detuning - offset`` and ``phase + offset * drive_start``.
     """
 
     qubit: int
@@ -218,10 +224,11 @@ def _leaks_onto(source: ExecutionWindow, receivers: Sequence[int], begin_us: flo
         if drive.end_us <= drive.start_us or end <= begin:
             continue
         for transfer in by_source.get(drive.qubit, ()):
+            offset = drive.frequency_offset_rad_per_us
             leaks.append(DriveLeak(
                 transfer.target, begin, end, source.job_id, source.physical_qubits[drive.qubit],
-                transfer.coefficient, transfer.detuning_rad_per_us, drive_start, drive_end,
-                drive.angle_rad, drive.phase_rad, drive.shape))
+                transfer.coefficient, transfer.detuning_rad_per_us - offset, drive_start, drive_end,
+                drive.angle_rad, drive.phase_rad + offset * drive_start, drive.shape))
     leaks.sort(key=_leak_order)
     return tuple(leaks)
 

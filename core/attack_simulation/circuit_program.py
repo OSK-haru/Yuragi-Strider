@@ -17,8 +17,9 @@ from core.attack_simulation.resource_binding import PhysicalQubitLayout
 from core.circuit_model import CircuitConfig, GateOperation
 from core.attack_simulation.native_pulses import NativeStep, UnsupportedNativeSequence, solve_native_steps
 from core.attack_simulation.backend_declaration import BackendDeclaration, KINGSTON_BACKEND
+from core.attack_simulation.direct_pulse import DirectPulse, DirectPulsePolicy
 from core.gates import Matrix, gate_duration_us, gate_unitary
-from core.gate_specs import PROGRAM_GATE_NAMES
+from core.gate_specs import DIRECT_PULSE_GATE, PROGRAM_GATE_NAMES
 
 if TYPE_CHECKING:
     from core.attack_simulation.scenario_compiler import ResolvedScenarioManifest
@@ -198,6 +199,13 @@ class CircuitExecutionOperation:
         return "program.submit"
 
 
+def _direct_pulse_policy(value: object) -> DirectPulsePolicy:
+    try:
+        return DirectPulsePolicy.from_config(value)
+    except ValueError as error:
+        raise ProgramRequestError(str(error)) from error
+
+
 @dataclass(frozen=True)
 class LocalCircuitCompiler:
     """Native gates on compact operand matrices; no full-register gate copies."""
@@ -216,6 +224,9 @@ class LocalCircuitCompiler:
     additional_physical_qubit_ids: tuple[int, ...] = ()
     backend_declaration: BackendDeclaration = KINGSTON_BACKEND
     two_qubit_gate_calibrations: Mapping[str, Mapping[str, Mapping[str, float]]] | None = None
+    # The provider's policy for pulses a tenant plays directly (``PULSE``); None: the service has no such
+    # instruction. It is not part of ``supported_gates``: the policy is what makes it exist.
+    direct_pulse: DirectPulsePolicy | None = None
 
     @classmethod
     def from_manifest(cls, manifest: ResolvedScenarioManifest) -> LocalCircuitCompiler:
@@ -225,7 +236,7 @@ class LocalCircuitCompiler:
         required = {"compiler_id", "supported_gates", "max_shots", "max_instruction_executions", "max_program_qubits"}
         optional = {"max_unitary_elements", "supported_initializations", "gate_durations_us"}
         optional |= {"cz_gate_calibrations", "single_qubit_native_gates", "single_qubit_gate_decompositions",
-                     "backend_declaration", "two_qubit_gate_calibrations"}
+                     "backend_declaration", "two_qubit_gate_calibrations", "direct_pulse"}
         if not isinstance(config, Mapping) or not required <= set(config) or set(config) - required - optional:
             raise ProgramRequestError("circuit_execution requires an explicit local service profile")
         if config["compiler_id"] != "local_sampling_v1":
@@ -245,12 +256,15 @@ class LocalCircuitCompiler:
                    config.get("single_qubit_gate_decompositions"), tuple(additional),
                    BackendDeclaration.from_config(config["backend_declaration"])
                    if "backend_declaration" in config else KINGSTON_BACKEND,
-                   config.get("two_qubit_gate_calibrations"))
+                   config.get("two_qubit_gate_calibrations"),
+                   _direct_pulse_policy(config["direct_pulse"]) if "direct_pulse" in config else None)
 
     def __post_init__(self) -> None:
         declaration = self.backend_declaration
         if not isinstance(declaration, BackendDeclaration):
             raise ValueError("invalid backend declaration")
+        if self.direct_pulse is not None and type(self.direct_pulse) is not DirectPulsePolicy:
+            raise ValueError("direct_pulse must be a DirectPulsePolicy")
         modes = self.supported_initializations
         if (not isinstance(modes, (tuple, list)) or not modes
                 or any(not isinstance(mode, str) or mode not in PROGRAM_INITIALIZATIONS for mode in modes)
@@ -445,7 +459,22 @@ class LocalCircuitCompiler:
                         if request.initialization == "prepare" else [])
         unitary_elements = 0
 
+        def direct_pulse(gate: GateOperation) -> DirectPulse:
+            if self.direct_pulse is None:
+                raise ProgramRequestError("this service does not accept direct pulses")
+            if gate.conditions or gate.controls or len(gate.targets) != 1:
+                raise ProgramRequestError("a direct pulse acts on exactly one qubit, unconditionally")
+            try:
+                pulse = DirectPulse.from_params(gate.params)
+                self.direct_pulse.check(pulse)
+            except ValueError as error:
+                raise ProgramRequestError(str(error)) from error
+            return pulse
+
         def gate_calibration(gate: GateOperation) -> tuple[float, float]:
+            if gate.type == DIRECT_PULSE_GATE:
+                # No calibration stands behind it, so no calibrated error is charged.
+                return direct_pulse(gate).duration_us, 0.0
             if gate.type not in self.supported_gates or gate.conditions:
                 raise ProgramRequestError(f"gate or classical condition is not supported by this service: {gate.type}")
             if self.single_qubit_gate_decompositions is not None and gate.type in self.single_qubit_gate_decompositions:
@@ -499,6 +528,15 @@ class LocalCircuitCompiler:
         def append_gate(gate: GateOperation, duration: float, group: int,
                         depolarizing_probability: float = 0.0, intrinsic: float = 0.0) -> None:
             nonlocal unitary_elements
+            if gate.type == DIRECT_PULSE_GATE:
+                pulse = direct_pulse(gate)
+                unitary_elements += 4
+                if unitary_elements > self.max_unitary_elements:
+                    raise ProgramRequestError("compiled unitary storage exceeds the service limit")
+                instructions.append(CircuitInstruction(
+                    "unitary", duration, tuple(tuple(complex(v) for v in row) for row in pulse.unitary()),
+                    tuple(gate.targets), time_group=group, intrinsic_us=intrinsic, natives=pulse.native_steps()))
+                return
             if gate.type not in self.supported_gates or gate.conditions:
                 raise ProgramRequestError(f"gate or classical condition is not supported by this service: {gate.type}")
             if gate.controls and gate.type not in {"CNOT", "CZ", "CP", "CCX"}:

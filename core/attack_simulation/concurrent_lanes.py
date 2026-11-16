@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+import math
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.coupled_regions import CoupledTransmonSettings, ResidualZZSettings
@@ -52,6 +53,16 @@ class ConcurrentRegions:
         if any(type(item) is not DriveCrosstalkTransfer for item in transfers):
             raise TypeError("transfers must contain DriveCrosstalkTransfer values")
         object.__setattr__(self, "transfers", transfers)
+        if self.transmons is not None:
+            # A leak's detuning is the receiver's frequency minus the source's. Where the device values
+            # give both, a transfer may not state a different one.
+            frequency = {qubit: spec.frequency_ghz for qubit, spec in self.transmons.transmons}
+            for item in transfers:
+                if item.source in frequency and item.target in frequency:
+                    expected = 2.0 * math.pi * 1e3 * (frequency[item.target] - frequency[item.source])
+                    if abs(item.detuning_rad_per_us - expected) > 1e-6 * max(1.0, abs(expected)):
+                        raise ValueError("a transfer's detuning must be the declared frequency of its target "
+                                         "minus that of its source")
         if type(self.pulse_shape) is not PulseShape:
             raise TypeError("a PulseShape is required")
 

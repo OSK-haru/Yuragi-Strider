@@ -11,13 +11,21 @@ from core.circuit_model import CircuitConfig, GateColumn, GateOperation
 from core.errors import ValidationIssue
 
 
-def validate_circuit_config(config: CircuitConfig) -> list[ValidationIssue]:
-    """Validate a circuit config for editor-safe placement."""
+def validate_circuit_config(
+    config: CircuitConfig,
+    supported_gates: Iterable[str] = SUPPORTED_GATES,
+) -> list[ValidationIssue]:
+    """Validate a circuit config for editor-safe placement.
+
+    ``supported_gates`` is the vocabulary of the caller: the gate-aware simulator's by default; a program
+    boundary passes its own, which may hold gates the simulator has no matrix for.
+    """
 
     return _validate_circuit(
         logical_qubits=config.logical_qubits,
         classical_bits=config.classical_bits,
         columns=config.columns,
+        supported_gates=frozenset(supported_gates),
     )
 
 
@@ -35,13 +43,14 @@ def validate_gate_for_circuit(
     logical_qubits: int,
     gate: GateOperation,
     classical_bits: int = 0,
+    supported_gates: frozenset[str] = SUPPORTED_GATES,
 ) -> list[ValidationIssue]:
     """Validate one gate without considering other gates in the same column."""
 
     issues: list[ValidationIssue] = []
     gate_type = normalize_gate_type(gate.type)
 
-    if gate_type not in SUPPORTED_GATES:
+    if gate_type not in supported_gates:
         issues.append(_error(
             "INVALID_GATE_TYPE",
             "Gate type is not supported by the circuit editor.",
@@ -306,13 +315,14 @@ def _validate_circuit(
     logical_qubits: int,
     classical_bits: int,
     columns: Iterable[GateColumn],
+    supported_gates: frozenset[str] = SUPPORTED_GATES,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
     for column in columns:
         occupied: dict[int, GateOperation] = {}
         for gate in column.gates:
-            issues.extend(validate_gate_for_circuit(logical_qubits, gate, classical_bits))
+            issues.extend(validate_gate_for_circuit(logical_qubits, gate, classical_bits, supported_gates))
             for qubit in _gate_qubits(gate):
                 if qubit in occupied:
                     issues.append(_error(
