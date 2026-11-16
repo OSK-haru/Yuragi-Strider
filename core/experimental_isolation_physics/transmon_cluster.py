@@ -299,11 +299,14 @@ class TransmonCluster:
 
     def propagator(self, start_us: float, end_us: float, drives: Sequence[ClusterDrive] = (),
                    relaxation: Sequence[IdleQubitSpec | None] | None = None, *,
-                   step_angle_rad: float = STEP_ANGLE_RAD) -> np.ndarray:
+                   step_angle_rad: float = STEP_ANGLE_RAD, exact_relaxation: bool = False) -> np.ndarray:
         """The map of the cluster over ``[start_us, end_us)`` in the dressed frame, as a superoperator.
 
         Column-major vectorization (``vec(rho)[column * D + row]``), labels with transmon 0 most significant.
-        ``drives`` may start before or end after the interval; only their part inside acts.
+        ``drives`` may start before or end after the interval; only their part inside acts. A shaped drive is
+        sliced; by default each slice's relaxation is split off symmetrically (``_split_slices``), and
+        ``exact_relaxation`` exponentiates the whole Lindblad generator per slice instead (about ten times
+        slower; the two are tested against each other).
         """
         start, end = float(start_us), float(end_us)
         if not (math.isfinite(start) and math.isfinite(end)) or end < start:
@@ -313,7 +316,11 @@ class TransmonCluster:
         for drive in drives:
             if type(drive) is not ClusterDrive or drive.line >= len(self.levels):
                 raise ValueError("drives must be ClusterDrive values on a transmon of the cluster")
-        base = self.generator(relaxation if relaxation is not None else (None,) * len(self.levels))
+        collapse = self.collapse_operators(relaxation if relaxation is not None else (None,) * len(self.levels))
+        dissipator = _dissipator(collapse, self.dimension) if collapse else None
+        base = _commutator(np.diag(self.frame_energies).astype(complex))
+        if dissipator is not None:
+            base = base + dissipator
         identity = np.eye(self.dimension ** 2, dtype=complex)
         if end == start:
             return identity
@@ -323,11 +330,11 @@ class TransmonCluster:
         for low, high in zip(edges, edges[1:]):
             middle = 0.5 * (low + high)
             active = [drive for drive in drives if drive.start_us <= middle < drive.end_us]
-            total = self._piece(base, low, high, active, step_angle_rad) @ total
+            total = self._piece(base, dissipator, low, high, active, step_angle_rad, exact_relaxation) @ total
         return total
 
-    def _piece(self, base: np.ndarray, low: float, high: float, active: Sequence[ClusterDrive],
-               step_angle: float) -> np.ndarray:
+    def _piece(self, base: np.ndarray, dissipator: np.ndarray | None, low: float, high: float,
+               active: Sequence[ClusterDrive], step_angle: float, exact_relaxation: bool) -> np.ndarray:
         if not active:
             return dense_matrix_exponential(base * (high - low))
         # Work in the frame that turns every transmon at the first drive's frequency: a drive at that
@@ -360,14 +367,64 @@ class TransmonCluster:
             beat = max(abs(frequency - carrier[0]) for frequency in carrier)
             slices = max(1, math.ceil(length * (detuning + beat + envelope) / step_angle))
             step = length / slices
-            inner = np.eye(self.dimension ** 2, dtype=complex)
-            for index in range(slices):
-                begin = low + index * step
-                first = generator(begin + (0.5 - _NODE) * step)
-                second = generator(begin + (0.5 + _NODE) * step)
-                inner = (dense_matrix_exponential(step * (_WEIGHT_FAR * first + _WEIGHT_NEAR * second))
-                         @ dense_matrix_exponential(step * (_WEIGHT_NEAR * first + _WEIGHT_FAR * second))
-                         @ inner)
+            if exact_relaxation:
+                inner = np.eye(self.dimension ** 2, dtype=complex)
+                for index in range(slices):
+                    begin = low + index * step
+                    first = generator(begin + (0.5 - _NODE) * step)
+                    second = generator(begin + (0.5 + _NODE) * step)
+                    inner = (dense_matrix_exponential(step * (_WEIGHT_FAR * first + _WEIGHT_NEAR * second))
+                             @ dense_matrix_exponential(step * (_WEIGHT_NEAR * first + _WEIGHT_FAR * second))
+                             @ inner)
+            else:
+                inner = self._split_slices(dissipator, energies, active, carrier, low, step, slices)
+        # rho_frame = exp(i K t) rho exp(-i K t): leave that frame at ``high``, enter it at ``low``.
+        return _turn(-shift * high)[:, None] * inner * _turn(shift * low)[None, :]
+
+    def _split_slices(self, dissipator: np.ndarray | None, energies: np.ndarray, active, carrier,
+                      low: float, step: float, slices: int) -> np.ndarray:
+        """The sliced map with the Hamiltonian in Hilbert space and the relaxation split off symmetrically.
+
+        Each slice is ``exp(D h/2) U exp(D h/2)`` with ``U`` the slice's fourth-order Magnus unitary. ``D`` does
+        not change with the frame (it is built from ladder and number operators), and it nearly commutes with
+        the static Hamiltonian (they differ by the ZZ-sized spread of a transition's frequency), so what the
+        splitting leaves is set by the drive: about ``h Omega gamma T`` (1e-8 for a 50 ns pulse at T1 = 100 us).
+        """
+        static = np.diag(energies).astype(complex)
+
+        def hamiltonian(time_us: float) -> np.ndarray:
+            result = static.copy()
+            for drive, frequency in zip(active, carrier):
+                rate = drive.rabi(time_us) * np.exp(1j * (drive.phase_rad - (frequency - carrier[0]) * time_us))
+                operator = self.line_operators[drive.line]
+                result += 0.5 * (np.conj(rate) * operator + rate * operator.conj().T)
+            return result
+
+        exponents = []
+        for index in range(slices):
+            begin = low + index * step
+            first = hamiltonian(begin + (0.5 - _NODE) * step)
+            second = hamiltonian(begin + (0.5 + _NODE) * step)
+            exponents.append(step * (_WEIGHT_NEAR * first + _WEIGHT_FAR * second))   # applied first
+            exponents.append(step * (_WEIGHT_FAR * first + _WEIGHT_NEAR * second))
+        # Each exponent is Hermitian, so exp(-i X) = V exp(-i lambda) V^+ exactly, all slices at once.
+        values, vectors = np.linalg.eigh(np.stack(exponents))
+        steps = (vectors * np.exp(-1j * values)[:, None, :]) @ vectors.conj().transpose(0, 2, 1)
+        unitaries = steps[1::2] @ steps[0::2]                                   # one per slice
+        dimension = self.dimension
+        if dissipator is None:
+            total = _ordered_product(unitaries)
+            return np.kron(total.conj(), total)
+        half = dense_matrix_exponential(dissipator * (0.5 * step))
+        full = half @ half
+        # Columns of the map are vec(rho_j); U rho U^+ on each is a pair of small products.
+        state = half.copy()
+        for index, unitary in enumerate(unitaries):
+            blocks = state.T.reshape(-1, dimension, dimension).transpose(0, 2, 1)      # [j, row, column]
+            blocks = unitary @ blocks @ unitary.conj().T
+            state = blocks.transpose(0, 2, 1).reshape(len(blocks), -1).T
+            state = (half if index == len(unitaries) - 1 else full) @ state
+        return state
         # rho_frame = exp(i K t) rho exp(-i K t): leave that frame at ``high``, enter it at ``low``.
         return _turn(-shift * high)[:, None] * inner * _turn(shift * low)[None, :]
 
@@ -412,6 +469,16 @@ def exchange_from_zz(transmons: Sequence[TransmonSpec], zz_khz: float) -> float:
 
 
 # ----- helpers ---------------------------------------------------------------------------------------------
+
+
+def _ordered_product(factors: np.ndarray) -> np.ndarray:
+    """``factors[-1] @ ... @ factors[0]`` (later factors on the left), by pairwise batched products."""
+    stack = np.asarray(factors)
+    while len(stack) > 1:
+        odd = stack[-1:] if len(stack) % 2 else stack[:0]
+        even = stack[:len(stack) - len(odd)]
+        stack = np.concatenate([even[1::2] @ even[0::2], odd])
+    return stack[0]
 
 
 def _lowering(levels: int) -> np.ndarray:

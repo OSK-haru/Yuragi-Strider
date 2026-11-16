@@ -263,6 +263,25 @@ class DynamicsTests(unittest.TestCase):
         # Fourth order: twice the slice size is about 16 times further away.
         self.assertAlmostEqual(np.max(np.abs(half - fine)) / np.max(np.abs(coarse - fine)), 16.0, delta=4.0)
 
+    def test_splitting_off_the_relaxation_matches_the_whole_generator(self):
+        """The default splits relaxation from the Hamiltonian per slice; the difference scales with the rates."""
+        cluster = TransmonCluster((CONTROL, TARGET), (COUPLING,), ((0, 1, 0.03 - 0.01j),))
+        offset = cluster.offsets_rad_per_us[1] - cluster.offsets_rad_per_us[0]
+        drives = (ClusterDrive(0, 0.0, 0.05, math.pi, GAUSSIAN_SHAPE, drag_us=1e-3),
+                  ClusterDrive(1, 0.01, 0.05, 1.3, GAUSSIAN_SHAPE, phase_rad=0.4, frequency_offset_rad_per_us=-offset))
+        gaps = []
+        for t1 in (100.0, 10.0):
+            specs = (IdleQubitSpec(t1, 1.5 * t1, 0.01, levels=3, frequency_ghz=5.1, anharmonicity_mhz=-330.0),
+                     IdleQubitSpec(t1, 1.5 * t1, 0.01, levels=3, frequency_ghz=5.0, anharmonicity_mhz=-310.0))
+            split = cluster.propagator(0.0, 0.07, drives, specs)
+            whole = cluster.propagator(0.0, 0.07, drives, specs, exact_relaxation=True)
+            gaps.append(np.max(np.abs(split - whole)))
+        self.assertLess(gaps[0], 1e-8)
+        self.assertAlmostEqual(gaps[1] / gaps[0], 10.0, delta=3.0)
+        # Without relaxation nothing is split: the two agree to round-off.
+        np.testing.assert_allclose(cluster.propagator(0.0, 0.07, drives),
+                                   cluster.propagator(0.0, 0.07, drives, exact_relaxation=True), atol=1e-11)
+
     def test_a_resonant_drive_on_the_second_transition_reaches_the_second_level(self):
         cluster = TransmonCluster((CONTROL,))
         # A pi pulse of the 1-2 transition: its matrix element is sqrt(2) times the 0-1 one.

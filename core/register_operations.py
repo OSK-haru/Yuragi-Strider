@@ -213,7 +213,7 @@ def driven_dephasing_bloch(rotation: tuple[float, float, float], duration_us: fl
     dr/dt = Omega x r - gamma (r_x, r_y, 0), Omega = rotation / duration, solved exactly. A zero duration is the
     plain rotation; without a drive it is the coherence decay exp(-gamma t).
     """
-    from scipy.linalg import expm
+    from core.cptp_liouvillian import dense_matrix_exponential
     omega = np.asarray(rotation, dtype=float)
     if duration_us <= 0.0:
         angle = float(np.linalg.norm(omega))
@@ -226,7 +226,7 @@ def driven_dephasing_bloch(rotation: tuple[float, float, float], duration_us: fl
     generator = np.array([[-dephasing_per_us, -rate[2], rate[1]],
                           [rate[2], -dephasing_per_us, -rate[0]],
                           [-rate[1], rate[0], 0.0]])
-    return expm(generator * duration_us)
+    return dense_matrix_exponential(generator * duration_us).real
 
 
 def _mix_qubit_levels(state: np.ndarray, qubit: int, dims: tuple[int, ...]) -> np.ndarray:

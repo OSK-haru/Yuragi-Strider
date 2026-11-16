@@ -104,14 +104,15 @@ def ladder_relaxation_operators(spec: IdleQubitSpec) -> list[np.ndarray]:
 @lru_cache(maxsize=512)
 def _ladder_channel(spec: IdleQubitSpec, elapsed_us: float) -> np.ndarray:
     """``exp(L t)`` of the subsystem's relaxation as ``[row, column, old row, old column]``."""
-    from scipy.linalg import expm
+    from core.cptp_liouvillian import dense_matrix_exponential
     levels = spec.levels
     identity = np.eye(levels, dtype=complex)
     generator = np.zeros((levels ** 2, levels ** 2), dtype=complex)        # column-major vectorization
     for operator in ladder_relaxation_operators(spec):
         square = operator.conj().T @ operator
         generator += np.kron(operator.conj(), operator) - 0.5 * (np.kron(identity, square) + np.kron(square.T, identity))
-    channel = expm(generator * elapsed_us).reshape(levels, levels, levels, levels)   # [col, row, old col, old row]
+    channel = dense_matrix_exponential(generator * elapsed_us).reshape(levels, levels, levels, levels)
+    # [col, row, old col, old row] -> [row, col, old row, old col]
     channel = np.ascontiguousarray(channel.transpose(1, 0, 3, 2))
     channel.setflags(write=False)
     return channel
