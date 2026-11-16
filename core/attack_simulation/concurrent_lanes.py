@@ -109,17 +109,17 @@ def build_lane_stores(base: QpuStateStore) -> dict[tuple[int, ...], QpuStateStor
     if parked is None or first.revision != 0 or first.device_time_us != 0.0 or parked.updated_at_us != 0.0:
         raise ValueError("concurrent regions need a fresh two-region store")
     bindings = {binding.physical_qubit_ids: binding for binding in base.regional_bindings}
-    second = replace(first, physical_qubit_ids=parked.physical_qubit_ids,
+    second = replace(first, physical_qubit_ids=parked.physical_qubit_ids, local_dimension=parked.local_dimension,
                      density_matrix=parked.density_matrix, owner_tenant_id=parked.owner_tenant_id)
     placeholder_for_second = InactiveRegionState(first.physical_qubit_ids, first.density_matrix,
-                                                 first.owner_tenant_id, 0.0)
+                                                 first.owner_tenant_id, 0.0, first.local_dimension)
     stores = {}
     for snapshot, other in ((first, parked), (second, placeholder_for_second)):
         stores[snapshot.physical_qubit_ids] = QpuStateStore(
             snapshot, region_binding=bindings[snapshot.physical_qubit_ids],
             alternate_region_binding=bindings[other.physical_qubit_ids],
             inactive_region=InactiveRegionState(other.physical_qubit_ids, other.density_matrix,
-                                                other.owner_tenant_id, 0.0))
+                                                other.owner_tenant_id, 0.0, other.local_dimension))
     return stores
 
 

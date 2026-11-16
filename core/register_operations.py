@@ -37,6 +37,16 @@ def register_dims(dimension: int, dims: Sequence[int] | None = None) -> tuple[in
     return dims
 
 
+def level_digits(dims: Sequence[int]) -> np.ndarray:
+    """The level of every subsystem in every basis label, shape (dimension, subsystems); read-only."""
+    return _digits(tuple(dims))
+
+
+def level_outcomes(dims: Sequence[int], qubits: Sequence[int]) -> tuple[np.ndarray, int]:
+    """Each basis label's joint level on ``qubits`` as one mixed-radix number, and how many values it takes."""
+    return _outcomes(tuple(dims), tuple(qubits))
+
+
 @lru_cache(maxsize=256)
 def _digits(dims: tuple[int, ...]) -> np.ndarray:
     """The level of every subsystem in every basis label, shape (dimension, subsystems)."""

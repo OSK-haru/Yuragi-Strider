@@ -642,7 +642,8 @@ class SharedQpuRuntime:
             # A leak during a qubit's readout (strong measurement, quantum Zeno) acts on the collapsed state; the
             # thresholded result is the state at the window's middle (``kick_application``).
             dims = self.state_store.read().dims
-            state = apply_readout_decisions(state, readout_kicks, self._slot_of, self.config.readout_dephasing_per_us)
+            state = apply_readout_decisions(state, readout_kicks, self._slot_of, self.config.readout_dephasing_per_us,
+                                            dims)
             state, levels = sample_measurement(state, measured_slots, generator, dims)
             for placed in readout_kicks:
                 if placed.readout == "after":

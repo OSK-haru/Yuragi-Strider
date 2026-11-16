@@ -133,13 +133,14 @@ EMPTY_PLAN = KickPlan(())
 
 
 def apply_readout_decisions(state: np.ndarray, kicks: Sequence[PlacedKick], slot_of,
-                            dephasing_per_us: float | None) -> np.ndarray:
+                            dephasing_per_us: float | None, dims: Sequence[int] | None = None) -> np.ndarray:
     """The ``readout="decision"`` kicks of one shot, before the result is drawn.
 
     The strong readout dephases the qubit at ``dephasing_per_us`` (the measurement-induced rate); each leak is a
     constant drive over its span, evolved exactly with that dephasing, after the decay since the readout began
     (``driven_dephasing_bloch``). ``None`` is the strong-measurement limit: the quantum Zeno effect freezes the
     population, so these leaks do not change the result (they still act through ``readout="after"``).
+    The Bloch description is of two levels, so a qubit with more levels (``dims``) is refused here.
     """
     if dephasing_per_us is None:
         return state
@@ -150,7 +151,7 @@ def apply_readout_decisions(state: np.ndarray, kicks: Sequence[PlacedKick], slot
         wait = max(offset - clock.get(slot, 0.0), 0.0)
         bloch = driven_dephasing_bloch(kick.rotation, length, dephasing_per_us) @ driven_dephasing_bloch(
             (0.0, 0.0, 0.0), wait, dephasing_per_us)
-        state = apply_local_bloch_map(state, slot, bloch)
+        state = apply_local_bloch_map(state, slot, bloch, dims)
         clock[slot] = offset + length
     return state
 

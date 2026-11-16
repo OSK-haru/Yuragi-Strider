@@ -24,6 +24,10 @@ Physics in this module:
   not relax, but ZZ keeps acting on it. Instructions themselves are instantaneous at their start time.
 * Every other qubit relaxes lazily, just before it is next touched, as in the single-region runtime (D85
   idle relaxation); local channels on other qubits commute with ZZ, so this is exact.
+* A qubit may have more levels than two (D91; the levels are its idle model's). Gates and leaks act on its
+  qubit levels, a reset lets a leaked level through, and with device values the cluster's dressed energies
+  cover every level the world holds. A measured ZZ and declared readout crosstalk describe two levels only,
+  so they are refused on a qubit with more.
 
 * Reading out a qubit disturbs its declared neighbours for as long as the readout lasts (extra dephasing and
   a frequency shift, ``ReadoutCrosstalk``), in either region and also during a reset's measurement. These
@@ -51,23 +55,29 @@ from core.attack_simulation.circuit_program import CircuitExecutionOperation
 from core.attack_simulation.kick_application import (
     EMPTY_PLAN, KickPlan, PlacedKick, apply_readout_decisions, kick_unitary,
 )
-from core.attack_simulation.register_readout import register_assignment_errors
+from core.attack_simulation.register_readout import (
+    assign_bit, assigned_one_probability, register_assignment_errors,
+)
 from core.attack_simulation.shot_activity import instruction_starts
 from core.cptp_liouvillian import dense_matrix_exponential, gksl_liouvillian_superoperator
 from core.experimental_isolation_physics.coherent_crosstalk import ResidualZZCoupling
-from core.experimental_isolation_physics.idle_evolution import IndependentIdleModel, relax_axes_in_place
+from core.experimental_isolation_physics.idle_evolution import (
+    IndependentIdleModel, ladder_relaxation_operators, relax_axes_in_place,
+)
 from core.experimental_isolation_physics.readout_crosstalk import ReadoutCrosstalk
 from core.experimental_isolation_physics.reset_model import ResetModelRegistry, ResetModelRequest
 from core.experimental_isolation_physics.transmon_cluster import TransmonCluster, TransmonSpec
 from core.pulse_transmon_network import TransmonExchangeCoupling
 from core.register_operations import (
-    apply_local_replacement, apply_reset_with_feedback_kick, freeze_register, nonselective_measurement,
+    apply_local_depolarizing_replacement, apply_local_replacement, apply_reset_with_feedback_kick,
+    embed_qubit_operator, freeze_register, level_digits, level_outcomes, nonselective_measurement,
 )
 
 ZZ_MODELS = ("low_rank", "exact")
 TRANSMON_SOLVERS = ("effective",)   # how a cluster declared by device values is advanced (D91)
 MAX_CLUSTER_QUBITS = 4
 EXACT_MAX_UNION_QUBITS = 8          # the dense-computation limit; ``exact`` is only offered up to it (D79)
+EXACT_MAX_UNION_DIMENSION = 1 << EXACT_MAX_UNION_QUBITS   # the same limit for subsystems with more levels
 _ROUND_OFF = 1e-14                  # relative singular value treated as zero, also in ``exact``
 _TIME_TOLERANCE = 1e-9              # us; absolute float coordinates of a window end differ by round-off
 _NEGATIVE_TOLERANCE = 1e-6          # truncation may leave tiny negative eigenvalues; larger ones are an error
@@ -249,7 +259,10 @@ class CoupledRegionWorld:
         self.settings = settings
         self.repetition_delay_us = float(repetition_delay_us)
         sizes = tuple(len(side.region) for side in sides)
-        if settings.model == "exact" and sum(sizes) > EXACT_MAX_UNION_QUBITS:
+        self.dims = tuple(side.idle_model.dims for side in sides)
+        if any(len(dims) != size for dims, size in zip(self.dims, sizes)):
+            raise ValueError("a region's idle model must cover its qubits")
+        if settings.model == "exact" and math.prod(self.dims[0]) * math.prod(self.dims[1]) > EXACT_MAX_UNION_DIMENSION:
             raise ValueError("the exact residual-ZZ model is limited to two regions of at most 8 qubits together")
         location = {q: (s, side.region.index(q)) for s, side in enumerate(sides) for q in side.region}
         if type(settings) is ResidualZZSettings:
@@ -258,6 +271,8 @@ class CoupledRegionWorld:
                 ends = (location.get(coupling.left), location.get(coupling.right))
                 if None in ends or ends[0][0] == ends[1][0]:
                     raise ValueError("a residual-ZZ pair must join the two regions")
+                if any(self.dims[side][slot] != 2 for side, slot in ends):
+                    raise ValueError("a measured ZZ says nothing about a leaked level; declare device values instead")
                 edges.append((*sorted(ends), float(coupling.conditional_shift_rad_per_us)))
             self._components = tuple((slots_a, slots_b, _pair_shift_energies(slots_a, slots_b, group))
                                      for slots_a, slots_b, group in _clusters(edges))
@@ -269,7 +284,8 @@ class CoupledRegionWorld:
                      for left, right, strength in settings.exchange]
             physical = {place: qubit for qubit, place in location.items()}
             self._components = tuple(
-                (slots_a, slots_b, _device_energies(slots_a, slots_b, group, lambda place: specs[physical[place]]))
+                (slots_a, slots_b, _device_energies(slots_a, slots_b, group, lambda place: specs[physical[place]],
+                                                    self.dims))
                 for slots_a, slots_b, group in _clusters(edges))
         elif type(settings) is UncoupledSettings:
             self._components = ()
@@ -281,6 +297,8 @@ class CoupledRegionWorld:
                 raise TypeError("readout_crosstalk must contain ReadoutCrosstalk values")
             if item.reader not in location or item.neighbour not in location:
                 raise ValueError("readout crosstalk must join qubits of the two regions")
+            if any(self.dims[side][slot] != 2 for side, slot in (location[item.reader], location[item.neighbour])):
+                raise ValueError("measured readout crosstalk describes two-level qubits")
             entries = readers.setdefault(location[item.reader], [])
             if any(place == location[item.neighbour] for place, _ in entries):
                 raise ValueError("a readout-crosstalk pair is declared twice")
@@ -292,8 +310,8 @@ class CoupledRegionWorld:
                         frozenset(q for comp in self._components for q in comp[1]))
         self.factors = tuple(np.asarray(state, dtype=complex).reshape(1, *np.shape(state)).copy()
                              for state in initial_states)
-        for factor, size in zip(self.factors, sizes):
-            if factor.shape != (1, 1 << size, 1 << size):
+        for factor, dims in zip(self.factors, self.dims):
+            if factor.shape != (1, math.prod(dims), math.prod(dims)):
                 raise ValueError("initial state does not match its region")
         self.free = tuple([0.0] * size for size in sizes)
         self.zz_time = 0.0
@@ -306,6 +324,7 @@ class CoupledRegionWorld:
     def copy(self) -> "CoupledRegionWorld":
         other = object.__new__(CoupledRegionWorld)
         other.sides, other.settings, other.repetition_delay_us = self.sides, self.settings, self.repetition_delay_us
+        other.dims = self.dims
         other._components, other.exposed, other._cache = self._components, self.exposed, self._cache
         other._readers, other.exposures = self._readers, [list(entry) for entry in self.exposures]
         other.factors = tuple(np.array(factor) for factor in self.factors)
@@ -557,20 +576,21 @@ class CoupledRegionWorld:
             # the thresholded result is the state at the window's middle (``kick_application``).
             if any(kick.readout == "decision" for kick in readout):
                 self._set(side_index, np.array([
-                    apply_readout_decisions(term, readout, side.region.index, side.readout_dephasing_per_us)
+                    apply_readout_decisions(term, readout, side.region.index, side.readout_dephasing_per_us,
+                                            self.dims[side_index])
                     for term in self.factors[side_index]]))
-            bits = self._sample(side_index, measured_slots, progress.generator)
+            levels = self._sample(side_index, measured_slots, progress.generator)
             for kick in readout:
                 if kick.readout == "after":
                     self._unitary(side_index, kick_unitary(kick), (side.region.index(kick.qubit),))
             classical = [0] * operation.classical_bits
-            for q, bit, target, slot in zip(measured_qubits, bits, targets, measured_slots):
-                p10, p01 = progress.assignment[q]
+            for q, level, target, slot in zip(measured_qubits, levels, targets, measured_slots):
+                channel = progress.assignment[q]
                 draw = progress.generator.random()
                 if any(item.reads for _, item in self._readers.get((side_index, slot), ())):
-                    classical[target] = self._observe(side_index, slot, bit, p10, p01, draw)
+                    classical[target] = self._observe(side_index, slot, level, channel, draw)
                 else:
-                    classical[target] = int(draw < p10) if bit == 0 else int(draw >= p01)
+                    classical[target] = assign_bit(channel, level, draw)
             # Each block of final measurements reads its qubits for one measurement time, one block after another.
             groups = list(dict.fromkeys(i.time_group for i in measurements))
             for instruction in measurements:
@@ -629,17 +649,17 @@ class CoupledRegionWorld:
                 self._cache.clear()
             self._cache[key] = factors
         x_factors, y_factors = factors
-        a_coef, a_basis = _block_coefficients(self.factors[0], slots_a)
-        b_coef, b_basis = _block_coefficients(self.factors[1], slots_b)
+        a_coef, a_basis = _block_coefficients(self.factors[0], slots_a, self.dims[0])
+        b_coef, b_basis = _block_coefficients(self.factors[1], slots_b, self.dims[1])
         # term (m, k) = X_m(A_k) (x) Y_m(B_k), expressed in the two orthonormal block bases.
         a_new = np.einsum("mde,ker->mkdr", x_factors, a_coef).reshape(-1, a_coef.shape[1] * a_coef.shape[2])
         b_new = np.einsum("mde,ker->mkdr", y_factors, b_coef).reshape(-1, b_coef.shape[1] * b_coef.shape[2])
         a_vectors, b_vectors = self._compress(a_new.T, b_new.T)
         self.factors = (
             _from_blocks(a_vectors.T.reshape(-1, a_coef.shape[1], a_coef.shape[2]) @ a_basis.T,
-                         slots_a, len(self.sides[0].region)),
+                         slots_a, self.dims[0]),
             _from_blocks(b_vectors.T.reshape(-1, b_coef.shape[1], b_coef.shape[2]) @ b_basis.T,
-                         slots_b, len(self.sides[1].region)),
+                         slots_b, self.dims[1]),
         )
 
     def _compress(self, left: np.ndarray, right: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -683,13 +703,13 @@ class CoupledRegionWorld:
             if entry[0] != side or entry[1] not in wanted or reach <= entry[2]:
                 continue
             stack = _scale_coherence(self.factors[side] if stack is None else stack, entry[1],
-                                     cmath.exp(-entry[4] * (reach - entry[2])))
+                                     cmath.exp(-entry[4] * (reach - entry[2])), self.dims[side])
             entry[2] = reach
         if stack is not None:
             self._set(side, stack)
             self.exposures = [entry for entry in self.exposures if entry[2] < entry[3]]
 
-    def _observe(self, side: int, slot: int, bit: int, p10: float, p01: float, draw: float) -> int:
+    def _observe(self, side: int, slot: int, bit: int, channel: tuple[float, ...], draw: float) -> int:
         """Assign the reader's result when it depends on neighbours, and update them with what it tells.
 
         ``P(assigned 1)`` is the reader's own value for its true ``bit`` plus the declared shift of every
@@ -697,13 +717,11 @@ class CoupledRegionWorld:
         square root of that likelihood on the neighbours' basis states (a measurement that only reads
         populations), which is what conditioning on the result means.
         """
-        sizes = [len(spec.region) for spec in self.sides]
-        shifts = [np.zeros(1 << size) for size in sizes]
+        shifts = [np.zeros(math.prod(dims)) for dims in self.dims]
         for (other, target), item in self._readers[(side, slot)]:
             if item.reads:
-                labels = np.arange(1 << sizes[other])
-                shifts[other] += item.excited_assignment_shift[bit] * ((labels >> (sizes[other] - 1 - target)) & 1)
-        excited = (p10 if bit == 0 else 1.0 - p01) + shifts[0][:, None] + shifts[1][None, :]
+                shifts[other] += item.excited_assignment_shift[bit] * level_digits(self.dims[other])[:, target]
+        excited = assigned_one_probability(channel, bit) + shifts[0][:, None] + shifts[1][None, :]
         if excited.min() < -1e-12 or excited.max() > 1.0 + 1e-12:
             raise ValueError("the declared assignment shifts take an assignment probability outside [0, 1]")
         excited = np.clip(excited, 0.0, 1.0)
@@ -745,18 +763,17 @@ class CoupledRegionWorld:
                 self.free[side][slot] = time_us
         if due:
             stack = np.array(self.factors[side], copy=True)
-            relax_axes_in_place(stack, due)
+            relax_axes_in_place(stack, due, self.dims[side])
             self._set(side, stack)
 
     def _unitary(self, side: int, operator: np.ndarray, slots: tuple[int, ...]) -> None:
-        self._set(side, _apply_stack(self.factors[side], operator, slots))
+        """An operator on the qubit levels of ``slots`` (a leaked level is left alone), on every factor."""
+        self._set(side, _apply_stack(self.factors[side], operator, slots, self.dims[side]))
 
     def _depolarize(self, side: int, slots: tuple[int, ...], probability: float) -> None:
-        stack = self.factors[side]
-        mixed = stack
-        for slot in slots:
-            mixed = _replace_with_mixed(mixed, slot)
-        self._set(side, (1.0 - probability) * stack + probability * mixed)
+        dims = self.dims[side]
+        self._set(side, np.array([apply_local_depolarizing_replacement(term, slots, probability, dims)
+                                  for term in self.factors[side]]))
 
     def _readout(self, job: WorldJob, progress: _Progress, shot: int) -> list:
         """The kicks known now that arrive during this shot's readout of a measured qubit."""
@@ -813,7 +830,7 @@ class CoupledRegionWorld:
                     density = (vectors * (selected / total)) @ vectors.conj().T
                     reset = spec.reset_models.run_register(spec.reset_model_id, ResetModelRequest(
                         input_state=freeze_register(density), reset_count=count, victim_measurement=measures_input,
-                        subsystem_count=size, targets=slots))
+                        subsystem_count=size, targets=slots, dims=self.dims[side]))
                     errors = reset.assignment_errors
                     out += weight * sign * total * np.asarray(reset.post_reset_state, dtype=complex)
             results.append(out)
@@ -836,22 +853,28 @@ class CoupledRegionWorld:
                 plain.append((slot, kick_unitary(kick)))
             else:
                 by_slot[slot] = kick_unitary(kick) @ by_slot.get(slot, np.eye(2, dtype=complex))
+        dims = self.dims[side]
         stack = np.array(self.factors[side], dtype=complex)
         for slot, unitary in plain:
-            stack = _apply_stack(stack, unitary, (slot,))
+            stack = _apply_stack(stack, unitary, (slot,), dims)
+        identity = np.eye(2, dtype=complex)
         results = []
         for term in stack:
             if measures_input:
-                term = nonselective_measurement(term, slots)
+                term = nonselective_measurement(term, slots, dims)
             for attempt in range(count):
                 for slot in slots:
                     params = model.local_spec(slot)
                     if params.local_dimension != 2:
                         raise ValueError("leaks inside a reset need two-level reset channels")
-                    term = (apply_reset_with_feedback_kick(term, slot, params.success_probability,
-                                                           params.target_populations, by_slot[slot])
-                            if attempt == 0 and slot in by_slot else
-                            apply_local_replacement(term, slot, params.success_probability, params.target_populations))
+                    if (attempt == 0 and slot in by_slot) or dims[slot] > 2:
+                        # On more levels the measurement-based form is the reset itself (a leaked level passes).
+                        term = apply_reset_with_feedback_kick(
+                            term, slot, params.success_probability, params.target_populations,
+                            by_slot.get(slot, identity) if attempt == 0 else identity, dims)
+                    else:
+                        term = apply_local_replacement(term, slot, params.success_probability,
+                                                       params.target_populations, dims)
             results.append(term)
         self._set(side, np.array(results))
         return register_assignment_errors(model, subsystem_count=len(spec.region), targets=slots)
@@ -862,18 +885,15 @@ class CoupledRegionWorld:
         return np.tensordot(weights, self.factors[side], axes=1)
 
     def _sample(self, side: int, slots: tuple[int, ...], generator: random.Random) -> tuple[int, ...]:
-        """Draw the outcome as ``sample_measurement`` does, then project this side's factors onto it."""
+        """Draw the levels as ``sample_measurement`` does, then project this side's factors onto them."""
         state = self._reduced(side)
-        n = len(self.sides[side].region)
+        dims = self.dims[side]
         probabilities = np.diag(state).real
         if np.any(~np.isfinite(probabilities)) or np.min(probabilities) < -_NEGATIVE_TOLERANCE \
                 or abs(float(probabilities.sum()) - 1.0) > 1e-8:
             raise ValueError("invalid measurement probability distribution")
-        labels = np.arange(len(state))
-        outcomes = np.zeros(len(state), dtype=int)
-        for slot in slots:
-            outcomes = (outcomes << 1) | ((labels >> (n - 1 - slot)) & 1)
-        marginal = np.bincount(outcomes, weights=np.maximum(probabilities, 0.0), minlength=1 << len(slots))
+        outcomes, count = level_outcomes(dims, slots)
+        marginal = np.bincount(outcomes, weights=np.maximum(probabilities, 0.0), minlength=count)
         draw = generator.random() * float(marginal.sum())
         outcome = min(int(np.searchsorted(np.cumsum(marginal), draw, side="right")), len(marginal) - 1)
         probability = float(marginal[outcome])
@@ -882,7 +902,11 @@ class CoupledRegionWorld:
         keep = outcomes == outcome
         mask = keep[:, None] & keep[None, :]
         self._set(side, np.where(mask[None], self.factors[side] / probability, 0.0j))
-        return tuple(int(bit) for bit in format(outcome, f"0{len(slots)}b"))
+        levels = []
+        for slot in reversed(slots):
+            outcome, level = divmod(outcome, dims[slot])
+            levels.append(level)
+        return tuple(reversed(levels))
 
     def _set(self, side: int, stack: np.ndarray) -> None:
         self.factors = (stack, self.factors[1]) if side == 0 else (self.factors[0], stack)
@@ -929,45 +953,38 @@ def _pair_shift_energies(slots_a, slots_b, edges) -> np.ndarray:
     return energies
 
 
-def _device_energies(slots_a, slots_b, edges, spec_of) -> np.ndarray:
-    """The dressed frame's energy of each qubit label of the cluster, from its device values (D91)."""
+def _device_energies(slots_a, slots_b, edges, spec_of, dims) -> np.ndarray:
+    """The dressed frame's energy of each label the world holds for the cluster, from its device values (D91).
+
+    The cluster is solved with its declared levels; the world keeps the labels up to its own levels per qubit
+    (two: the qubit labels; three: |2> too, with its anharmonicity and the shifts it brings).
+    """
     qubits = [(0, s) for s in slots_a] + [(1, s) for s in slots_b]
-    count = len(qubits)
     position = {qubit: index for index, qubit in enumerate(qubits)}
+    held = tuple(dims[side][slot] for side, slot in qubits)
+    specs = tuple(spec_of(qubit) for qubit in qubits)
+    if any(spec.levels < levels for spec, levels in zip(specs, held)):
+        raise ValueError("a coupled transmon must be solved with at least the levels its qubit holds")
     cluster = TransmonCluster(
-        tuple(spec_of(qubit) for qubit in qubits),
+        specs,
         tuple(TransmonExchangeCoupling(position[left], position[right], strength) for left, right, strength in edges))
-    return np.array([cluster.frame_energies[cluster.label_index(
-        tuple((state >> (count - 1 - index)) & 1 for index in range(count)))] for state in range(1 << count)])
-
-
-_SIGMA_MINUS = np.array([[0, 1], [0, 0]], dtype=complex)   # |0><1|
-_SIGMA_Z = np.array([[1, 0], [0, -1]], dtype=complex)
+    return np.array([cluster.frame_energies[cluster.label_index(tuple(int(level) for level in label))]
+                     for label in level_digits(held)])
 
 
 def _component_factors(component, elapsed: float, mask, sides):
     """``exp(L t)`` on the cluster split as ``sum_m X_m (x) Y_m`` (A-side and B-side superoperators on blocks)."""
     slots_a, slots_b, energies = component
     qubits = [(0, s) for s in slots_a] + [(1, s) for s in slots_b]
-    count = len(qubits)
-    collapse = []
-    for index, ((side, slot), idle) in enumerate(zip(qubits, mask)):
-        if not idle:
-            continue
-        spec = sides[side].idle_model.qubits[slot]
-        rates = []
-        if math.isfinite(spec.t1_us):
-            p = spec.equilibrium_excited_population
-            rates += [((1.0 - p) / spec.t1_us, _SIGMA_MINUS), (p / spec.t1_us, _SIGMA_MINUS.T)]
-        if math.isfinite(spec.tphi_us):
-            rates.append((0.5 / spec.tphi_us, _SIGMA_Z))
-        for rate, operator in rates:
-            if rate > 0.0:
-                collapse.append(math.sqrt(rate) * _embed(operator, index, count))
+    specs = [sides[side].idle_model.qubits[slot] for side, slot in qubits]
+    cluster_dims = tuple(spec.levels for spec in specs)
+    collapse = [_embed(operator, index, cluster_dims)
+                for index, (spec, idle) in enumerate(zip(specs, mask)) if idle
+                for operator in ladder_relaxation_operators(spec)]
     generator = np.asarray(gksl_liouvillian_superoperator(np.diag(energies).astype(complex), collapse))
     propagator = dense_matrix_exponential(generator * elapsed)
     # column-major vectorization: index = column * D + row. Split rows/columns into (A part, B part).
-    da, db = 1 << len(slots_a), 1 << len(slots_b)
+    da, db = math.prod(cluster_dims[:len(slots_a)]), math.prod(cluster_dims[len(slots_a):])
     tensor = propagator.reshape(da, db, da, db, da, db, da, db)  # out col(A,B), out row(A,B), in col, in row
     # -> out row A, out col A, in row A, in col A | out row B, out col B, in row B, in col B
     tensor = tensor.transpose(2, 0, 6, 4, 3, 1, 7, 5).reshape(da ** 4, db ** 4)
@@ -979,50 +996,57 @@ def _component_factors(component, elapsed: float, mask, sides):
     return x_factors, y_factors
 
 
-def _embed(operator: np.ndarray, index: int, count: int) -> np.ndarray:
+def _embed(operator: np.ndarray, index: int, dims: tuple[int, ...]) -> np.ndarray:
     result = np.eye(1, dtype=complex)
-    for position in range(count):
-        result = np.kron(result, operator if position == index else np.eye(2, dtype=complex))
+    for position, level in enumerate(dims):
+        result = np.kron(result, operator if position == index else np.eye(level, dtype=complex))
     return result
 
 
-def _block_coefficients(stack: np.ndarray, slots: tuple[int, ...]):
-    """Write each factor as blocks over ``slots`` (row and column bits) times an orthonormal rest basis.
+def _block_coefficients(stack: np.ndarray, slots: tuple[int, ...], dims: tuple[int, ...]):
+    """Write each factor as blocks over ``slots`` (row and column levels) times an orthonormal rest basis.
 
-    Returns ``coef`` with shape (terms, 4**len(slots), rank) and the basis (rest dimension, rank).
+    Returns ``coef`` with shape (terms, (levels of slots)**2, rank) and the basis (rest dimension, rank).
     """
-    terms, dimension = stack.shape[0], stack.shape[1]
-    n = dimension.bit_length() - 1
-    blocks = _to_blocks(stack, slots, n)                      # (terms, d, rest)
+    terms = stack.shape[0]
+    blocks = _to_blocks(stack, slots, dims)                   # (terms, d, rest)
     flat = blocks.reshape(-1, blocks.shape[2]).T              # (rest, terms * d)
     basis, triangle = np.linalg.qr(flat)
     coef = triangle.T.reshape(terms, blocks.shape[1], -1)     # (terms, d, rank)
     return coef, basis
 
 
-def _to_blocks(stack: np.ndarray, slots: tuple[int, ...], n: int) -> np.ndarray:
-    terms = stack.shape[0]
-    tensor = stack.reshape((terms,) + (2,) * (2 * n))
+def _to_blocks(stack: np.ndarray, slots: tuple[int, ...], dims: tuple[int, ...]) -> np.ndarray:
+    terms, n = stack.shape[0], len(dims)
+    tensor = stack.reshape((terms,) + dims + dims)
     front = [1 + s for s in slots] + [1 + n + s for s in slots]
     rest = [axis for axis in range(1, 2 * n + 1) if axis not in front]
     ordered = tensor.transpose([0] + front + rest)
-    return ordered.reshape(terms, 1 << (2 * len(slots)), -1)
+    return ordered.reshape(terms, math.prod(dims[s] for s in slots) ** 2, -1)
 
 
-def _from_blocks(blocks: np.ndarray, slots: tuple[int, ...], n: int) -> np.ndarray:
-    terms = blocks.shape[0]
+def _from_blocks(blocks: np.ndarray, slots: tuple[int, ...], dims: tuple[int, ...]) -> np.ndarray:
+    terms, n = blocks.shape[0], len(dims)
     front = [1 + s for s in slots] + [1 + n + s for s in slots]
     rest = [axis for axis in range(1, 2 * n + 1) if axis not in front]
     order = [0] + front + rest
-    tensor = blocks.reshape((terms,) + (2,) * (2 * n)).transpose(np.argsort(order))
-    return np.ascontiguousarray(tensor.reshape(terms, 1 << n, 1 << n))
+    shape = tuple(([terms] + list(dims) + list(dims))[axis] for axis in order)
+    tensor = blocks.reshape(shape).transpose(np.argsort(order))
+    return np.ascontiguousarray(tensor.reshape(terms, math.prod(dims), math.prod(dims)))
 
 
-def _apply_stack(stack: np.ndarray, operator: np.ndarray, slots: tuple[int, ...]) -> np.ndarray:
-    """``U X U^dagger`` on every factor ``X`` of the stack (qubit 0 is the most significant)."""
-    terms, dimension = stack.shape[0], stack.shape[1]
-    n = dimension.bit_length() - 1
-    tensor = stack.reshape((terms,) + (2,) * (2 * n))
+def _apply_stack(stack: np.ndarray, operator: np.ndarray, slots: tuple[int, ...],
+                 dims: tuple[int, ...]) -> np.ndarray:
+    """``U X U^dagger`` on every factor ``X`` of the stack (qubit 0 is the most significant).
+
+    An operator given on the qubit levels of ``slots`` acts there and leaves leaked levels alone.
+    """
+    operand_dims = tuple(dims[s] for s in slots)
+    operator = np.asarray(operator, dtype=complex)
+    if len(operator) != math.prod(operand_dims):
+        operator = embed_qubit_operator(operator, operand_dims)
+    terms, n = stack.shape[0], len(dims)
+    tensor = stack.reshape((terms,) + dims + dims)
     for axes, transform in (([1 + s for s in slots], operator), ([1 + n + s for s in slots], operator.conj())):
         order = axes + [axis for axis in range(2 * n + 1) if axis not in axes]
         ordered = tensor.transpose(order)
@@ -1031,25 +1055,9 @@ def _apply_stack(stack: np.ndarray, operator: np.ndarray, slots: tuple[int, ...]
     return np.ascontiguousarray(tensor.reshape(stack.shape))
 
 
-def _scale_coherence(stack: np.ndarray, slot: int, factor: complex) -> np.ndarray:
-    """Multiply ``<1| X |0>`` of ``slot`` by ``factor`` and ``<0| X |1>`` by its conjugate, on every factor."""
-    dimension = stack.shape[1]
-    n = dimension.bit_length() - 1
-    bit = (np.arange(dimension) >> (n - 1 - slot)) & 1
+def _scale_coherence(stack: np.ndarray, slot: int, factor: complex, dims: tuple[int, ...]) -> np.ndarray:
+    """Multiply ``<1| X |0>`` of a two-level ``slot`` by ``factor`` and ``<0| X |1>`` by its conjugate."""
+    bit = level_digits(dims)[:, slot]
     difference = bit[:, None] - bit[None, :]
     weights = np.where(difference == 1, factor, np.where(difference == -1, np.conj(factor), 1.0))
     return stack * weights[None]
-
-
-def _replace_with_mixed(stack: np.ndarray, slot: int) -> np.ndarray:
-    """``I/2 (x) Tr_slot(X)`` on every factor, as ``apply_local_replacement`` with success 1."""
-    terms, dimension = stack.shape[0], stack.shape[1]
-    n = dimension.bit_length() - 1
-    tensor = stack.reshape((terms,) + (2,) * (2 * n))
-    reduced = np.trace(tensor, axis1=1 + slot, axis2=1 + n + slot)
-    replaced = np.zeros_like(tensor)
-    for level in (0, 1):
-        index = [slice(None)] * (2 * n + 1)
-        index[1 + slot] = index[1 + n + slot] = level
-        replaced[tuple(index)] = 0.5 * reduced
-    return replaced.reshape(stack.shape)
