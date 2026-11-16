@@ -922,6 +922,16 @@ class DeclaredQpuExecutor:
             ready = job_id in self._finished or status is JobStatus.CANCELLED
             return bool(ready and release is not None and target is not None and target.key >= release.key)
 
+    def research_diagnostics(self, job_id: str) -> dict:
+        """Read the coupled world's research channel after its committed job is complete."""
+        with self._gate:
+            if self._world is None:
+                raise ValueError("research diagnostics require a coupled-region world")
+            try:
+                return self._world.research_diagnostics(job_id)
+            except KeyError:
+                raise ValueError("research diagnostics are unavailable for this job") from None
+
     def observation_at(self, job_id: str, position: EventPosition) -> tuple[JobStatus, bool]:
         """Trusted receipt-time projection, independent of host callback delay.
 

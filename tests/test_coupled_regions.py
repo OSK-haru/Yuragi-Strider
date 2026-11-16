@@ -657,6 +657,26 @@ class ProductModelTests(unittest.TestCase):
     sides, scenario, joint, run_world = (WorldTests.sides, WorldTests.scenario, WorldTests.joint,
                                          WorldTests.run_world)
 
+    def test_research_diagnostics_capture_pre_sample_probabilities_separately(self):
+        results = []
+        for model in ("exact", "low_rank"):
+            settings = ResidualZZSettings((ResidualZZCoupling(1, 2, 1.7),), model=model,
+                                          max_rank=64, truncation=0.0)
+            runtime, executor = build(zz=settings)
+            job = submit(runtime, "victim", [[{"type": "H", "targets": [1]}]], "research")
+            register(executor, job, 1.0, 0)
+            run_in_order(executor)
+            result = runtime.scheduler.get(job.job_id).result
+            self.assertEqual(set(result), {"shots", "counts"})
+            diagnostic = executor.research_diagnostics(job.job_id)
+            self.assertEqual(diagnostic["world_stats"]["dropped_norm"], 0.0)
+            self.assertEqual(diagnostic["world_stats"]["dropped_correlation"], 0.0)
+            measurement, = diagnostic["measurements"]
+            self.assertEqual(measurement["shot"], 0)
+            self.assertEqual(sum(measurement["probabilities"]), 1.0)
+            results.append(measurement["probabilities"])
+        np.testing.assert_allclose(results[0], results[1], atol=1e-12)
+
     def wait(self, initial_b, model, step=0.01, zeta=2.0, until=math.pi / 2.0, t1=math.inf):
         """One qubit per region, A in |+>, ZZ for ``until``; returns A's state and the world."""
         sides = self.sides(1, t1, math.inf)

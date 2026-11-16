@@ -87,7 +87,8 @@ def deny(runtime, boundary, role):
     policy = runtime.job_authorization
     if boundary == "actor":
         grants = dict(policy.actor_grants)
-        grants[role] = grants[role] - {STATE_INHERIT_OPERATION_ID}
+        actor = next(actor for actor in grants if actor.role_id == role)
+        grants[actor] = grants[actor] - {STATE_INHERIT_OPERATION_ID}
         policy = replace(policy, actor_grants=grants)
     else:
         field = f"{boundary}_operations"

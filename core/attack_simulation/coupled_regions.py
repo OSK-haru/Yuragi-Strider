@@ -253,13 +253,20 @@ class _Progress:
     first_shot_us: float = 0.0
     handover: tuple | None = None   # (reduced state, duration) of the handover service reset
     pulses: tuple = ()              # the pulses of cluster qubits, absolute times (reference solver)
+    research_stats: dict = field(default_factory=lambda: {
+        "compressions": 0, "max_rank": 1, "dropped_norm": 0.0,
+        "dropped_correlation": 0.0, "clipped_eigenvalue": 0.0, "late_kicks": 0,
+    })
+    research_measurements: list = field(default_factory=list)
+    current_shot: int = 0
 
     def copy(self) -> "_Progress":
         generator = random.Random()
         generator.setstate(self.generator.getstate())
         return _Progress(self.actions, self.layout, self.pointer, self.last_seq, self.last_time, Counter(self.applied), generator,
                          dict(self.counts), list(self.records), dict(self.assignment), self.duration,
-                         list(self.classical), self.first_shot_us, self.handover, self.pulses)
+                         list(self.classical), self.first_shot_us, self.handover, self.pulses,
+                         dict(self.research_stats), list(self.research_measurements), self.current_shot)
 
     @property
     def done(self) -> bool:
@@ -387,6 +394,7 @@ class CoupledRegionWorld:
         self.zz_time = 0.0
         self.progress: dict[str, _Progress] = {}
         self.stats = WorldStats()
+        self._active_progress: _Progress | None = None
         self._cache: dict = {}
 
     # ----- lifecycle -------------------------------------------------------------------------------------
@@ -405,6 +413,7 @@ class CoupledRegionWorld:
         other.zz_time = self.zz_time
         other.progress = {job_id: item.copy() for job_id, item in self.progress.items()}
         other.stats = WorldStats(**vars(self.stats))
+        other._active_progress = None
         return other
 
     def advance_to(self, time_us: float, jobs: Sequence[WorldJob]) -> None:
@@ -436,7 +445,24 @@ class CoupledRegionWorld:
                 break
             _, actual, seq, kind, payload = pending[index]
             progress = self.progress[job.job_id]
-            self._do(job, progress, kind, payload, when, actual)
+            # Attribute counter increments to the job action that advances the shared world to this event.
+            before = WorldStats(**vars(self.stats))
+            self._active_progress = progress
+            try:
+                self._do(job, progress, kind, payload, when, actual)
+            finally:
+                self._active_progress = None
+            after = self.stats
+            progress.research_stats["compressions"] += after.compressions - before.compressions
+            progress.research_stats["dropped_norm"] += after.dropped_norm - before.dropped_norm
+            progress.research_stats["dropped_correlation"] += after.dropped_correlation - before.dropped_correlation
+            if after.clipped_eigenvalue < before.clipped_eigenvalue:
+                progress.research_stats["clipped_eigenvalue"] = min(
+                    progress.research_stats["clipped_eigenvalue"], after.clipped_eigenvalue)
+            rank_now = len(self.factors[0])
+            if after.max_rank > before.max_rank:
+                rank_now = max(rank_now, after.max_rank)
+            progress.research_stats["max_rank"] = max(progress.research_stats["max_rank"], rank_now)
             progress.last_seq, progress.last_time = seq, when
             if kind != "kick":
                 progress.pointer += 1
@@ -450,7 +476,7 @@ class CoupledRegionWorld:
         self._flush(time_us)
         self._relax_to(side, range(len(self.free[side])), time_us)
 
-    def reduced_state(self, side: int) -> np.ndarray:
+    def reduced_state(self, side: int, progress: _Progress | None = None) -> np.ndarray:
         """The region's own state, ``Tr_other(rho)``; tiny negative eigenvalues from truncation are clipped."""
         state = self._reduced(side)
         state = 0.5 * (state + state.conj().T)
@@ -463,6 +489,9 @@ class CoupledRegionWorld:
         if lowest < -_NEGATIVE_TOLERANCE:
             raise ValueError("the low-rank residual-ZZ state lost positivity; raise max_rank or lower truncation")
         self.stats.clipped_eigenvalue = min(self.stats.clipped_eigenvalue, lowest)
+        if progress is not None:
+            progress.research_stats["clipped_eigenvalue"] = min(
+                progress.research_stats["clipped_eigenvalue"], lowest)
         values = np.clip(values, 0.0, None)
         state = (vectors * values) @ vectors.conj().T
         return state / np.trace(state).real
@@ -473,6 +502,18 @@ class CoupledRegionWorld:
         if not progress.done:
             raise ValueError("the job has not been simulated through its finish")
         return progress.records, progress.counts
+
+    def research_diagnostics(self, job_id: str) -> dict:
+        """Return research data separately from results.
+
+        Cumulative counter increments are attributed to the action that advances the shared world;
+        consequently a concurrent job's evolution can be included in that action's interval.
+        """
+        progress = self.progress[job_id]
+        if not progress.done:
+            raise ValueError("the job has not been simulated through its finish")
+        return {"world_stats": dict(progress.research_stats),
+                "measurements": [dict(item) for item in progress.research_measurements]}
 
     def handover_record(self, job_id: str) -> tuple | None:
         """``(reduced state, duration)`` after the job's handover service reset, or None without one."""
@@ -667,6 +708,7 @@ class CoupledRegionWorld:
         merged = sorted([(time, seq, kind, payload) for time, seq, kind, payload in progress.actions[progress.pointer:]]
                         + fresh, key=lambda item: item[1])
         self.stats.late_kicks += len(late)
+        progress.research_stats["late_kicks"] += len(late)
         merged = [(max(progress.last_time, 0.0), seq, kind, payload) for _, seq, kind, payload in late] + merged
         pending, floor = [], progress.last_time
         for time, seq, kind, payload in merged:
@@ -708,10 +750,11 @@ class CoupledRegionWorld:
                 progress.assignment.update(zip(instruction.qubits, errors))
             return
         if kind == "shot":
+            progress.current_shot = payload
             if job.handover and progress.handover is None:
                 # The service-reset record is the region when the reset ends, i.e. when the first shot begins.
                 self.settle(side_index, when)
-                progress.handover = (self.reduced_state(side_index), side.reset_us)
+                progress.handover = (self.reduced_state(side_index, progress), side.reset_us)
             progress.assignment = {}
             progress.duration = self.repetition_delay_us if payload else 0.0
             for slot in job.slots:                  # the hardware frame starts each shot at zero
@@ -789,7 +832,8 @@ class CoupledRegionWorld:
                     apply_readout_decisions(term, readout, side.region.index, side.readout_dephasing_per_us,
                                             self.dims[side_index])
                     for term in self.factors[side_index]]))
-            levels = self._sample(side_index, measured_slots, progress.generator)
+            progress.current_shot = payload
+            levels = self._sample(side_index, measured_slots, progress.generator, progress)
             for kick in readout:
                 if kick.readout == "after":
                     self._unitary(side_index, kick_unitary(kick), (side.region.index(kick.qubit),))
@@ -816,7 +860,7 @@ class CoupledRegionWorld:
             return
         if kind == "commit":
             self.settle(side_index, when)
-            progress.records.append((self.reduced_state(side_index), progress.duration))
+            progress.records.append((self.reduced_state(side_index, progress), progress.duration))
             return
         raise ValueError("unknown world action")
 
@@ -983,6 +1027,9 @@ class CoupledRegionWorld:
             self.stats.dropped_norm += dropped
         self.stats.compressions += 1
         self.stats.max_rank = max(self.stats.max_rank, keep)
+        if self._active_progress is not None:
+            self._active_progress.research_stats["max_rank"] = max(
+                self._active_progress.research_stats["max_rank"], keep)
         return q_left @ (u[:, :keep] * singular[:keep]), q_right @ vh[:keep].T
 
     # ----- local operations -------------------------------------------------------------------------------
@@ -1190,7 +1237,8 @@ class CoupledRegionWorld:
         weights = np.trace(other, axis1=1, axis2=2)
         return np.tensordot(weights, self.factors[side], axes=1)
 
-    def _sample(self, side: int, slots: tuple[int, ...], generator: random.Random) -> tuple[int, ...]:
+    def _sample(self, side: int, slots: tuple[int, ...], generator: random.Random,
+                progress: _Progress | None = None) -> tuple[int, ...]:
         """Draw the levels as ``sample_measurement`` does, then project this side's factors onto them."""
         state = self._reduced(side)
         dims = self.dims[side]
@@ -1200,6 +1248,13 @@ class CoupledRegionWorld:
             raise ValueError("invalid measurement probability distribution")
         outcomes, count = level_outcomes(dims, slots)
         marginal = np.bincount(outcomes, weights=np.maximum(probabilities, 0.0), minlength=count)
+        if progress is not None:
+            research_probability = marginal / float(marginal.sum())
+            progress.research_measurements.append({
+                "shot": int(progress.current_shot), "slots": tuple(slots),
+                "dimensions": tuple(dims[slot] for slot in slots),
+                "probabilities": tuple(float(value) for value in research_probability),
+            })
         draw = generator.random() * float(marginal.sum())
         outcome = min(int(np.searchsorted(np.cumsum(marginal), draw, side="right")), len(marginal) - 1)
         probability = float(marginal[outcome])

@@ -621,6 +621,16 @@ class JobApplicationService:
             error_code=job.error_code,
         )
 
+    def get_research_diagnostics(self, principal_id: str, job_id: str) -> dict[str, object]:
+        """Separate, owner-scoped research output; ordinary job results remain shots/counts only."""
+        job = self._visible_job(principal_id, job_id, "job.result.read")
+        if job.status not in TERMINAL_JOB_STATUSES or not self._runtime.result_is_available(job_id):
+            raise JobResultNotReadyError("research diagnostics are not ready")
+        executor = self._runtime._declared_executor
+        if executor is None:
+            raise ValueError("research diagnostics require a declared coupled-region executor")
+        return executor.research_diagnostics(job_id)
+
     def _observe_declared_job(self, principal_id: str, job_id: str, operation_id: str, position):
         """Trusted coordinator boundary, not a public timestamp parameter.
 

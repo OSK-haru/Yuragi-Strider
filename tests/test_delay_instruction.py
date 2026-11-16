@@ -76,8 +76,8 @@ class DelayInstructionTests(unittest.TestCase):
         store, runtime, service, _ = build(ids=(3, 7), initial=("1", "1"))
         job = submit(service, Circuit(2).delay(0, 10 * T1_US).measure(0, 0).measure(1, 1))
         runtime.run_next()
-        # Qubit 0 relaxed to 0; qubit 1 was not delayed and keeps |1>.
-        self.assertEqual(service.get_result("a", job.job_id).result["counts"], {"01": 1})
+        # Both qubits idle until measurement; qubit 1 relaxes during qubit 0's delay.
+        self.assertEqual(service.get_result("a", job.job_id).result["counts"], {"00": 1})
 
     def test_parallel_columns_take_the_longest_wait(self):
         store, runtime, service, _ = build(ids=(3, 7), initial=("1", "1"))
