@@ -43,6 +43,18 @@ def experimental_isolation_physics_capabilities() -> dict[str, object]:
                 "stage": "observation",
                 "model": "local_joint_column_stochastic_confusion_matrix",
             },
+            "coupled_transmons": {
+                "stage": "hamiltonian_and_control_hamiltonian",
+                "model": "duffing_transmons_with_exchange_in_the_dressed_frame",
+                "inputs": "measured_frequency_anharmonicity_and_exchange",
+                "local_dimensions": [2, 3, 4],
+                "runtime_connected": "static_shifts_only",
+            },
+            "readout_crosstalk": {
+                "stage": "measurement",
+                "model": "measured_neighbour_dephasing_and_shift_with_state_dependent_assignment",
+                "runtime_connected": "joint_world",
+            },
         },
         "limits": [
             "Internal single-QPU FIFO and in-memory cross-job state exist; no public authorization API or persistent store yet.",
@@ -71,6 +83,14 @@ def experimental_isolation_physics_capabilities() -> dict[str, object]:
             {
                 "topic": "readout_correlation_characterization",
                 "arxiv": "2104.04607",
+            },
+            {
+                "topic": "cross_resonance_from_exchange_coupling",
+                "arxiv": "1804.04073",
+            },
+            {
+                "topic": "measurement_induced_dephasing_of_untargeted_qubits",
+                "doi": "10.1103/PhysRevApplied.10.034040",
             },
         ],
     }

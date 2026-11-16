@@ -57,7 +57,7 @@ def registry(success=1.0):
 
 
 def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.0, region_access=None,
-          durations=(1.0, 1.0), readout_dephasing=None, transmons=None):
+          durations=(1.0, 1.0), readout_dephasing=None, transmons=None, readout_crosstalk=()):
     model, reg = registry(reset_success)
     idle = IndependentIdleModel((IdleQubitSpec(t1, tphi, 0.0),) * 2, 2)
     runtime = SharedQpuRuntime(
@@ -72,7 +72,8 @@ def build(*, transfers=(), zz=None, t1=math.inf, tphi=math.inf, reset_success=1.
     executor = DeclaredQpuExecutor(
         runtime=runtime, clock_domain="world", max_jobs=16, max_events_per_job=64, max_unresolved=16,
         idle_model=idle,
-        concurrent_regions=ConcurrentRegions(tuple(transfers), residual_zz=zz, transmons=transmons))
+        concurrent_regions=ConcurrentRegions(tuple(transfers), residual_zz=zz, transmons=transmons,
+                                             readout_crosstalk=tuple(readout_crosstalk)))
     executor.frontier.set_target(pos(1000, 99))
     executor.frontier.seal_ingress(pos(1000, 99))
     return runtime, executor

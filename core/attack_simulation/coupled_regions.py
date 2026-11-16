@@ -25,6 +25,12 @@ Physics in this module:
 * Every other qubit relaxes lazily, just before it is next touched, as in the single-region runtime (D85
   idle relaxation); local channels on other qubits commute with ZZ, so this is exact.
 
+* Reading out a qubit disturbs its declared neighbours for as long as the readout lasts (extra dephasing and
+  a frequency shift, ``ReadoutCrosstalk``), in either region and also during a reset's measurement. These
+  commute with the coupling and with idle relaxation, so each neighbour takes what has accrued just before it
+  is next touched. Where the reader's assigned result depends on a neighbour's state, drawing the result is
+  a weak measurement of that neighbour: the joint state is updated with what the result tells.
+
 The per-shot semantics mirror ``SharedQpuRuntime._run_before_measurement`` and ``_execute_circuit``: with no
 coupling, the reduced states and counts are those of the region-by-region path.
 """
@@ -34,6 +40,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+import cmath
 import heapq
 import math
 import random
@@ -49,6 +56,7 @@ from core.attack_simulation.shot_activity import instruction_starts
 from core.cptp_liouvillian import dense_matrix_exponential, gksl_liouvillian_superoperator
 from core.experimental_isolation_physics.coherent_crosstalk import ResidualZZCoupling
 from core.experimental_isolation_physics.idle_evolution import IndependentIdleModel, relax_axes_in_place
+from core.experimental_isolation_physics.readout_crosstalk import ReadoutCrosstalk
 from core.experimental_isolation_physics.reset_model import ResetModelRegistry, ResetModelRequest
 from core.experimental_isolation_physics.transmon_cluster import TransmonCluster, TransmonSpec
 from core.pulse_transmon_network import TransmonExchangeCoupling
@@ -138,6 +146,29 @@ class CoupledTransmonSettings:
 
 
 @dataclass(frozen=True)
+class UncoupledSettings:
+    """Two regions with no coupling Hamiltonian, joined only by what a readout learns about a neighbour.
+
+    The joint state is then a mixture of products and needs few terms; the limits are those of the
+    approximation model of ``ResidualZZSettings``.
+    """
+
+    model: str = "low_rank"
+    max_rank: int = 32
+    truncation: float = 1e-6
+
+    def __post_init__(self) -> None:
+        if self.model not in ZZ_MODELS:
+            raise ValueError("unknown approximation model")
+        if type(self.max_rank) is not int or self.max_rank < 1:
+            raise ValueError("max_rank must be a positive integer")
+        truncation = float(self.truncation)
+        if not math.isfinite(truncation) or truncation < 0.0:
+            raise ValueError("truncation must be finite and nonnegative")
+        object.__setattr__(self, "truncation", truncation)
+
+
+@dataclass(frozen=True)
 class RegionSide:
     """One region of the pair, with the models its jobs run under."""
 
@@ -209,8 +240,9 @@ class CoupledRegionWorld:
     """Two regions advanced together on one joint state. Copy before advancing a candidate."""
 
     def __init__(self, sides: tuple[RegionSide, RegionSide],
-                 settings: ResidualZZSettings | CoupledTransmonSettings,
-                 initial_states: tuple[np.ndarray, np.ndarray], *, repetition_delay_us: float) -> None:
+                 settings: ResidualZZSettings | CoupledTransmonSettings | UncoupledSettings,
+                 initial_states: tuple[np.ndarray, np.ndarray], *, repetition_delay_us: float,
+                 readout_crosstalk: Sequence[ReadoutCrosstalk] = ()) -> None:
         if len(sides) != 2 or set(sides[0].region) & set(sides[1].region):
             raise ValueError("coupled regions must be two disjoint regions")
         self.sides = tuple(sides)
@@ -239,8 +271,23 @@ class CoupledRegionWorld:
             self._components = tuple(
                 (slots_a, slots_b, _device_energies(slots_a, slots_b, group, lambda place: specs[physical[place]]))
                 for slots_a, slots_b, group in _clusters(edges))
+        elif type(settings) is UncoupledSettings:
+            self._components = ()
         else:
-            raise TypeError("coupled regions need ResidualZZSettings or CoupledTransmonSettings")
+            raise TypeError("coupled regions need ResidualZZSettings, CoupledTransmonSettings or UncoupledSettings")
+        readers: dict = {}
+        for item in readout_crosstalk:
+            if type(item) is not ReadoutCrosstalk:
+                raise TypeError("readout_crosstalk must contain ReadoutCrosstalk values")
+            if item.reader not in location or item.neighbour not in location:
+                raise ValueError("readout crosstalk must join qubits of the two regions")
+            entries = readers.setdefault(location[item.reader], [])
+            if any(place == location[item.neighbour] for place, _ in entries):
+                raise ValueError("a readout-crosstalk pair is declared twice")
+            entries.append((location[item.neighbour], item))
+        self._readers = {place: tuple(entries) for place, entries in readers.items()}
+        # Readouts still acting on a neighbour: [side, slot, applied up to, end, Gamma + i shift].
+        self.exposures: list[list] = []
         self.exposed = (frozenset(q for comp in self._components for q in comp[0]),
                         frozenset(q for comp in self._components for q in comp[1]))
         self.factors = tuple(np.asarray(state, dtype=complex).reshape(1, *np.shape(state)).copy()
@@ -260,6 +307,7 @@ class CoupledRegionWorld:
         other = object.__new__(CoupledRegionWorld)
         other.sides, other.settings, other.repetition_delay_us = self.sides, self.settings, self.repetition_delay_us
         other._components, other.exposed, other._cache = self._components, self.exposed, self._cache
+        other._readers, other.exposures = self._readers, [list(entry) for entry in self.exposures]
         other.factors = tuple(np.array(factor) for factor in self.factors)
         other.free = tuple(list(values) for values in self.free)
         other.zz_time = self.zz_time
@@ -435,8 +483,10 @@ class CoupledRegionWorld:
             targets = (tuple(range(len(side.region))) if side.handover_scope == "region" else job.slots)
             if payload == "begin":
                 self._occupy(side_index, targets, when, actual, side.reset_us)
+                self._announce_readout(side_index, targets, actual, min(side.measurement_us, side.reset_us))
             else:
                 self._touch(side_index, targets, when)
+                self._expose(side_index, targets, actual)
                 feedback = self._feedback(job, progress, 0, None)
                 self._reset(side_index, targets, count=side.handover_reset_count,
                             measures_input=side.handover_measures_input, feedback=feedback)
@@ -447,9 +497,12 @@ class CoupledRegionWorld:
             operands = tuple(job.slots[q] for q in instruction.qubits)
             if phase == "begin":
                 self._occupy(side_index, operands, when, actual, side.reset_us)
+                # A reset is a measurement and then the feedback: its measurement reads the qubit out.
+                self._announce_readout(side_index, operands, actual, min(side.measurement_us, side.reset_us))
                 progress.duration += side.reset_us
             else:
                 self._touch(side_index, operands, when)
+                self._expose(side_index, operands, actual)
                 errors = self._reset(side_index, operands, feedback=self._feedback(job, progress, shot, index))
                 progress.assignment.update(zip(instruction.qubits, errors))
             return
@@ -511,10 +564,19 @@ class CoupledRegionWorld:
                 if kick.readout == "after":
                     self._unitary(side_index, kick_unitary(kick), (side.region.index(kick.qubit),))
             classical = [0] * operation.classical_bits
-            for q, bit, target in zip(measured_qubits, bits, targets):
+            for q, bit, target, slot in zip(measured_qubits, bits, targets, measured_slots):
                 p10, p01 = progress.assignment[q]
                 draw = progress.generator.random()
-                classical[target] = int(draw < p10) if bit == 0 else int(draw >= p01)
+                if any(item.reads for _, item in self._readers.get((side_index, slot), ())):
+                    classical[target] = self._observe(side_index, slot, bit, p10, p01, draw)
+                else:
+                    classical[target] = int(draw < p10) if bit == 0 else int(draw >= p01)
+            # Each block of final measurements reads its qubits for one measurement time, one block after another.
+            groups = list(dict.fromkeys(i.time_group for i in measurements))
+            for instruction in measurements:
+                self._announce_readout(side_index, tuple(job.slots[q] for q in instruction.qubits),
+                                       actual + groups.index(instruction.time_group) * side.measurement_us,
+                                       side.measurement_us)
             label = "".join(str(bit) for bit in classical)
             progress.counts[label] = progress.counts.get(label, 0) + 1
             measurement = shot_length - measure_start
@@ -600,7 +662,79 @@ class CoupledRegionWorld:
 
     # ----- local operations -------------------------------------------------------------------------------
 
+    def _announce_readout(self, side: int, slots: Sequence[int], begin_us: float, duration_us: float) -> None:
+        """Reading ``slots`` out over the window disturbs their declared neighbours for as long."""
+        if duration_us <= 0.0:
+            return
+        for slot in slots:
+            for (other, target), item in self._readers.get((side, slot), ()):
+                if item.disturbs:
+                    self.exposures.append([other, target, begin_us, begin_us + duration_us,
+                                           complex(item.dephasing_per_us, item.frequency_shift_rad_per_us)])
+
+    def _expose(self, side: int, slots, time_us: float) -> None:
+        """Give ``slots`` what the readouts announced so far have done to them up to ``time_us``."""
+        if not self.exposures:
+            return
+        wanted = set(slots)
+        stack = None
+        for entry in self.exposures:
+            reach = min(time_us, entry[3])
+            if entry[0] != side or entry[1] not in wanted or reach <= entry[2]:
+                continue
+            stack = _scale_coherence(self.factors[side] if stack is None else stack, entry[1],
+                                     cmath.exp(-entry[4] * (reach - entry[2])))
+            entry[2] = reach
+        if stack is not None:
+            self._set(side, stack)
+            self.exposures = [entry for entry in self.exposures if entry[2] < entry[3]]
+
+    def _observe(self, side: int, slot: int, bit: int, p10: float, p01: float, draw: float) -> int:
+        """Assign the reader's result when it depends on neighbours, and update them with what it tells.
+
+        ``P(assigned 1)`` is the reader's own value for its true ``bit`` plus the declared shift of every
+        neighbour in |1>. The assigned bit is drawn from the joint populations; the joint state then takes the
+        square root of that likelihood on the neighbours' basis states (a measurement that only reads
+        populations), which is what conditioning on the result means.
+        """
+        sizes = [len(spec.region) for spec in self.sides]
+        shifts = [np.zeros(1 << size) for size in sizes]
+        for (other, target), item in self._readers[(side, slot)]:
+            if item.reads:
+                labels = np.arange(1 << sizes[other])
+                shifts[other] += item.excited_assignment_shift[bit] * ((labels >> (sizes[other] - 1 - target)) & 1)
+        excited = (p10 if bit == 0 else 1.0 - p01) + shifts[0][:, None] + shifts[1][None, :]
+        if excited.min() < -1e-12 or excited.max() > 1.0 + 1e-12:
+            raise ValueError("the declared assignment shifts take an assignment probability outside [0, 1]")
+        excited = np.clip(excited, 0.0, 1.0)
+        populations = np.einsum("kaa,kbb->ab", self.factors[0], self.factors[1]).real
+        probability = float((excited * populations).sum() / populations.sum())
+        assigned = int(draw < probability) if bit == 0 else int(draw >= 1.0 - probability)
+        weight = probability if assigned else 1.0 - probability
+        if weight <= 0.0:
+            raise ValueError("sampled a zero-probability assignment")
+        self._weigh(np.sqrt((excited if assigned else 1.0 - excited) / weight))
+        return assigned
+
+    def _weigh(self, root: np.ndarray) -> None:
+        """``rho -> K rho K`` with ``K`` diagonal: ``root[a, b]`` on basis state ``a`` of region 0 and ``b`` of 1."""
+        u, singular, vh = np.linalg.svd(root)
+        keep = max(1, int(np.count_nonzero(singular > _ROUND_OFF * singular[0])))
+        left, right = u[:, :keep] * np.sqrt(singular[:keep]), vh[:keep].T * np.sqrt(singular[:keep])
+        a, b = self.factors
+        if keep == 1:                       # K is a product: no new terms
+            self.factors = (a * np.outer(left[:, 0], left[:, 0])[None], b * np.outer(right[:, 0], right[:, 0])[None])
+            return
+        # K = sum_m diag(left_m) (x) diag(right_m), so term (m, n, k) is left_m A_k left_n (x) right_m B_k right_n.
+        a_new = np.einsum("im,kij,jn->mnkij", left, a, left).reshape(-1, a.shape[1] * a.shape[2])
+        b_new = np.einsum("im,kij,jn->mnkij", right, b, right).reshape(-1, b.shape[1] * b.shape[2])
+        a_vectors, b_vectors = self._compress(a_new.T, b_new.T)
+        self.factors = (np.ascontiguousarray(a_vectors.T.reshape(-1, a.shape[1], a.shape[2])),
+                        np.ascontiguousarray(b_vectors.T.reshape(-1, b.shape[1], b.shape[2])))
+
     def _relax_to(self, side: int, slots, time_us: float) -> None:
+        slots = tuple(slots)
+        self._expose(side, slots, time_us)
         model = self.sides[side].idle_model
         due = []
         for slot in slots:
@@ -895,6 +1029,16 @@ def _apply_stack(stack: np.ndarray, operator: np.ndarray, slots: tuple[int, ...]
         updated = transform @ ordered.reshape(len(transform), -1)
         tensor = updated.reshape(ordered.shape).transpose(np.argsort(order))
     return np.ascontiguousarray(tensor.reshape(stack.shape))
+
+
+def _scale_coherence(stack: np.ndarray, slot: int, factor: complex) -> np.ndarray:
+    """Multiply ``<1| X |0>`` of ``slot`` by ``factor`` and ``<0| X |1>`` by its conjugate, on every factor."""
+    dimension = stack.shape[1]
+    n = dimension.bit_length() - 1
+    bit = (np.arange(dimension) >> (n - 1 - slot)) & 1
+    difference = bit[:, None] - bit[None, :]
+    weights = np.where(difference == 1, factor, np.where(difference == -1, np.conj(factor), 1.0))
+    return stack * weights[None]
 
 
 def _replace_with_mixed(stack: np.ndarray, slot: int) -> np.ndarray:

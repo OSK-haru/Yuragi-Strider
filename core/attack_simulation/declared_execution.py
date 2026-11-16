@@ -163,11 +163,12 @@ class DeclaredQpuExecutor:
                 store.bind_transaction_lock(gate)
             self._lanes = {region: RegionLane(region, store) for region, store in stores.items()}
             runtime.scheduler.bind_lanes(runtime.region_of)
-        # A coupling (measured ZZ, or exchange from device values) entangles the two regions: they then share
-        # one joint world, advanced in time order (D85, D91).
+        # A coupling (measured ZZ, or exchange from device values) entangles the two regions, and a readout that
+        # picks up a neighbour's state correlates them: they then share one joint world, advanced in time order
+        # (D85, D91).
         self._world = None
         self._world_side: dict[tuple[int, ...], int] = {}
-        if concurrent_regions is not None and concurrent_regions.coupling is not None:
+        if concurrent_regions is not None and concurrent_regions.world_settings is not None:
             regions = tuple(self._lanes)
             durations = runtime.regional_service_durations
             if any(runtime.regional_idle_models.get(region) is None for region in regions):
@@ -180,10 +181,11 @@ class DeclaredQpuExecutor:
                                      readout_dephasing_per_us=runtime.config.readout_dephasing_per_us)
                           for region in regions)
             self._world = CoupledRegionWorld(
-                sides, concurrent_regions.coupling,
+                sides, concurrent_regions.world_settings,
                 tuple(np.asarray(self._lanes[region].store.read().density_matrix, dtype=complex)
                       for region in regions),
-                repetition_delay_us=runtime.config.repetition_delay_us)
+                repetition_delay_us=runtime.config.repetition_delay_us,
+                readout_crosstalk=concurrent_regions.readout_crosstalk)
             self._world_side = {region: index for index, region in enumerate(regions)}
         runtime._declared_executor = self
         runtime._declared_event_limit = max_events_per_job

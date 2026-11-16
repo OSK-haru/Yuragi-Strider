@@ -14,7 +14,9 @@ from dataclasses import dataclass, field, replace
 import math
 
 from core.attack_simulation.circuit_program import CircuitExecutionOperation
-from core.attack_simulation.coupled_regions import CoupledTransmonSettings, ResidualZZSettings
+from core.attack_simulation.coupled_regions import (
+    CoupledTransmonSettings, ResidualZZSettings, UncoupledSettings,
+)
 from core.attack_simulation.concurrent_windows import (
     DriveSchedule, ExecutionWindow, gap_before, gap_leaks, leaks_into,
 )
@@ -24,6 +26,7 @@ from core.attack_simulation.pulse_shape import SQUARE_SHAPE, PulseShape
 from core.attack_simulation.qpu_state import InactiveRegionState, QpuStateSnapshot, QpuStateStore
 from core.attack_simulation.shot_activity import shot_activity
 from core.experimental_isolation_physics.coherent_crosstalk import DriveCrosstalkTransfer
+from core.experimental_isolation_physics.readout_crosstalk import ReadoutCrosstalk
 
 
 @dataclass(frozen=True)
@@ -36,13 +39,29 @@ class ConcurrentRegions:
     residual_zz: ResidualZZSettings | None = None
     # The same coupling declared by device values instead (frequency, anharmonicity, exchange J; D91).
     transmons: CoupledTransmonSettings | None = None
+    # What reading one qubit out does to a neighbour and learns from it (measured values; D91). It depends on
+    # the neighbour's state, so the regions share one joint world with it as well.
+    readout_crosstalk: tuple[ReadoutCrosstalk, ...] = ()
 
     @property
     def coupling(self) -> ResidualZZSettings | CoupledTransmonSettings | None:
-        """What couples the two regions' states, if anything; with it they share one joint world."""
+        """The coupling Hamiltonian between the two regions, if one is declared."""
         return self.residual_zz if self.residual_zz is not None else self.transmons
 
+    @property
+    def world_settings(self) -> ResidualZZSettings | CoupledTransmonSettings | UncoupledSettings | None:
+        """How the regions' joint world is advanced, or None when nothing joins their states."""
+        if self.coupling is not None:
+            return self.coupling
+        return UncoupledSettings() if self.readout_crosstalk else None
+
     def __post_init__(self) -> None:
+        crosstalk = tuple(self.readout_crosstalk)
+        if any(type(item) is not ReadoutCrosstalk for item in crosstalk):
+            raise TypeError("readout_crosstalk must contain ReadoutCrosstalk values")
+        if len({(item.reader, item.neighbour) for item in crosstalk}) != len(crosstalk):
+            raise ValueError("a readout-crosstalk pair is declared twice")
+        object.__setattr__(self, "readout_crosstalk", crosstalk)
         if self.residual_zz is not None and type(self.residual_zz) is not ResidualZZSettings:
             raise TypeError("residual_zz must be ResidualZZSettings")
         if self.transmons is not None and type(self.transmons) is not CoupledTransmonSettings:
